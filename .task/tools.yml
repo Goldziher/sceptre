@@ -1,0 +1,14 @@
+version: "3"
+
+tasks:
+  build:
+    # Assumes the tools/ dev crate is named easyocr-tools; it is a workspace member but
+    # excluded from default-members. ~keep
+    desc: Build the easyocr-tools dev crate
+    cmds:
+      - cargo build -p easyocr-tools
+
+  run:
+    desc: Run the easyocr-tools dev crate (forwards extra CLI args)
+    cmds:
+      - cargo run -p easyocr-tools -- {{.CLI_ARGS}}

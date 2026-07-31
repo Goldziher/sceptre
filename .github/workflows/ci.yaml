@@ -37,6 +37,23 @@ jobs:
       - name: Build (release)
         run: cargo build --release --workspace --features "${{ matrix.features }}"
 
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync Python dev environment
+        # Plain `uv sync` installs only the default dependency group; the heavy
+        # torch/export group is optional and must be requested explicitly, so CI
+        # skips it here on purpose. ~keep
+        run: uv sync
+      - name: Ruff check
+        run: uv run ruff check python
+      - name: Ruff format check
+        run: uv run ruff format --check python
+
   deny:
     runs-on: ubuntu-latest
     steps:

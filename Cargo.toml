@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/easyocr", "crates/easyocr-cli"]
+members = ["crates/easyocr", "crates/easyocr-cli", "tools"]
 default-members = ["crates/easyocr", "crates/easyocr-cli"]
 resolver = "2"
 

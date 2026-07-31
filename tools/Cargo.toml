@@ -1,0 +1,22 @@
+[package]
+name = "easyocr-tools"
+description = "Dev-only model export/conversion tooling for easyocr-rs (Rust-first, candle-based)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[[bin]]
+name = "easyocr-tools"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+
+[lints]
+workspace = true

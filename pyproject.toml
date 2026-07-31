@@ -1,0 +1,31 @@
+[project]
+name = "easyocr-rs-tools"
+version = "0.1.0"
+description = "Dev-only fallback model export and golden-fixture tooling for easyocr-rs."
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Na'aman Hirschfeld", email = "nhirschfeld@gmail.com" }]
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/easyocr_rs_tools"]
+
+[dependency-groups]
+dev = ["ruff>=0.6", "pytest>=8"]
+# Heavy, opt-in export path: torch + easyocr drive the fallback .pth->ONNX/safetensors
+# export and the golden-fixture generation. Not installed by default. ~keep
+export = ["torch", "easyocr", "onnx", "numpy"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]

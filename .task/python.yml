@@ -1,0 +1,34 @@
+version: "3"
+
+tasks:
+  sync:
+    desc: Sync the Python dev environment via uv
+    cmds:
+      - uv sync
+
+  lint:
+    desc: Lint Python code with ruff
+    cmds:
+      - uv run ruff check python
+
+  format:
+    desc: Format Python code with ruff
+    cmds:
+      - uv run ruff format python
+
+  export:
+    # Assumes the Python package import name is easyocr_rs_tools; confirm this once
+    # pyproject.toml and python/ land. ~keep
+    desc: >-
+      FALLBACK model-export path: runs the (currently stubbed) exporter that converts
+      upstream EasyOCR checkpoints to ONNX; requires the opt-in export/torch dependency
+      group
+    cmds:
+      - uv run python -m easyocr_rs_tools.export
+
+  golden:
+    desc: >-
+      Generate golden JSON fixtures for parity testing (currently stubbed); requires
+      the opt-in export/torch dependency group to produce real output
+    cmds:
+      - uv run python -m easyocr_rs_tools.golden

@@ -1,41 +1,64 @@
 version: "3"
 
+includes:
+  rust:
+    taskfile: ./.task/rust.yml
+  python:
+    taskfile: ./.task/python.yml
+  tools:
+    taskfile: ./.task/tools.yml
+
 tasks:
   setup:
-    desc: Fetch dependencies and install git hooks
+    desc: Fetch Rust dependencies, install git hooks, and sync the Python dev environment
     cmds:
       - cargo fetch
       - poly hooks install
+      - uv sync
 
   build:
-    desc: Build the workspace
+    desc: Build the Rust workspace
     cmds:
-      - cargo build --workspace
+      - task: rust:build
 
   test:
-    desc: Run the test suite
+    desc: Run the Rust workspace test suite
     cmds:
-      - cargo test --workspace
+      - task: rust:test
 
   lint:
-    desc: Run poly lint over the repo
+    desc: Lint Rust (poly) and Python (ruff) code
     cmds:
       - poly lint .
+      - task: python:lint
 
   format:
-    desc: Format all Rust code
+    desc: Format Rust (cargo fmt) and Python (ruff) code
     cmds:
-      - cargo fmt --all
+      - task: rust:fmt
+      - task: python:format
 
   check:
-    desc: Full pre-commit gate (fmt + clippy + test + poly)
+    desc: Full pre-commit gate (fmt check + clippy + test + poly lint)
     cmds:
-      - cargo fmt --all --check
-      - cargo clippy --workspace --all-targets --tests -- -D warnings
-      - cargo test --workspace
+      - task: rust:check
       - poly lint .
 
+  update:
+    desc: Bump dependencies to latest compatible versions (cargo update + uv lock --upgrade)
+    cmds:
+      - cargo update
+      - uv lock --upgrade
+
+  upgrade:
+    desc: Bump dependencies to latest, including breaking changes
+    cmds:
+      # cargo upgrade comes from cargo-edit (cargo install cargo-edit --locked); it is not
+      # part of stock cargo. ~keep
+      - cargo upgrade --incompatible
+      - uv lock --upgrade
+
   clean:
-    desc: Remove build artifacts
+    desc: Remove Rust build artifacts
     cmds:
       - cargo clean

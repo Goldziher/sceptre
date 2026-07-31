@@ -759,14 +759,11 @@ dependencies = [
  "image",
  "ndarray 0.17.2",
  "num_cpus",
- "once_cell",
  "ort",
  "rayon",
  "rmcp",
  "schemars",
  "serde",
- "serde_json",
- "sha2",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -777,14 +774,20 @@ dependencies = [
 name = "easyocr-cli"
 version = "0.1.0"
 dependencies = [
- "anstream",
  "anstyle",
  "anyhow",
  "clap",
  "clap_complete",
  "easyocr",
- "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "easyocr-tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
 ]
 
 [[package]]
