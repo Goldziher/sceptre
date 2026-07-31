@@ -1,9 +1,9 @@
-# easyocr-rs
+# sceptre
 
 A Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s OCR
 pipeline — **CRAFT** text detection followed by **gen2 CRNN** recognition with
 CTC decoding — running the models over ONNX. Ships as a **library**, a **CLI**
-(`easyocr-rs`), and an **MCP server**.
+(`sceptre`), and an **MCP server**.
 
 > **Status:** early scaffolding. The workspace, configuration, and module
 > structure are in place; the pipeline stages are being implemented.
@@ -29,30 +29,30 @@ for now (see [`adrs/0002`](adrs/0002-scope-gen2-recognizers-and-craft.md)).
 ONNX artifacts come from the
 [`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch) repos on
 Hugging Face (Apache-2.0, dynamic-width). They are downloaded on first use,
-cached under `~/.cache/easyocr-rs`, and sha256-verified — nothing is committed to
+cached under `~/.cache/sceptre`, and sha256-verified — nothing is committed to
 the repo (see [`adrs/0003`](adrs/0003-model-source-itext-onnx-runtime-download.md)).
 
 ## Install
 
 ```sh
-cargo install --path crates/easyocr-cli
+cargo install --path crates/sceptre-cli
 ```
 
 ## CLI usage
 
 ```sh
 # Full pipeline
-easyocr-rs run image.png --lang english --format json
+sceptre run image.png --lang english --format json
 
 # Detection only
-easyocr-rs detect image.png
+sceptre detect image.png
 
 # Manage models
-easyocr-rs models list
-easyocr-rs models download
+sceptre models list
+sceptre models download
 
 # Shell completions
-easyocr-rs completions zsh > _easyocr-rs
+sceptre completions zsh > _sceptre
 ```
 
 Diagnostics go to stderr (`--log-level`, `EASYOCR_LOG`); structured results go to
@@ -61,14 +61,14 @@ stdout. Colour honors `NO_COLOR`.
 ## Library usage
 
 ```rust
-use easyocr::{OcrConfig, ReadOptions, Reader};
+use sceptre::{OcrConfig, ReadOptions, Reader};
 
 let reader = Reader::builder().config(OcrConfig::default()).build()?;
 let result = reader.readtext("image.png".as_ref(), &ReadOptions::default())?;
 for line in result.lines {
     println!("{} ({:.2})", line.text, line.confidence);
 }
-# Ok::<(), easyocr::OcrError>(())
+# Ok::<(), sceptre::OcrError>(())
 ```
 
 ## MCP server
@@ -77,7 +77,7 @@ Build with the `mcp` feature and run the stdio server, which exposes a `readtext
 tool:
 
 ```sh
-cargo run -p easyocr-cli --features mcp -- mcp
+cargo run -p sceptre-cli --features mcp -- mcp
 ```
 
 ## Feature flags

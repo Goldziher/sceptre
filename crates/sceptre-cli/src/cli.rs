@@ -9,7 +9,7 @@ use crate::overrides::OcrOverrides;
 
 /// CRAFT + gen2 CRNN optical character recognition over ONNX.
 #[derive(Parser)]
-#[command(name = "easyocr-rs", version, about)]
+#[command(name = "sceptre", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -93,7 +93,7 @@ impl Cli {
                 overrides,
                 format,
             } => {
-                let mut config = easyocr::OcrConfig::default();
+                let mut config = sceptre::OcrConfig::default();
                 overrides.apply(&mut config);
                 let _ = (image, format, config);
                 bail!("`run` is not yet implemented")
@@ -112,7 +112,7 @@ impl Cli {
             },
             Commands::Completions { shell } => {
                 let mut command = Cli::command();
-                clap_complete::generate(shell, &mut command, "easyocr-rs", &mut std::io::stdout());
+                clap_complete::generate(shell, &mut command, "sceptre", &mut std::io::stdout());
                 Ok(())
             }
             #[cfg(feature = "mcp")]

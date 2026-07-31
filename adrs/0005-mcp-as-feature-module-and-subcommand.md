@@ -14,13 +14,13 @@ surface.
 
 ## Considered Options
 
-- A dedicated `crates/easyocr-mcp` binary crate.
-- An `mcp` feature-gated module in the core lib, exposed via an `easyocr-rs mcp`
+- A dedicated `crates/sceptre-mcp` binary crate.
+- An `mcp` feature-gated module in the core lib, exposed via an `sceptre mcp`
   subcommand.
 
 ## Decision Outcome
 
-Chosen option: **feature-gated `mcp` module + `easyocr-rs mcp` subcommand**,
+Chosen option: **feature-gated `mcp` module + `sceptre mcp` subcommand**,
 mirroring the xberg pattern. `rmcp`/`tokio`/`schemars` are optional dependencies
 enabled only by the feature, so default builds stay lean. One binary ships both
 the CLI and the server.

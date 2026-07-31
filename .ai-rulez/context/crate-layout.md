@@ -6,7 +6,7 @@ priority: high
 
 A Cargo workspace: one rlib core plus a thin CLI. Shared metadata, dependency pins, lints, and profiles live in the root `Cargo.toml`; members inherit with `.workspace = true`.
 
-## `crates/easyocr` (library, rlib)
+## `crates/sceptre` (library, rlib)
 
 - `lib.rs` — crate docs, feature-gated `pub mod`s, curated flat re-exports.
 - `error.rs` — `OcrError` + `Result`.
@@ -20,7 +20,7 @@ A Cargo workspace: one rlib core plus a thin CLI. Shared metadata, dependency pi
 - `models/` — `registry` (gen2 model table → Hugging Face) + `download` (fetch/cache/verify).
 - `mcp/` — rmcp server (`mcp` feature).
 
-## `crates/easyocr-cli` (binary `easyocr-rs`)
+## `crates/sceptre-cli` (binary `sceptre`)
 
 - `main.rs` (thin), `cli.rs` (clap `Cli`/`Commands` + dispatch), `overrides.rs` (flattened flag group → `OcrConfig`), `style.rs` (anstyle palette).
 

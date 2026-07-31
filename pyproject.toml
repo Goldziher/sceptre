@@ -1,7 +1,7 @@
 [project]
-name = "easyocr-rs-tools"
+name = "sceptre-tools"
 version = "0.1.0"
-description = "Dev-only fallback model export and golden-fixture tooling for easyocr-rs."
+description = "Dev-only fallback model export and golden-fixture tooling for sceptre."
 requires-python = ">=3.11"
 readme = "README.md"
 license = { text = "MIT" }
@@ -12,7 +12,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["python/easyocr_rs_tools"]
+packages = ["python/sceptre_rs_tools"]
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pytest>=8"]

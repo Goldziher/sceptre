@@ -1,5 +1,5 @@
 version = "4.0"
-name = "easyocr-rs"
+name = "sceptre"
 description = "Rust reimplementation of EasyOCR — CRAFT detection + gen2 CRNN recognition over ONNX, as a library + CLI + MCP server."
 gitignore = true
 

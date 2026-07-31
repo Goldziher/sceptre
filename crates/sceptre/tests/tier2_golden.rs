@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use easyocr::{BBox, ReadOptions, Reader};
+use sceptre::{BBox, ReadOptions, Reader};
 
 /// Absolute path to `tests/data/` in this crate.
 fn data_dir() -> PathBuf {

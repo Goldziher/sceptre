@@ -1,4 +1,4 @@
 def test_imports() -> None:
-    import easyocr_rs_tools
+    import sceptre_rs_tools
 
-    assert easyocr_rs_tools.__version__
+    assert sceptre_rs_tools.__version__

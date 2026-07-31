@@ -30,7 +30,7 @@ six gen2 recognizers, and a way to deliver them to users.
 Chosen option: **use the `itextresearch` ONNX exports, downloaded at runtime**.
 They cover CRAFT + all six gen2 recognizers, are Apache-2.0, full-precision, and
 dynamic-width. Models are fetched via `hf-hub`, cached under
-`~/.cache/easyocr-rs`, and sha256-verified. A Python export script is kept only
+`~/.cache/sceptre`, and sha256-verified. A Python export script is kept only
 as a fallback (e.g. to re-export at a different opset if a pure-Rust backend
 rejects a model).
 

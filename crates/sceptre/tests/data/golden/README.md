@@ -2,7 +2,7 @@
 
 Each `<image>.json` file here is the expected parity result for the matching
 image under `tests/data/images/<image>.{png,jpg}`, consumed by the
-`#[ignore]`d tests in `crates/easyocr/tests/tier2_golden.rs`.
+`#[ignore]`d tests in `crates/sceptre/tests/tier2_golden.rs`.
 
 ## Format
 

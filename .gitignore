@@ -4,7 +4,7 @@
 # poly (polylint) local cache
 /.polylint
 
-# downloaded ONNX model cache (default location is ~/.cache/easyocr-rs, but keep
+# downloaded ONNX model cache (default location is ~/.cache/sceptre, but keep
 # any in-tree cache out of git as well)
 /.cache
 *.onnx

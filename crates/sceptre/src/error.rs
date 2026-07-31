@@ -1,4 +1,4 @@
-//! Error types for easyocr.
+//! Error types for sceptre.
 //!
 //! Philosophy (mirrors the xberg convention):
 //!
@@ -10,10 +10,10 @@
 
 use thiserror::Error;
 
-/// Standard result type for all fallible operations in easyocr.
+/// Standard result type for all fallible operations in sceptre.
 pub type Result<T> = std::result::Result<T, OcrError>;
 
-/// The single error type for all easyocr operations.
+/// The single error type for all sceptre operations.
 #[derive(Debug, Error)]
 pub enum OcrError {
     /// A file-system or I/O operation failed. Always bubbles up unchanged.

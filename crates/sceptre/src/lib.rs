@@ -1,4 +1,4 @@
-//! # easyocr
+//! # sceptre
 //!
 //! A Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s OCR
 //! pipeline — CRAFT text detection followed by gen2 CRNN recognition with CTC
@@ -17,7 +17,7 @@
 //!
 //! Models are resolved and cached by [`models`]; behavior is configured through
 //! [`config`].
-#![doc(html_root_url = "https://docs.rs/easyocr")]
+#![doc(html_root_url = "https://docs.rs/sceptre")]
 
 pub(crate) mod config;
 pub(crate) mod detect;

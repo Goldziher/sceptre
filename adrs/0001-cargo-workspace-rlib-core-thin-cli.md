@@ -21,7 +21,7 @@ the entry points thin.
 ## Considered Options
 
 - Single crate with `lib.rs` + `main.rs`.
-- Cargo workspace: `crates/easyocr` (rlib) + `crates/easyocr-cli` (bin).
+- Cargo workspace: `crates/sceptre` (rlib) + `crates/sceptre-cli` (bin).
 - Multi-app monorepo with several binaries up front.
 
 ## Decision Outcome

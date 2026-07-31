@@ -1,10 +1,10 @@
-//! Black-box tests for the public [`easyocr::Image`] DTO.
+//! Black-box tests for the public [`sceptre::Image`] DTO.
 //!
 //! These exercise only the frozen public surface (`Image::from_rgb8`,
 //! `Image::from_path`, `Image::from_bytes`) with no model dependency, so they
 //! run as part of the default `cargo test` invocation.
 
-use easyocr::{Image, OcrError};
+use sceptre::{Image, OcrError};
 
 /// Absolute path to a committed fixture under `tests/data/images/`.
 fn image_path(name: &str) -> std::path::PathBuf {

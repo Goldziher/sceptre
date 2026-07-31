@@ -1,4 +1,4 @@
-//! Black-box tests for the [`easyocr::OcrEngine`] seam, [`easyocr::FallbackEngine`],
+//! Black-box tests for the [`sceptre::OcrEngine`] seam, [`sceptre::FallbackEngine`],
 //! and `Reader`/`ReaderBuilder` wiring.
 //!
 //! Every test injects a test-local fake `OcrEngine` via `ReaderBuilder::engine`, so
@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use easyocr::{
+use sceptre::{
     FallbackEngine, Image, OcrConfig, OcrEngine, OcrError, OcrResult, Point, Quad, ReadOptions, Reader, TextLine,
 };
 
@@ -63,7 +63,7 @@ impl FakeEngine {
 }
 
 impl OcrEngine for FakeEngine {
-    fn recognize(&self, _image: &Image, _options: &ReadOptions) -> easyocr::Result<OcrResult> {
+    fn recognize(&self, _image: &Image, _options: &ReadOptions) -> sceptre::Result<OcrResult> {
         match self {
             Self::Empty => Ok(OcrResult::default()),
             Self::Lines(lines) => Ok(OcrResult { lines: lines.clone() }),

@@ -44,7 +44,7 @@ pub struct ModelConfig {
     pub languages: Vec<Language>,
     /// Inference backend.
     pub backend: Backend,
-    /// Override for the model cache directory (default `~/.cache/easyocr-rs`).
+    /// Override for the model cache directory (default `~/.cache/sceptre`).
     pub cache_dir: Option<PathBuf>,
     /// Override for the Hugging Face registry owner hosting the ONNX exports.
     ///

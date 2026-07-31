@@ -1,5 +1,5 @@
 [package]
-name = "easyocr"
+name = "sceptre"
 description = "Rust reimplementation of EasyOCR (CRAFT detection + gen2 CRNN recognition) over ONNX."
 version.workspace = true
 edition.workspace = true
@@ -15,7 +15,7 @@ homepage.workspace = true
 ignored = ["rmcp", "schemars", "tokio", "tract-onnx"]
 
 [lib]
-name = "easyocr"
+name = "sceptre"
 
 [features]
 default = []

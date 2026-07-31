@@ -1,4 +1,4 @@
-//! The default [`OcrEngine`] implementation: [`EasyOcrEngine`].
+//! The default [`OcrEngine`] implementation: [`SceptreEngine`].
 
 use std::sync::Arc;
 
@@ -14,18 +14,18 @@ use super::{OcrEngine, ReadOptions};
 ///
 /// Holds the injectable seams and configuration consumed by the detect → crop →
 /// recognize pipeline. The detector is built lazily during
-/// [`recognize`](EasyOcrEngine::recognize) because loading its model backend is
+/// [`recognize`](SceptreEngine::recognize) because loading its model backend is
 /// fallible I/O and cannot happen in an infallible constructor.
 // Seams, config, and recognizer feed the detect → crop → recognize pipeline, whose body is still a todo. ~keep
 #[allow(dead_code)]
-pub(crate) struct EasyOcrEngine {
+pub(crate) struct SceptreEngine {
     config: OcrConfig,
     models: Arc<dyn ModelProvider>,
     progress: Arc<dyn ProgressSink>,
     recognizer: Box<dyn TextRecognizer>,
 }
 
-impl EasyOcrEngine {
+impl SceptreEngine {
     /// Build the default engine from resolved seams and configuration.
     pub(crate) fn new(config: OcrConfig, models: Arc<dyn ModelProvider>, progress: Arc<dyn ProgressSink>) -> Self {
         Self {
@@ -37,7 +37,7 @@ impl EasyOcrEngine {
     }
 }
 
-impl OcrEngine for EasyOcrEngine {
+impl OcrEngine for SceptreEngine {
     fn recognize(&self, _image: &Image, _options: &ReadOptions) -> Result<OcrResult> {
         todo!(
             "build the inference backend from models, construct CraftDetector, detect regions, \

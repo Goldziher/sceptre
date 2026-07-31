@@ -37,9 +37,9 @@ a crate-wide encapsulation lockdown.**
   one extension point. `FallbackEngine` is a public combinator that tries engines in order,
   advancing past an `Err` or an empty result. `Reader` holds `Arc<dyn OcrEngine>`;
   `ReaderBuilder::engine(...)` injects a custom engine (default: the internal
-  `EasyOcrEngine`). `Image` is a public owned RGB8 input DTO, decoupled from the `image`
+  `SceptreEngine`). `Image` is a public owned RGB8 input DTO, decoupled from the `image`
   crate.
-- **Internal stage boundaries.** `EasyOcrEngine` composes internal `pub(crate)` traits
+- **Internal stage boundaries.** `SceptreEngine` composes internal `pub(crate)` traits
   `TextDetector` (→ `DetectedRegions`) and `TextRecognizer` (`&[RegionCrop]` →
   `Vec<RecognizedText>`). These DTOs carry only primitives/`String` (corners as raw
   `[[f32; 2]; 4]`, not the public `Quad`), so a stage can change independently and the
@@ -48,7 +48,7 @@ a crate-wide encapsulation lockdown.**
   module; the entire public API is the curated re-export list in `lib.rs`
   (`Reader`/`ReaderBuilder`, `OcrEngine`/`FallbackEngine`, `Image`, config + result DTOs,
   errors, and the `ModelProvider`/`ProgressSink` builder seams). A black-box test tier that
-  may only `use easyocr::…` enforces this by construction.
+  may only `use sceptre::…` enforces this by construction.
 
 Detector and recognizer stay *internal* traits (not public) so we are not committed to their
 shape as API; if a use case to swap a detector/recognizer independently emerges, it can be

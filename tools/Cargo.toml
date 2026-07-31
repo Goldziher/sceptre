@@ -1,6 +1,6 @@
 [package]
-name = "easyocr-tools"
-description = "Dev-only model export/conversion tooling for easyocr-rs (Rust-first, candle-based)."
+name = "sceptre-tools"
+description = "Dev-only model export/conversion tooling for sceptre (Rust-first, candle-based)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ homepage.workspace = true
 publish = false
 
 [[bin]]
-name = "easyocr-tools"
+name = "sceptre-tools"
 path = "src/main.rs"
 
 [dependencies]

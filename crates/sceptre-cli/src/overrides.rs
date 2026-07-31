@@ -2,7 +2,7 @@
 
 use clap::Args;
 
-use easyocr::OcrConfig;
+use sceptre::OcrConfig;
 
 /// Optional overrides applied on top of the loaded configuration.
 #[derive(Debug, Args)]
@@ -56,9 +56,9 @@ pub enum BackendArg {
     Candle,
 }
 
-impl From<LanguageArg> for easyocr::Language {
+impl From<LanguageArg> for sceptre::Language {
     fn from(value: LanguageArg) -> Self {
-        use easyocr::Language;
+        use sceptre::Language;
         match value {
             LanguageArg::English => Language::English,
             LanguageArg::Latin => Language::Latin,
@@ -70,9 +70,9 @@ impl From<LanguageArg> for easyocr::Language {
     }
 }
 
-impl From<BackendArg> for easyocr::Backend {
+impl From<BackendArg> for sceptre::Backend {
     fn from(value: BackendArg) -> Self {
-        use easyocr::Backend;
+        use sceptre::Backend;
         match value {
             BackendArg::Ort => Backend::Ort,
             BackendArg::Tract => Backend::Tract,

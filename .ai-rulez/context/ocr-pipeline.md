@@ -15,7 +15,7 @@ The pipeline reimplements EasyOCR's "latest version" path: the CRAFT detector pl
 ## Models
 
 - Source: the `itextresearch/itext-EasyOCR-*` ONNX repos on Hugging Face (Apache-2.0, dynamic-width): `craft_mlt_25k` + `english_g2`, `latin_g2`, `zh_sim_g2`, `japanese_g2`, `korean_g2`, `cyrillic_g2`.
-- Downloaded at runtime, cached under `~/.cache/easyocr-rs`, sha256-verified.
+- Downloaded at runtime, cached under `~/.cache/sceptre`, sha256-verified.
 
 ## Key tunables (EasyOCR defaults)
 

@@ -686,49 +686,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15401da73a9ed8c80e3b2d4dc05fe10e7b72d7243b9f614e516a44fa99986e88"
 
 [[package]]
-name = "easyocr"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "hf-hub",
- "image",
- "imageproc",
- "ndarray 0.17.2",
- "num_cpus",
- "ort",
- "rayon",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "tokio",
- "tracing",
- "tract-onnx",
-]
-
-[[package]]
-name = "easyocr-cli"
-version = "0.1.0"
-dependencies = [
- "anstyle",
- "anyhow",
- "clap",
- "clap_complete",
- "easyocr",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "easyocr-tools"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
-]
-
-[[package]]
 name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2828,6 +2785,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b53b0a5db882a8e2fdaae0a43f7b39e7e9082389e978398bdf223a55b581248"
 dependencies = [
  "regex",
+]
+
+[[package]]
+name = "sceptre"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "hf-hub",
+ "image",
+ "imageproc",
+ "ndarray 0.17.2",
+ "num_cpus",
+ "ort",
+ "rayon",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tract-onnx",
+]
+
+[[package]]
+name = "sceptre-cli"
+version = "0.1.0"
+dependencies = [
+ "anstyle",
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "sceptre",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "sceptre-tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
 ]
 
 [[package]]

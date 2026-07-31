@@ -4,13 +4,13 @@
 //! [`OcrEngine`] and the loaded config. It is built through [`ReaderBuilder`],
 //! mirroring xberg's engine/seams pattern: every extension point is a trait with
 //! an in-crate default, so callers can inject alternatives without touching the
-//! default path. The default engine is the internal [`EasyOcrEngine`].
+//! default path. The default engine is the internal [`SceptreEngine`].
 
 pub(crate) mod seams;
 
-mod easyocr_engine;
 mod fallback;
 mod ocr_engine;
+mod sceptre_engine;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use crate::config::{OcrConfig, init_thread_pools, resolve_thread_budget};
 use crate::error::Result;
 use crate::types::{Image, OcrResult};
 
-use easyocr_engine::EasyOcrEngine;
+use sceptre_engine::SceptreEngine;
 use seams::{DefaultModelProvider, ModelProvider, NoopProgress, ProgressSink};
 
 pub use fallback::FallbackEngine;
@@ -88,7 +88,7 @@ impl ReaderBuilder {
         self
     }
 
-    /// Inject a custom engine (default: the internal `EasyOcrEngine`).
+    /// Inject a custom engine (default: the internal `SceptreEngine`).
     pub fn engine(mut self, engine: Arc<dyn OcrEngine>) -> Self {
         self.engine = Some(engine);
         self
@@ -109,7 +109,7 @@ impl ReaderBuilder {
     /// Finalize the reader, initializing the shared thread budget.
     ///
     /// If an engine was injected it is used as-is; otherwise the default
-    /// [`EasyOcrEngine`] is constructed from the config and the resolved model
+    /// [`SceptreEngine`] is constructed from the config and the resolved model
     /// provider and progress sink.
     pub fn build(self) -> Result<Reader> {
         let budget = resolve_thread_budget(Some(&self.config.concurrency));
@@ -123,7 +123,7 @@ impl ReaderBuilder {
                     None => Arc::new(DefaultModelProvider::from_config(&self.config)?),
                 };
                 let progress = self.progress.unwrap_or_else(|| Arc::new(NoopProgress));
-                Arc::new(EasyOcrEngine::new(self.config.clone(), models, progress))
+                Arc::new(SceptreEngine::new(self.config.clone(), models, progress))
             }
         };
 

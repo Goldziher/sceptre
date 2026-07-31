@@ -1,7 +1,7 @@
 //! Download and cache model artifacts.
 //!
 //! Resolves a [`ModelEntry`] to a local path under the cache directory (default
-//! `~/.cache/easyocr-rs`), downloading from Hugging Face when the `download`
+//! `~/.cache/sceptre`), downloading from Hugging Face when the `download`
 //! feature is enabled and verifying its SHA-256 against the registry pin when one
 //! is present (the gen2 artifacts are currently unpinned; see the registry).
 //!
@@ -47,10 +47,10 @@ pub fn ensure(_entry: &ModelEntry, _cache_dir: &Path, _registry_owner: Option<&s
     ))
 }
 
-/// Default cache directory: `~/.cache/easyocr-rs` (or the platform cache dir).
+/// Default cache directory: `~/.cache/sceptre` (or the platform cache dir).
 pub fn default_cache_dir() -> Result<PathBuf> {
     dirs::cache_dir()
-        .map(|d| d.join("easyocr-rs"))
+        .map(|d| d.join("sceptre"))
         .ok_or_else(|| OcrError::model("could not determine a cache directory"))
 }
 
@@ -234,17 +234,17 @@ mod tests {
 
     #[test]
     fn cache_path_namespaces_by_owner_repo_and_file() {
-        let cache_dir = Path::new("/cache/easyocr-rs");
+        let cache_dir = Path::new("/cache/sceptre");
         let path = cache_path(cache_dir, "itextresearch/itext-EasyOCR-english_g2", "english_g2.onnx");
         assert_eq!(
             path,
-            Path::new("/cache/easyocr-rs/itextresearch/itext-EasyOCR-english_g2/english_g2.onnx")
+            Path::new("/cache/sceptre/itextresearch/itext-EasyOCR-english_g2/english_g2.onnx")
         );
     }
 
     #[test]
     fn sha256_file_hashes_written_bytes() {
-        let dir = std::env::temp_dir().join(format!("easyocr-hash-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("sceptre-hash-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("abc.bin");
         std::fs::write(&file, b"abc").unwrap();
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn cached_file_is_valid_matches_pin_and_rejects_wrong_pin() {
-        let dir = std::env::temp_dir().join(format!("easyocr-cache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("sceptre-cache-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("abc.bin");
         std::fs::write(&file, b"abc").unwrap();
@@ -273,7 +273,7 @@ mod tests {
     fn ensure_downloads_and_caches_the_craft_model() {
         use crate::models::registry::craft_entry;
 
-        let cache_dir = std::env::temp_dir().join(format!("easyocr-net-{}", std::process::id()));
+        let cache_dir = std::env::temp_dir().join(format!("sceptre-net-{}", std::process::id()));
         let path = ensure(&craft_entry(), &cache_dir, None).expect("craft download should succeed");
         assert!(path.is_file(), "downloaded artifact must exist at {}", path.display());
         assert!(path.starts_with(&cache_dir), "artifact must live under the cache dir");

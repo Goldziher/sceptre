@@ -17,18 +17,18 @@ tasks:
       - uv run ruff format python
 
   export:
-    # Assumes the Python package import name is easyocr_rs_tools; confirm this once
+    # Assumes the Python package import name is sceptre_rs_tools; confirm this once
     # pyproject.toml and python/ land. ~keep
     desc: >-
       FALLBACK model-export path: runs the (currently stubbed) exporter that converts
       upstream EasyOCR checkpoints to ONNX; requires the opt-in export/torch dependency
       group
     cmds:
-      - uv run python -m easyocr_rs_tools.export
+      - uv run python -m sceptre_rs_tools.export
 
   golden:
     desc: >-
       Generate golden JSON fixtures for parity testing (currently stubbed); requires
       the opt-in export/torch dependency group to produce real output
     cmds:
-      - uv run python -m easyocr_rs_tools.golden
+      - uv run python -m sceptre_rs_tools.golden

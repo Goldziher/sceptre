@@ -15,7 +15,7 @@ import sys
 def main() -> None:
     """Print an informative not-implemented message and exit non-zero."""
     print(
-        "easyocr_rs_tools.golden: golden-fixture generation not yet implemented — "
+        "sceptre_rs_tools.golden: golden-fixture generation not yet implemented — "
         "generates golden JSON fixtures from Python EasyOCR over the example images "
         "for parity testing; requires the 'export' dependency group (torch, easyocr).",
         file=sys.stderr,
