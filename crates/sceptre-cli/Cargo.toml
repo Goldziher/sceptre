@@ -14,17 +14,32 @@ name = "sceptre"
 path = "src/main.rs"
 
 [features]
-default = []
+# Runnable out of the box: recognition over ONNX Runtime loaded at runtime
+# (load-dynamic, no build-time native download) plus model download/caching. ~keep
+default = ["ort-dynamic", "download"]
+# ONNX Runtime linked from a prebuilt binary fetched at build time (zero-config). ~keep
+ort-bundled = ["sceptre/ort-bundled"]
+# ONNX Runtime loaded at runtime via ORT_DYLIB_PATH (no build-time download). ~keep
+ort-dynamic = ["sceptre/ort-dynamic"]
+# Runtime model download, caching, and sha256 verification from Hugging Face. ~keep
+download = ["sceptre/download"]
 # Expose the MCP server as the `mcp` subcommand. ~keep
 mcp = ["sceptre/mcp"]
 
 [dependencies]
+anstream = { workspace = true }
 anstyle = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 sceptre = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
 
 [lints]
 workspace = true

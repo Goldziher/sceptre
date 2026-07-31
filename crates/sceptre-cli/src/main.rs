@@ -5,6 +5,7 @@
 //! tracing; structured data is written to stdout.
 
 mod cli;
+mod output;
 mod overrides;
 mod style;
 
