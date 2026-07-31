@@ -5,6 +5,10 @@
 //! [`ctc`] (decode logits to text). [`charset`] supplies per-language alphabets;
 //! [`contrast`] drives the low-confidence second pass. Crops are resized to a
 //! height of 64 px (EasyOCR `imgH`).
+//!
+//! The recognizer seam and its stage DTOs live in [`recognizer`]; the individual
+//! stages are module-private helpers wired together by
+//! [`recognizer::CrnnRecognizer`].
 
 mod charset;
 mod contrast;
@@ -14,24 +18,6 @@ mod ctc;
 mod preprocess;
 mod recognizer;
 
-pub(crate) use recognizer::{CrnnRecognizer, TextRecognizer};
-
-use crate::config::RecognitionConfig;
-use crate::detect::Detection;
-use crate::error::Result;
-use crate::imaging::LoadedImage;
-use crate::inference::ModelBackend;
-use crate::types::TextLine;
-
-/// Recognize text for every detected region.
-// Legacy stage entry point, superseded by the `TextRecognizer` seam. ~keep
-#[allow(dead_code)]
-pub fn recognize(
-    _backend: &dyn ModelBackend,
-    _image: &LoadedImage,
-    _detection: &Detection,
-    _charset: &charset::Charset,
-    _config: &RecognitionConfig,
-) -> Result<Vec<TextLine>> {
-    todo!("crop, preprocess, run the CRNN, then CTC-decode")
-}
+// The recognizer seam surface for the engine; some names are unreferenced while the pipeline body is a todo. ~keep
+#[allow(unused_imports)]
+pub(crate) use recognizer::{CrnnRecognizer, RecognizedText, RegionCrop, TextRecognizer};

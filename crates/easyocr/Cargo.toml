@@ -38,6 +38,7 @@ mcp = ["dep:rmcp", "dep:schemars", "dep:tokio"]
 dirs = { workspace = true }
 hf-hub = { workspace = true, optional = true }
 image = { workspace = true }
+imageproc = { workspace = true }
 ndarray = { workspace = true }
 num_cpus = { workspace = true }
 ort = { workspace = true, optional = true }
