@@ -1,0 +1,40 @@
+[defaults]
+line_length = 120
+line_ending = "lf"
+final_newline = true
+trim_trailing_whitespace = true
+
+[discovery]
+exclude = [
+  "**/*.lock",
+  "**/Cargo.lock",
+  "**/*.onnx",
+  "target/**",
+  "dist/**",
+  "node_modules/**",
+  "vendor/**",
+  "**/assets/**",
+  "**/tests/data/**",
+]
+
+[lint.markdown.rumdl]
+disable = ["MD013", "MD024", "MD033", "MD036", "MD041"]
+
+[fmt.markdown.rumdl]
+disable = ["MD013", "MD024", "MD033", "MD036", "MD041"]
+
+[hooks]
+stages = ["pre-commit"]
+
+[hooks.builtin]
+lint = { exclude = ["**/*.lock", "**/*.onnx", "target/**", "**/assets/**", "**/tests/data/**"] }
+fmt = { exclude = ["**/*.lock", "**/*.onnx", "target/**", "**/assets/**", "**/tests/data/**"] }
+commit = { stages = ["commit-msg"] }
+file_safety = { exclude = ["**/*.lock", "**/*.onnx", "target/**", "**/assets/**", "**/tests/data/**"] }
+cargo = true
+
+[[hooks.sources]]
+id = "ai-rulez"
+git = "https://github.com/Goldziher/ai-rulez.git"
+revision = "v4.9.3"
+hooks = ["ai-rulez-validate", "ai-rulez-plugin-verify"]

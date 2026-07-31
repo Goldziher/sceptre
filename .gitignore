@@ -1,0 +1,22 @@
+/target
+/dist
+
+# poly (polylint) local cache
+/.polylint
+
+# downloaded ONNX model cache (default location is ~/.cache/easyocr-rs, but keep
+# any in-tree cache out of git as well)
+/.cache
+*.onnx
+
+*.swp
+.env
+
+# BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)
+.ai-rulez/.generated-manifest.json
+.claude/
+.codex/
+.mcp.json
+AGENTS.md
+CLAUDE.md
+# END ai-rulez

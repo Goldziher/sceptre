@@ -1,0 +1,39 @@
+[package]
+name = "easyocr"
+description = "Rust reimplementation of EasyOCR (CRAFT detection + gen2 CRNN recognition) over ONNX."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lib]
+name = "easyocr"
+
+[features]
+default = []
+# Native ONNX Runtime backend for desktop and server. ~keep
+ort = ["dep:ort"]
+# Pure-Rust ONNX backend for WASM and Android. ~keep
+tract = ["dep:tract-onnx"]
+# Pure-Rust native-tensor backend. ~keep
+candle = []
+# Runtime model download and caching from Hugging Face. ~keep
+download = ["dep:hf-hub"]
+# MCP (rmcp) server surface. ~keep
+mcp = ["dep:rmcp", "dep:schemars", "dep:tokio"]
+
+[dependencies]
+dirs = { workspace = true }
+image = { workspace = true }
+ndarray = { workspace = true }
+num_cpus = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

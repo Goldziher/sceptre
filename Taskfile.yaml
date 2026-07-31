@@ -1,0 +1,41 @@
+version: "3"
+
+tasks:
+  setup:
+    desc: Fetch dependencies and install git hooks
+    cmds:
+      - cargo fetch
+      - poly hooks install
+
+  build:
+    desc: Build the workspace
+    cmds:
+      - cargo build --workspace
+
+  test:
+    desc: Run the test suite
+    cmds:
+      - cargo test --workspace
+
+  lint:
+    desc: Run poly lint over the repo
+    cmds:
+      - poly lint .
+
+  format:
+    desc: Format all Rust code
+    cmds:
+      - cargo fmt --all
+
+  check:
+    desc: Full pre-commit gate (fmt + clippy + test + poly)
+    cmds:
+      - cargo fmt --all --check
+      - cargo clippy --workspace --all-targets --tests -- -D warnings
+      - cargo test --workspace
+      - poly lint .
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - cargo clean

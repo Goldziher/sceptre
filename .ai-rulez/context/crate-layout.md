@@ -1,0 +1,29 @@
+---
+priority: high
+---
+
+# Crate Layout
+
+A Cargo workspace: one rlib core plus a thin CLI. Shared metadata, dependency pins, lints, and profiles live in the root `Cargo.toml`; members inherit with `.workspace = true`.
+
+## `crates/easyocr` (library, rlib)
+
+- `lib.rs` — crate docs, feature-gated `pub mod`s, curated flat re-exports.
+- `error.rs` — `OcrError` + `Result`.
+- `types.rs` — `Point`, `BBox`, `Quad`, `TextLine`, `OcrResult`.
+- `config/` — `detection.rs`, `recognition.rs`, `concurrency.rs`, `model.rs`, aggregated in `OcrConfig`.
+- `engine/` — `Reader` + `ReaderBuilder`; `engine/seams/` holds the injectable `ModelProvider` / `ProgressSink` traits and defaults.
+- `imaging.rs` — decode to RGB + grayscale.
+- `detect/` — `preprocess`, `craft`, `postprocess`, `group` (CRAFT).
+- `recognize/` — `crop`, `preprocess`, `crnn`, `ctc`, `charset`, `contrast` (CRNN + CTC).
+- `inference/` — `ModelBackend` seam + `ort_backend` / `tract_backend` impls.
+- `models/` — `registry` (gen2 model table → Hugging Face) + `download` (fetch/cache/verify).
+- `mcp/` — rmcp server (`mcp` feature).
+
+## `crates/easyocr-cli` (binary `easyocr-rs`)
+
+- `main.rs` (thin), `cli.rs` (clap `Cli`/`Commands` + dispatch), `overrides.rs` (flattened flag group → `OcrConfig`), `style.rs` (anstyle palette).
+
+## Repo root
+
+- `adrs/` — MADR decision records. `scripts/` — model export / golden-fixture tooling. `poly.toml`, `rustfmt.toml`, `deny.toml`, `Taskfile.yaml`, `.github/workflows/ci.yaml`.

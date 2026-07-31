@@ -1,0 +1,30 @@
+[package]
+name = "easyocr-cli"
+description = "Command-line interface for easyocr — CRAFT + gen2 CRNN OCR over ONNX."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "easyocr-rs"
+path = "src/main.rs"
+
+[features]
+default = []
+# Expose the MCP server as the `mcp` subcommand. ~keep
+mcp = ["easyocr/mcp"]
+
+[dependencies]
+anstyle = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+clap_complete = { workspace = true }
+easyocr = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
