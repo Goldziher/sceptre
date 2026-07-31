@@ -89,6 +89,73 @@ fn should_return_injected_engine_result_verbatim_from_recognize() {
 }
 
 #[test]
+fn should_return_region_quads_from_detect() {
+    let first = TextLine {
+        quad: Quad {
+            points: [
+                Point::new(0.0, 0.0),
+                Point::new(4.0, 0.0),
+                Point::new(4.0, 3.0),
+                Point::new(0.0, 3.0),
+            ],
+        },
+        text: "first".to_string(),
+        confidence: 0.9,
+    };
+    let second = TextLine {
+        quad: Quad {
+            points: [
+                Point::new(5.0, 1.0),
+                Point::new(9.0, 1.0),
+                Point::new(9.0, 6.0),
+                Point::new(5.0, 6.0),
+            ],
+        },
+        text: "second".to_string(),
+        confidence: 0.8,
+    };
+    let reader = Reader::builder()
+        .engine(FakeEngine::lines(vec![first.clone(), second.clone()]))
+        .build()
+        .expect("building a reader with an injected engine");
+
+    let quads = reader
+        .detect(&tiny_image(), &ReadOptions::default())
+        .expect("fake engine never errors");
+
+    assert_eq!(quads, vec![first.quad, second.quad]);
+}
+
+#[test]
+fn should_merge_lines_into_one_from_recognize_line() {
+    let reader = Reader::builder()
+        .engine(FakeEngine::lines(vec![text_line("hello"), text_line("world")]))
+        .build()
+        .expect("building a reader with an injected engine");
+
+    let line = reader
+        .recognize_line(&tiny_image(), &ReadOptions::default())
+        .expect("fake engine never errors");
+
+    assert_eq!(line.text, "hello world");
+}
+
+#[test]
+fn should_return_empty_line_from_recognize_line_when_no_lines() {
+    let reader = Reader::builder()
+        .engine(FakeEngine::empty())
+        .build()
+        .expect("building a reader with an injected engine");
+
+    let line = reader
+        .recognize_line(&tiny_image(), &ReadOptions::default())
+        .expect("fake engine never errors");
+
+    assert_eq!(line.text, "");
+    assert_eq!(line.confidence, 0.0);
+}
+
+#[test]
 fn should_return_injected_engine_result_verbatim_from_readtext() {
     let expected_lines = vec![text_line("readtext delegates to the engine")];
     let reader = Reader::builder()

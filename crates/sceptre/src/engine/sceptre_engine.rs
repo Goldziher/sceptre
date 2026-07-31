@@ -95,7 +95,7 @@ impl SceptreEngine {
     }
 
     /// Detect candidate text regions with the CRAFT detector.
-    fn detect(&self, image: &Image) -> Result<DetectedRegions> {
+    fn detect_regions(&self, image: &Image) -> Result<DetectedRegions> {
         let detector = CraftDetector::new(self.detector_backend()?, self.config.detection.clone());
         detector.detect(&DetectorInput { image })
     }
@@ -115,7 +115,7 @@ impl SceptreEngine {
 impl OcrEngine for SceptreEngine {
     fn recognize(&self, image: &Image, _options: &ReadOptions) -> Result<OcrResult> {
         self.progress.on_stage(STAGE_DETECT);
-        let regions = self.detect(image)?;
+        let regions = self.detect_regions(image)?;
         if regions.regions.is_empty() {
             return Ok(OcrResult::default());
         }
@@ -129,6 +129,38 @@ impl OcrEngine for SceptreEngine {
         self.progress.on_stage(STAGE_RECOGNIZE);
         let texts = self.recognize_crops(&crops)?;
         Ok(build_result(&crops, texts))
+    }
+
+    fn detect(&self, image: &Image, _options: &ReadOptions) -> Result<Vec<Quad>> {
+        self.progress.on_stage(STAGE_DETECT);
+        let regions = self.detect_regions(image)?;
+        Ok(regions
+            .regions
+            .iter()
+            .map(|region| corners_to_quad(&region.corners))
+            .collect())
+    }
+
+    fn recognize_line(&self, image: &Image, _options: &ReadOptions) -> Result<TextLine> {
+        self.progress.on_stage(STAGE_RECOGNIZE);
+        let grey = to_grayscale(image)?;
+        let corners = full_image_corners(grey.width(), grey.height());
+        let crop = RegionCrop {
+            width: grey.width(),
+            height: grey.height(),
+            gray: grey.into_raw(),
+            corners,
+        };
+        let recognized = self
+            .recognize_crops(&[crop])?
+            .into_iter()
+            .next()
+            .ok_or_else(|| OcrError::inference("recognizer returned no result for the line crop"))?;
+        Ok(TextLine {
+            quad: corners_to_quad(&corners),
+            text: recognized.text,
+            confidence: recognized.confidence,
+        })
     }
 }
 
@@ -172,6 +204,13 @@ fn corners_to_quad(corners: &[[f32; 2]; QUAD_CORNERS]) -> Quad {
     Quad {
         points: corners.map(|corner| Point::new(corner[0], corner[1])),
     }
+}
+
+/// The clockwise `[TL, TR, BR, BL]` corners spanning a whole `width`×`height` image.
+fn full_image_corners(width: u32, height: u32) -> [[f32; 2]; QUAD_CORNERS] {
+    let width = width as f32;
+    let height = height as f32;
+    [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]]
 }
 
 #[cfg(test)]

@@ -66,8 +66,7 @@ const HASH_CHUNK_BYTES: usize = 64 * 1024;
 ///
 /// Each `owner/name` segment of the repo id becomes a directory component, so
 /// the layout is `<cache_dir>/<owner>/<name>/<file>`.
-#[cfg(feature = "download")]
-fn cache_path(cache_dir: &Path, repo: &str, file: &str) -> PathBuf {
+pub(crate) fn cache_path(cache_dir: &Path, repo: &str, file: &str) -> PathBuf {
     let mut path = cache_dir.to_path_buf();
     for segment in repo.split('/') {
         path.push(segment);

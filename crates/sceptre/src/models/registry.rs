@@ -45,8 +45,6 @@ pub const fn craft_entry() -> ModelEntry {
 /// The override is validated ([`owner_is_safe`]) before it reaches the cache-path
 /// construction in [`crate::models::download`], so it cannot inject a path
 /// separator or `..` traversal; an invalid owner is an [`OcrError::Config`].
-// Consumed by the `download`-gated resolver; unused when that feature is off. ~keep
-#[cfg_attr(not(feature = "download"), allow(dead_code))]
 pub fn effective_repo(entry: &ModelEntry, registry_owner: Option<&str>) -> Result<String> {
     let Some(owner) = registry_owner else {
         return Ok(entry.hf_repo.to_string());
@@ -67,8 +65,6 @@ pub fn effective_repo(entry: &ModelEntry, registry_owner: Option<&str>) -> Resul
 /// Restricting to ASCII alphanumerics plus `-`/`_` keeps a `registry_owner`
 /// override from smuggling path separators (`/`, `\`) or `..` traversal into the
 /// on-disk cache layout derived from the repo id.
-// Consumed by the `download`-gated resolver; unused when that feature is off. ~keep
-#[cfg_attr(not(feature = "download"), allow(dead_code))]
 fn owner_is_safe(owner: &str) -> bool {
     !owner.is_empty() && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }

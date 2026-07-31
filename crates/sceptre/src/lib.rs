@@ -38,4 +38,5 @@ pub use config::{
 pub use engine::seams::{ModelProvider, ProgressSink};
 pub use engine::{FallbackEngine, OcrEngine, ReadOptions, Reader, ReaderBuilder};
 pub use error::{OcrError, Result};
+pub use models::provision::{ModelInfo, ModelRole, download_models, model_manifest};
 pub use types::{BBox, Image, OcrResult, Point, Quad, TextLine};

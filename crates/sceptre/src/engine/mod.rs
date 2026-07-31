@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use crate::config::{OcrConfig, init_thread_pools, resolve_thread_budget};
 use crate::error::Result;
-use crate::types::{Image, OcrResult};
+use crate::types::{Image, OcrResult, Quad, TextLine};
 
 use sceptre_engine::SceptreEngine;
 use seams::{DefaultModelProvider, ModelProvider, NoopProgress, ProgressSink};
@@ -72,6 +72,16 @@ impl Reader {
     /// Run the engine directly on an already-decoded image.
     pub fn recognize(&self, image: &Image, options: &ReadOptions) -> Result<OcrResult> {
         self.inner.engine.recognize(image, options)
+    }
+
+    /// Detect text regions in an already-decoded image, returning their quads.
+    pub fn detect(&self, image: &Image, options: &ReadOptions) -> Result<Vec<Quad>> {
+        self.inner.engine.detect(image, options)
+    }
+
+    /// Recognize an already-decoded, pre-cropped single line image.
+    pub fn recognize_line(&self, image: &Image, options: &ReadOptions) -> Result<TextLine> {
+        self.inner.engine.recognize_line(image, options)
     }
 }
 
