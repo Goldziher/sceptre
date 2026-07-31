@@ -22,18 +22,18 @@ pub trait ProgressSink: Send + Sync {
 }
 
 /// A progress sink that discards all notifications.
-pub struct NoopProgress;
+pub(crate) struct NoopProgress;
 
 impl ProgressSink for NoopProgress {}
 
 /// The default model provider: resolves via the cache dir, downloading on miss.
-pub struct DefaultModelProvider {
+pub(crate) struct DefaultModelProvider {
     cache_dir: PathBuf,
 }
 
 impl DefaultModelProvider {
     /// Build from config, honoring `model.cache_dir` or the platform default.
-    pub fn from_config(config: &OcrConfig) -> Result<Self> {
+    pub(crate) fn from_config(config: &OcrConfig) -> Result<Self> {
         let cache_dir = match &config.model.cache_dir {
             Some(dir) => dir.clone(),
             None => default_cache_dir()?,

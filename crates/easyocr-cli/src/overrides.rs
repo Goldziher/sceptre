@@ -56,9 +56,9 @@ pub enum BackendArg {
     Candle,
 }
 
-impl From<LanguageArg> for easyocr::config::Language {
+impl From<LanguageArg> for easyocr::Language {
     fn from(value: LanguageArg) -> Self {
-        use easyocr::config::Language;
+        use easyocr::Language;
         match value {
             LanguageArg::English => Language::English,
             LanguageArg::Latin => Language::Latin,
@@ -70,9 +70,9 @@ impl From<LanguageArg> for easyocr::config::Language {
     }
 }
 
-impl From<BackendArg> for easyocr::config::Backend {
+impl From<BackendArg> for easyocr::Backend {
     fn from(value: BackendArg) -> Self {
-        use easyocr::config::Backend;
+        use easyocr::Backend;
         match value {
             BackendArg::Ort => Backend::Ort,
             BackendArg::Tract => Backend::Tract,

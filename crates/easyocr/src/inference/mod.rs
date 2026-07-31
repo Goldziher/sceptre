@@ -10,6 +10,9 @@
 //! [`load_backend`] selects an implementation from [`Backend`]; backends not
 //! compiled in return an [`OcrError::Inference`].
 
+// Backend seam and loader consumed by the detection and recognition stages. ~keep
+#![allow(dead_code)]
+
 use ndarray::ArrayD;
 
 use crate::config::Backend;

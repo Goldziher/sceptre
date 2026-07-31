@@ -5,10 +5,13 @@
 //! (threshold + connected components → boxes) → [`group`] (merge boxes into
 //! lines, split horizontal vs. rotated).
 
-pub mod craft;
-pub mod group;
-pub mod postprocess;
-pub mod preprocess;
+mod craft;
+mod detector;
+mod group;
+mod postprocess;
+mod preprocess;
+
+pub(crate) use detector::{CraftDetector, TextDetector};
 
 use crate::config::DetectionConfig;
 use crate::error::Result;
@@ -17,6 +20,8 @@ use crate::inference::ModelBackend;
 use crate::types::Quad;
 
 /// The detector's output: axis-aligned lines and rotated (free) quads.
+// Legacy stage output type, superseded by the `TextDetector` seam. ~keep
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Detection {
     /// Horizontal (axis-aligned) text quads.
@@ -26,6 +31,8 @@ pub struct Detection {
 }
 
 /// Run detection end-to-end, returning grouped text regions.
+// Legacy stage entry point, superseded by the `TextDetector` seam. ~keep
+#[allow(dead_code)]
 pub fn detect(_backend: &dyn ModelBackend, _image: &LoadedImage, _config: &DetectionConfig) -> Result<Detection> {
     todo!("preprocess, run CRAFT, postprocess the heat-maps, then group boxes")
 }

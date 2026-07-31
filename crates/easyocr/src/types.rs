@@ -1,6 +1,80 @@
 //! Core geometric and result types for the OCR pipeline.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
+
+use crate::error::{OcrError, Result};
+
+/// Number of channels in an RGB8 pixel (red, green, blue).
+const RGB_CHANNELS: usize = 3;
+
+/// A decoded, owned RGB8 image — the public input DTO for the OCR engine.
+///
+/// Decoupled from the `image` crate: callers hand the engine raw pixels or an
+/// encoded file/byte slice, and the engine works only in terms of this owned,
+/// row-major RGB8 buffer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    width: u32,
+    height: u32,
+    rgb8: Vec<u8>,
+}
+
+impl Image {
+    /// Decode an image file (any format the `image` crate supports) into RGB8.
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
+        let bytes = std::fs::read(path)?;
+        Self::from_bytes(&bytes)
+    }
+
+    /// Decode encoded image bytes into RGB8.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let decoded = image::load_from_memory(bytes).map_err(|error| OcrError::Image {
+            message: "failed to decode image bytes".to_string(),
+            source: Some(Box::new(error)),
+        })?;
+        let rgb = decoded.to_rgb8();
+        let (width, height) = rgb.dimensions();
+        Ok(Self {
+            width,
+            height,
+            rgb8: rgb.into_raw(),
+        })
+    }
+
+    /// Wrap raw RGB8 pixels; `rgb8.len()` must equal `width * height * 3`.
+    pub fn from_rgb8(width: u32, height: u32, rgb8: Vec<u8>) -> Result<Self> {
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(RGB_CHANNELS));
+        match expected {
+            Some(expected) if expected == rgb8.len() => Ok(Self { width, height, rgb8 }),
+            _ => Err(OcrError::image(format!(
+                "RGB8 buffer length {} does not match width {} * height {} * {} channels",
+                rgb8.len(),
+                width,
+                height,
+                RGB_CHANNELS
+            ))),
+        }
+    }
+
+    /// Image width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Image height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Row-major RGB8 pixels, length `width * height * 3`.
+    pub fn as_rgb8(&self) -> &[u8] {
+        &self.rgb8
+    }
+}
 
 /// A 2D point in pixel coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

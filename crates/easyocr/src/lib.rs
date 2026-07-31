@@ -19,20 +19,23 @@
 //! [`config`].
 #![doc(html_root_url = "https://docs.rs/easyocr")]
 
-pub mod config;
-pub mod detect;
-pub mod engine;
-pub mod error;
-pub mod imaging;
-pub mod inference;
-pub mod models;
-pub mod recognize;
-pub mod types;
+pub(crate) mod config;
+pub(crate) mod detect;
+pub(crate) mod engine;
+pub(crate) mod error;
+pub(crate) mod imaging;
+pub(crate) mod inference;
+pub(crate) mod models;
+pub(crate) mod recognize;
+pub(crate) mod types;
 
 #[cfg(feature = "mcp")]
 pub mod mcp;
 
-pub use config::{DetectionConfig, ModelConfig, OcrConfig, RecognitionConfig};
-pub use engine::{ReadOptions, Reader, ReaderBuilder};
+pub use config::{
+    Backend, ConcurrencyConfig, Decoder, DetectionConfig, Language, ModelConfig, OcrConfig, RecognitionConfig,
+};
+pub use engine::seams::{ModelProvider, ProgressSink};
+pub use engine::{FallbackEngine, OcrEngine, ReadOptions, Reader, ReaderBuilder};
 pub use error::{OcrError, Result};
-pub use types::{BBox, OcrResult, Point, Quad, TextLine};
+pub use types::{BBox, Image, OcrResult, Point, Quad, TextLine};

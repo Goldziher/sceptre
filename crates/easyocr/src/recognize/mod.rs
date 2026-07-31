@@ -6,12 +6,15 @@
 //! [`contrast`] drives the low-confidence second pass. Crops are resized to a
 //! height of 64 px (EasyOCR `imgH`).
 
-pub mod charset;
-pub mod contrast;
-pub mod crnn;
-pub mod crop;
-pub mod ctc;
-pub mod preprocess;
+mod charset;
+mod contrast;
+mod crnn;
+mod crop;
+mod ctc;
+mod preprocess;
+mod recognizer;
+
+pub(crate) use recognizer::{CrnnRecognizer, TextRecognizer};
 
 use crate::config::RecognitionConfig;
 use crate::detect::Detection;
@@ -21,6 +24,8 @@ use crate::inference::ModelBackend;
 use crate::types::TextLine;
 
 /// Recognize text for every detected region.
+// Legacy stage entry point, superseded by the `TextRecognizer` seam. ~keep
+#[allow(dead_code)]
 pub fn recognize(
     _backend: &dyn ModelBackend,
     _image: &LoadedImage,

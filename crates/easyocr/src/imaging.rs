@@ -3,6 +3,9 @@
 //! Mirrors EasyOCR's `reformat_input`: every input is decoded into both an RGB
 //! image (for CRAFT detection) and a grayscale image (for recognition).
 
+// Decode helpers consumed by the detection and recognition stages. ~keep
+#![allow(dead_code)]
+
 use std::path::Path;
 
 use crate::error::Result;

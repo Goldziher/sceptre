@@ -4,6 +4,9 @@
 //! character `c` maps to index `i + 1`. Alphabets are embedded from
 //! `assets/character/*.txt`, copied from EasyOCR.
 
+// Charset lookup consumed by CTC decoding. ~keep
+#![allow(dead_code)]
+
 use crate::config::Language;
 
 /// An ordered alphabet plus the derived blank-prefixed CTC class list.

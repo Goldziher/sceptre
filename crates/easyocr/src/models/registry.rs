@@ -7,6 +7,8 @@
 use crate::config::Language;
 
 /// A single downloadable ONNX model artifact.
+// Fields describe the artifact consumed by `download::ensure`. ~keep
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct ModelEntry {
     /// Logical model name (EasyOCR naming).
