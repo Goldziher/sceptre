@@ -9,6 +9,12 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
+# Optional deps are activated by the ort/tract/download/mcp features; the backend,
+# download, and MCP modules that consume them are still stubs, so cargo-machete would
+# otherwise flag them as unused until those implementations land. ~keep
+[package.metadata.cargo-machete]
+ignored = ["hf-hub", "ort", "rmcp", "schemars", "tokio", "tract-onnx"]
+
 [lib]
 name = "easyocr"
 
@@ -27,13 +33,19 @@ mcp = ["dep:rmcp", "dep:schemars", "dep:tokio"]
 
 [dependencies]
 dirs = { workspace = true }
+hf-hub = { workspace = true, optional = true }
 image = { workspace = true }
 ndarray = { workspace = true }
 num_cpus = { workspace = true }
+ort = { workspace = true, optional = true }
 rayon = { workspace = true }
+rmcp = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, optional = true }
 tracing = { workspace = true }
+tract-onnx = { workspace = true, optional = true }
 
 [lints]
 workspace = true

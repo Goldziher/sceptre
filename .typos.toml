@@ -1,0 +1,4 @@
+[default.extend-words]
+# EasyOCR names its threshold parameters with a `_ths` suffix (slope_ths, width_ths,
+# contrast_ths, …); keep the domain spelling rather than "correcting" it. ~keep
+ths = "ths"
