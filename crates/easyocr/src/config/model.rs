@@ -46,6 +46,14 @@ pub struct ModelConfig {
     pub backend: Backend,
     /// Override for the model cache directory (default `~/.cache/easyocr-rs`).
     pub cache_dir: Option<PathBuf>,
+    /// Override for the Hugging Face registry owner hosting the ONNX exports.
+    ///
+    /// `None` (the default) uses the upstream `itextresearch` org. Setting it
+    /// swaps only the owner segment of every model repo id, so identical exports
+    /// can be served from a mirror or private account without any code change
+    /// (the `itext-EasyOCR-<model>` repo name is preserved). See ADR 0011; the
+    /// value is validated to a safe owner form before it reaches cache paths.
+    pub registry_owner: Option<String>,
 }
 
 impl Default for ModelConfig {
@@ -54,6 +62,7 @@ impl Default for ModelConfig {
             languages: vec![Language::English],
             backend: Backend::default(),
             cache_dir: None,
+            registry_owner: None,
         }
     }
 }

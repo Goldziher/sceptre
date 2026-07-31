@@ -9,25 +9,28 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
-# Optional deps are activated by the ort/tract/download/mcp features; the backend,
-# download, and MCP modules that consume them are still stubs, so cargo-machete would
-# otherwise flag them as unused until those implementations land. ~keep
+# The tract backend and the MCP server module are still stubs, so cargo-machete would
+# otherwise flag their optional deps as unused until those implementations land. ~keep
 [package.metadata.cargo-machete]
-ignored = ["hf-hub", "ort", "rmcp", "schemars", "tokio", "tract-onnx"]
+ignored = ["rmcp", "schemars", "tokio", "tract-onnx"]
 
 [lib]
 name = "easyocr"
 
 [features]
 default = []
-# Native ONNX Runtime backend for desktop and server. ~keep
+# Native ONNX Runtime backend for desktop and server (provisioning-agnostic). ~keep
 ort = ["dep:ort"]
+# ort with a prebuilt ONNX Runtime fetched at build time — zero-config native (xberg pattern). ~keep
+ort-bundled = ["ort", "ort?/download-binaries", "ort?/tls-rustls"]
+# ort loading libonnxruntime at runtime via ORT_DYLIB_PATH — for targets without a prebuilt. ~keep
+ort-dynamic = ["ort", "ort?/load-dynamic"]
 # Pure-Rust ONNX backend for WASM and Android. ~keep
 tract = ["dep:tract-onnx"]
 # Pure-Rust native-tensor backend. ~keep
 candle = []
-# Runtime model download and caching from Hugging Face. ~keep
-download = ["dep:hf-hub"]
+# Runtime model download, caching, and sha256 verification from Hugging Face. ~keep
+download = ["dep:hf-hub", "dep:sha2"]
 # MCP (rmcp) server surface. ~keep
 mcp = ["dep:rmcp", "dep:schemars", "dep:tokio"]
 
@@ -42,6 +45,7 @@ rayon = { workspace = true }
 rmcp = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true }
+sha2 = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, optional = true }
 tracing = { workspace = true }

@@ -29,25 +29,34 @@ impl ProgressSink for NoopProgress {}
 /// The default model provider: resolves via the cache dir, downloading on miss.
 pub(crate) struct DefaultModelProvider {
     cache_dir: PathBuf,
+    registry_owner: Option<String>,
 }
 
 impl DefaultModelProvider {
-    /// Build from config, honoring `model.cache_dir` or the platform default.
+    /// Build from config, honoring `model.cache_dir` or the platform default and
+    /// the optional `model.registry_owner` re-pointing override.
     pub(crate) fn from_config(config: &OcrConfig) -> Result<Self> {
         let cache_dir = match &config.model.cache_dir {
             Some(dir) => dir.clone(),
             None => default_cache_dir()?,
         };
-        Ok(Self { cache_dir })
+        Ok(Self {
+            cache_dir,
+            registry_owner: config.model.registry_owner.clone(),
+        })
     }
 }
 
 impl ModelProvider for DefaultModelProvider {
     fn detector(&self) -> Result<PathBuf> {
-        download::ensure(&craft_entry(), &self.cache_dir)
+        download::ensure(&craft_entry(), &self.cache_dir, self.registry_owner.as_deref())
     }
 
     fn recognizer(&self, language: Language) -> Result<PathBuf> {
-        download::ensure(&recognizer_entry(language), &self.cache_dir)
+        download::ensure(
+            &recognizer_entry(language),
+            &self.cache_dir,
+            self.registry_owner.as_deref(),
+        )
     }
 }

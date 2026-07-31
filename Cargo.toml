@@ -39,8 +39,9 @@ ndarray = "0.17"
 num_cpus = "1.17"
 once_cell = "1.21"
 
-# default-features = false keeps ort off its prebuilt-binary auto-download; provisioning is explicit. ~keep
-ort = { version = "2.0.0-rc.10", default-features = false, features = ["std"] }
+# default-features = false keeps ort off its prebuilt-binary auto-download; provisioning is chosen
+# explicitly by the easyocr `ort-bundled` / `ort-dynamic` features (xberg pattern, ADR 0012). ~keep
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "api-18"] }
 rayon = "1.12"
 
 rmcp = { version = "2.2", features = ["server"] }
