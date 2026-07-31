@@ -15,6 +15,45 @@ use std::path::PathBuf;
 
 use sceptre::{BBox, ReadOptions, Reader};
 
+#[cfg(feature = "ort")]
+use sceptre::{Language, ModelProvider};
+#[cfg(feature = "ort")]
+use std::sync::Arc;
+
+/// A [`ModelProvider`] that serves local ONNX files named by environment variables,
+/// so the real engine can be exercised without any network access. `EASYOCR_TEST_
+/// CRAFT_ONNX` points at a CRAFT detector and `EASYOCR_TEST_RECOG_ONNX` at a gen2
+/// recognizer; the same recognizer serves every language group.
+#[cfg(feature = "ort")]
+struct LocalModelProvider {
+    detector: PathBuf,
+    recognizer: PathBuf,
+}
+
+#[cfg(feature = "ort")]
+impl LocalModelProvider {
+    fn from_env() -> Self {
+        let detector = std::env::var("EASYOCR_TEST_CRAFT_ONNX").expect("set EASYOCR_TEST_CRAFT_ONNX to a CRAFT model");
+        let recognizer =
+            std::env::var("EASYOCR_TEST_RECOG_ONNX").expect("set EASYOCR_TEST_RECOG_ONNX to a recognizer model");
+        Self {
+            detector: PathBuf::from(detector),
+            recognizer: PathBuf::from(recognizer),
+        }
+    }
+}
+
+#[cfg(feature = "ort")]
+impl ModelProvider for LocalModelProvider {
+    fn detector(&self) -> sceptre::Result<PathBuf> {
+        Ok(self.detector.clone())
+    }
+
+    fn recognizer(&self, _language: Language) -> sceptre::Result<PathBuf> {
+        Ok(self.recognizer.clone())
+    }
+}
+
 /// Absolute path to `tests/data/` in this crate.
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")
@@ -114,6 +153,30 @@ fn should_parse_golden_fixture_with_multiple_lines() {
     let lines = golden_lines(r#"{"lines": ["first line", "second line"]}"#);
 
     assert_eq!(lines, vec!["first line".to_string(), "second line".to_string()]);
+}
+
+#[test]
+#[cfg(feature = "ort")]
+#[ignore = "requires local CRAFT + recognizer ONNX models (EASYOCR_TEST_*_ONNX)"]
+fn should_run_the_real_engine_end_to_end_over_english_png() {
+    // Exercises the full detect → crop → recognize wiring through the public
+    // `Reader` with a local-file model provider; asserts the pipeline runs without
+    // error and produces at least one line. Text parity is the golden test's job.
+    let provider = Arc::new(LocalModelProvider::from_env());
+    let reader = Reader::builder()
+        .model_provider(provider)
+        .build()
+        .expect("building the reader with a local model provider");
+
+    let image_path = data_dir().join("images/english.png");
+    let result = reader
+        .readtext(&image_path, &ReadOptions::default())
+        .expect("the real engine runs end to end over english.png");
+
+    assert!(
+        !result.lines.is_empty(),
+        "the real engine should detect and recognize at least one line in english.png"
+    );
 }
 
 #[test]

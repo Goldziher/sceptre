@@ -13,40 +13,29 @@ use std::sync::Arc;
 use crate::config::DetectionConfig;
 use crate::error::Result;
 use crate::inference::ModelBackend;
-use crate::types::Image;
+use crate::types::{Image, QUAD_CORNERS as REGION_CORNERS};
 
 use super::group::Grouped;
 
-/// Number of corners describing a detected quadrilateral region.
-const REGION_CORNERS: usize = 4;
-
 /// Internal seam: turns a decoded image into candidate text regions.
-// The engine's pipeline body is the only caller and is still a todo, so the method reads as dead. ~keep
-#[allow(dead_code)]
 pub(crate) trait TextDetector: Send + Sync {
     /// Detect text regions in `input`.
     fn detect(&self, input: &DetectorInput) -> Result<DetectedRegions>;
 }
 
 /// Internal DTO: what the detector consumes. Borrows the decoded image.
-// Stage-boundary DTO the engine constructs when invoking the detector. ~keep
-#[allow(dead_code)]
 pub(crate) struct DetectorInput<'a> {
     /// The decoded image to detect text in.
     pub image: &'a Image,
 }
 
 /// Internal DTO: the detected regions produced by a [`TextDetector`].
-// Stage-boundary DTO the engine maps to public quads. ~keep
-#[allow(dead_code)]
 pub(crate) struct DetectedRegions {
     /// One entry per detected region.
     pub regions: Vec<DetectedRegion>,
 }
 
 /// Internal DTO: a single detected region as raw corners.
-// The crop stage that turns regions into recognizer crops is not yet implemented, so the fields read as dead. ~keep
-#[allow(dead_code)]
 pub(crate) struct DetectedRegion {
     /// Corner coordinates `[x, y]`, clockwise from top-left.
     pub corners: [[f32; 2]; REGION_CORNERS],
@@ -57,8 +46,6 @@ pub(crate) struct DetectedRegion {
 }
 
 /// The CRAFT-based text detector.
-// Only the engine's still-todo pipeline body constructs a detector, so the struct reads as dead. ~keep
-#[allow(dead_code)]
 pub(crate) struct CraftDetector {
     backend: Arc<dyn ModelBackend>,
     config: DetectionConfig,
@@ -66,8 +53,6 @@ pub(crate) struct CraftDetector {
 
 impl CraftDetector {
     /// Construct a CRAFT detector from a loaded model backend and detection config.
-    // The engine's still-todo pipeline body is the only caller, so this reads as dead. ~keep
-    #[allow(dead_code)]
     pub(crate) fn new(backend: Arc<dyn ModelBackend>, detection_config: DetectionConfig) -> Self {
         Self {
             backend,

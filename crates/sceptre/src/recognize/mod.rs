@@ -18,6 +18,6 @@ mod ctc;
 mod preprocess;
 mod recognizer;
 
-// The recognizer seam surface for the engine; some names are unreferenced while the pipeline body is a todo. ~keep
-#[allow(unused_imports)]
+pub(crate) use charset::Charset;
+pub(crate) use crop::crop_region;
 pub(crate) use recognizer::{CrnnRecognizer, RecognizedText, RegionCrop, TextRecognizer};

@@ -11,23 +11,17 @@ use ndarray::Axis;
 use crate::config::{Decoder, RecognitionConfig};
 use crate::error::{OcrError, Result};
 use crate::inference::ModelBackend;
+use crate::types::QUAD_CORNERS as REGION_CORNERS;
 
 use super::charset::Charset;
 
-/// Number of corners describing a crop's source region.
-const REGION_CORNERS: usize = 4;
-
 /// Internal seam: turns cropped regions into recognized text.
-// Seam method the engine invokes to run CRNN recognition. ~keep
-#[allow(dead_code)]
 pub(crate) trait TextRecognizer: Send + Sync {
     /// Recognize text for each crop, preserving order.
     fn recognize(&self, crops: &[RegionCrop]) -> Result<Vec<RecognizedText>>;
 }
 
 /// Internal DTO: one cropped region ready for the recognizer (grayscale, owned).
-// Stage-boundary DTO the engine constructs when feeding the recognizer. ~keep
-#[allow(dead_code)]
 pub(crate) struct RegionCrop {
     /// Crop width in pixels.
     pub width: u32,
@@ -40,8 +34,6 @@ pub(crate) struct RegionCrop {
 }
 
 /// Internal DTO: recognizer output for one crop.
-// Stage-boundary DTO the engine maps to a public text line. ~keep
-#[allow(dead_code)]
 pub(crate) struct RecognizedText {
     /// The decoded text.
     pub text: String,
@@ -54,8 +46,6 @@ pub(crate) struct RecognizedText {
 /// Runs a first greedy pass over every crop, then a contrast-adjusted second pass
 /// over the low-confidence crops (EasyOCR's `contrast_ths` retry), keeping whichever
 /// pass scored higher per crop.
-// Only the engine's still-todo pipeline body constructs a recognizer, so the struct reads as dead. ~keep
-#[allow(dead_code)]
 pub(crate) struct CrnnRecognizer {
     backend: Arc<dyn ModelBackend>,
     charset: Charset,
@@ -64,8 +54,6 @@ pub(crate) struct CrnnRecognizer {
 
 impl CrnnRecognizer {
     /// Construct a CRNN recognizer from a loaded backend, charset, and config.
-    // The engine's still-todo pipeline body is the only caller, so this reads as dead. ~keep
-    #[allow(dead_code)]
     pub(crate) fn new(backend: Arc<dyn ModelBackend>, charset: Charset, config: RecognitionConfig) -> Self {
         Self {
             backend,

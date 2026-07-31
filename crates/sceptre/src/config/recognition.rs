@@ -33,7 +33,9 @@ pub struct RecognitionConfig {
     pub contrast_ths: f32,
     /// Target contrast for the adjustment pass. Default `0.5`.
     pub adjust_contrast: f32,
-    /// Drop predictions below this confidence. Default `0.003`.
+    /// Accepted for EasyOCR parity. Default `0.003`. Upstream threads this through
+    /// `get_text` but never applies it, so like upstream it currently has no effect
+    /// on the output (every recognized region is emitted regardless of confidence).
     pub filter_ths: f32,
 }
 

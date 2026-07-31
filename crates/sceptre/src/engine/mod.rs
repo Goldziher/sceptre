@@ -28,7 +28,10 @@ pub use ocr_engine::OcrEngine;
 /// Per-call options for a [`Reader::readtext`] or [`Reader::recognize`] invocation.
 #[derive(Debug, Clone)]
 pub struct ReadOptions {
-    /// When `false`, only text is returned (locations/confidence omitted downstream).
+    /// Presentation hint consumed by callers (e.g. the CLI) when formatting output:
+    /// when `false`, only the text of each line is meant to be shown, dropping its
+    /// quad and confidence. The engine always computes full detail; this flag does
+    /// not change the [`OcrResult`] it returns.
     pub detail: bool,
 }
 

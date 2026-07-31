@@ -5,14 +5,11 @@
 //! quads use a 4-point perspective warp. Resizing to the recognizer height is
 //! handled later by the preprocessing stage.
 
-// The engine's crop stage (which turns detected regions into recognizer crops) is
-// not yet implemented, so `crop_region` and its helpers read as dead. ~keep
-#![allow(dead_code)]
-
 use image::{GrayImage, Luma};
 use imageproc::geometric_transformations::{Border, Interpolation, Projection, warp_into};
 
 use crate::error::{OcrError, Result};
+use crate::types::QUAD_CORNERS;
 
 use super::recognizer::RegionCrop;
 
@@ -24,7 +21,11 @@ const MIN_WARP_DIMENSION: i32 = 1;
 /// bounds-clamped rectangular slice; free (rotated) quads use a 4-point
 /// perspective warp. `corners` are `[TL, TR, BR, BL]` as `[x, y]`, clockwise
 /// from the top-left.
-pub(crate) fn crop_region(gray: &GrayImage, corners: &[[f32; 2]; 4], axis_aligned: bool) -> Result<RegionCrop> {
+pub(crate) fn crop_region(
+    gray: &GrayImage,
+    corners: &[[f32; 2]; QUAD_CORNERS],
+    axis_aligned: bool,
+) -> Result<RegionCrop> {
     if axis_aligned {
         crop_axis_aligned(gray, corners)
     } else {
@@ -33,7 +34,7 @@ pub(crate) fn crop_region(gray: &GrayImage, corners: &[[f32; 2]; 4], axis_aligne
 }
 
 /// Slice the bounding rectangle of `corners`, clamped to the image, row-major.
-fn crop_axis_aligned(gray: &GrayImage, corners: &[[f32; 2]; 4]) -> Result<RegionCrop> {
+fn crop_axis_aligned(gray: &GrayImage, corners: &[[f32; 2]; QUAD_CORNERS]) -> Result<RegionCrop> {
     let width = gray.width() as f32;
     let height = gray.height() as f32;
 
@@ -72,7 +73,7 @@ fn crop_axis_aligned(gray: &GrayImage, corners: &[[f32; 2]; 4]) -> Result<Region
 }
 
 /// Perspective-warp the rotated quad `corners` into an upright natural-size crop.
-fn crop_free_quad(gray: &GrayImage, corners: &[[f32; 2]; 4]) -> Result<RegionCrop> {
+fn crop_free_quad(gray: &GrayImage, corners: &[[f32; 2]; QUAD_CORNERS]) -> Result<RegionCrop> {
     let [top_left, top_right, bottom_right, bottom_left] = *corners;
 
     let width_bottom = distance(bottom_right, bottom_left).trunc() as i32;

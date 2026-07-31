@@ -14,6 +14,6 @@ mod group;
 mod postprocess;
 mod preprocess;
 
-// The detector seam surface for the engine; unreferenced while its pipeline body is a todo. ~keep
+// DetectedRegion is only referenced from unit tests; the rest feed the engine pipeline. ~keep
 #[allow(unused_imports)]
 pub(crate) use detector::{CraftDetector, DetectedRegion, DetectedRegions, DetectorInput, TextDetector};

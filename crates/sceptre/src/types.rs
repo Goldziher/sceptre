@@ -9,6 +9,10 @@ use crate::error::{OcrError, Result};
 /// Number of channels in an RGB8 pixel (red, green, blue).
 const RGB_CHANNELS: usize = 3;
 
+/// Corners describing a quadrilateral text region (clockwise from top-left). Shared
+/// by the public [`Quad`] and the internal detector/crop DTOs so they stay in sync.
+pub(crate) const QUAD_CORNERS: usize = 4;
+
 /// A decoded, owned RGB8 image — the public input DTO for the OCR engine.
 ///
 /// Decoupled from the `image` crate: callers hand the engine raw pixels or an

@@ -8,9 +8,6 @@
 //! per-language `*_char.txt` letter lists are NOT the CTC charset (they omit the
 //! digit/symbol prefix and use a different order), so we embed the full strings.
 
-// Charset lookup consumed by CTC decoding and the recognizer runner. ~keep
-#![allow(dead_code)]
-
 use crate::config::Language;
 
 /// Raw gen2 charset strings, embedded at compile time (one per recognizer).
