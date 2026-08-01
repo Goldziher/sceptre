@@ -39,9 +39,11 @@ tasks:
       - cargo build --release -p sceptre-cli --no-default-features --features ort-bundled,download
 
   release:dry-run:
-    desc: Validate that both publishable crates package cleanly, without publishing
+    desc: Validate that the library packages cleanly for crates.io, without publishing
     cmds:
-      # Library before binary — sceptre-cli depends on sceptre, so it must package first.
+      # Only the library can be dry-run-published: cargo resolves sceptre-cli's `sceptre`
+      # dependency from crates.io, where 0.1.0 does not exist yet, so a cli dry-run fails
+      # with "no matching package named sceptre". The cli's publish packaging is validated
+      # at real-publish time (after the lib lands); its build is covered by release:build. ~keep
       # ort-dynamic (not ort-bundled) avoids downloading the ONNX Runtime during the check. ~keep
       - cargo publish --dry-run -p sceptre --no-default-features --features ort-dynamic,download
-      - cargo publish --dry-run -p sceptre-cli --no-default-features --features ort-dynamic,download

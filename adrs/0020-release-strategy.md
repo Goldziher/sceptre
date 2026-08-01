@@ -42,10 +42,13 @@ dry-run**, no real publish until an explicit decision.
   A `build` matrix over `ubuntu-latest`, `macos-latest`, and `windows-latest` runs
   `task release:build` and uploads the release CLI binary as a per-OS artifact.
 - A `publish-dry-run` job runs `task release:dry-run`, which invokes
-  `cargo publish --dry-run` for `sceptre` then `sceptre-cli` (library before
-  binary). This validates that both crates package cleanly without publishing. The
-  dry-run uses the `ort-dynamic` feature so packaging does not download the ONNX
-  Runtime; `release:build` uses `ort-bundled` for a runnable binary.
+  `cargo publish --dry-run` for `sceptre` — the library. `sceptre-cli` cannot be
+  dry-run-published: cargo resolves its `sceptre` dependency from crates.io, where
+  `0.1.0` does not exist yet, so the cli dry-run fails with "no matching package
+  named sceptre". The cli's build is covered by `release:build` and its publish
+  packaging is validated at real-publish time, once the library is on crates.io.
+  The dry-run uses the `ort-dynamic` feature so packaging does not download the
+  ONNX Runtime; `release:build` uses `ort-bundled` for a runnable binary.
 - Versioning is workspace-wide, currently `0.1.0`, with Conventional-Commit-driven
   bumps and a Keep-a-Changelog `CHANGELOG.md`.
 - Model artifacts stay pinned by the existing sha256 verification in the registry;

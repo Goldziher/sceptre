@@ -69,7 +69,7 @@ tasks:
       - task: rust:release:build
 
   release:dry-run:
-    desc: Validate that sceptre then sceptre-cli package cleanly, without publishing
+    desc: Validate that the sceptre library packages cleanly for crates.io, without publishing
     cmds:
       - task: rust:release:dry-run
 
