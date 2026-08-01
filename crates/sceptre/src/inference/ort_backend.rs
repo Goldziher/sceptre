@@ -52,8 +52,7 @@ impl ModelBackend for OrtBackend {
     }
 
     fn run(&self, input: Tensor) -> Result<Tensor> {
-        let shape = shape_to_i64(input.shape());
-        let data: Vec<f32> = input.iter().copied().collect();
+        let (shape, data) = input_buffer(input);
         let value = OrtTensor::from_array((shape, data))
             .map_err(|error| inference_error("build the ONNX Runtime input tensor", error))?;
 
@@ -65,10 +64,36 @@ impl ModelBackend for OrtBackend {
             .map_err(|error| inference_error("run ONNX Runtime inference", error))?;
 
         // The EasyOCR CRAFT and gen2 CRNN graphs are single-output. ~keep
-        let (out_shape, out_data) = outputs[0]
+        let output = outputs
+            .values()
+            .next()
+            .ok_or_else(|| OcrError::inference("ONNX Runtime returned no output tensor"))?;
+        let (out_shape, out_data) = output
             .try_extract_tensor::<f32>()
             .map_err(|error| inference_error("extract the ONNX Runtime output tensor", error))?;
         array_from_output(out_shape, out_data)
+    }
+}
+
+/// Move a tensor's backing buffer out in row-major order, copy-free when possible.
+///
+/// A standard-layout tensor already stores its elements contiguously in row-major
+/// order, so its buffer is taken by move. A non-standard layout (e.g. a transposed
+/// view made owned) is materialized into a fresh contiguous buffer first — the only
+/// case that copies. Either way the returned [`Vec`] matches the tensor's logical
+/// `iter().copied()` order, so downstream inference stays bit-identical.
+fn input_buffer(input: Tensor) -> (Vec<i64>, Vec<f32>) {
+    let shape = shape_to_i64(input.shape());
+    if input.is_standard_layout() {
+        let (data, offset) = input.into_raw_vec_and_offset();
+        debug_assert!(
+            matches!(offset, None | Some(0)),
+            "a standard-layout tensor must begin at buffer offset 0"
+        );
+        (shape, data)
+    } else {
+        let (data, _) = input.as_standard_layout().into_owned().into_raw_vec_and_offset();
+        (shape, data)
     }
 }
 
@@ -131,6 +156,36 @@ mod tests {
     fn array_from_output_errors_on_length_mismatch() {
         let error = array_from_output(&[2, 2], &[1.0_f32, 2.0, 3.0]).expect_err("length mismatch must fail");
         assert!(matches!(error, OcrError::Inference { .. }));
+    }
+
+    #[test]
+    fn input_buffer_preserves_row_major_order_for_standard_layout() {
+        let expected: Vec<f32> = (0..8).map(|value| value as f32).collect();
+        let input = ArrayD::from_shape_vec(IxDyn(&[1, 2, 2, 2]), expected.clone()).expect("build the tensor");
+        let manual: Vec<f32> = input.iter().copied().collect();
+
+        let (shape, data) = input_buffer(input);
+
+        assert_eq!(shape, vec![1_i64, 2, 2, 2]);
+        assert_eq!(data, manual);
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn input_buffer_matches_iter_order_for_non_standard_layout() {
+        let base = ArrayD::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|value| value as f32).collect())
+            .expect("build the tensor");
+        let transposed = base.t().into_owned();
+        assert!(
+            !transposed.is_standard_layout(),
+            "transpose must be non-standard layout"
+        );
+        let manual: Vec<f32> = transposed.iter().copied().collect();
+
+        let (shape, data) = input_buffer(transposed);
+
+        assert_eq!(shape, vec![3_i64, 2]);
+        assert_eq!(data, manual);
     }
 
     #[test]
