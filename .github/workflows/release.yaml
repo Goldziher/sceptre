@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Install `task` on every runner so the workflow calls task targets, not raw
+      # cargo, per the pipeline-standards task-runner rule (Windows has no task). ~keep
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build release CLI
+        run: task release:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sceptre-${{ matrix.os }}
+          path: |
+            target/release/sceptre
+            target/release/sceptre.exe
+          if-no-files-found: error
+
+  publish-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # Dry-run only: validates that both crates package and publish cleanly WITHOUT
+      # pushing to crates.io. A real `cargo publish` is intentionally omitted pending
+      # the release decision recorded in ADR 0020; flipping it on is a one-line change. ~keep
+      - name: Validate crates.io packaging (dry run)
+        run: task release:dry-run

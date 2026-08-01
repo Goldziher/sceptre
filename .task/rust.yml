@@ -32,3 +32,16 @@ tasks:
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --tests -- -D warnings
       - cargo test --workspace
+
+  release:build:
+    desc: Build the release CLI binary with a bundled ONNX Runtime
+    cmds:
+      - cargo build --release -p sceptre-cli --no-default-features --features ort-bundled,download
+
+  release:dry-run:
+    desc: Validate that both publishable crates package cleanly, without publishing
+    cmds:
+      # Library before binary — sceptre-cli depends on sceptre, so it must package first.
+      # ort-dynamic (not ort-bundled) avoids downloading the ONNX Runtime during the check. ~keep
+      - cargo publish --dry-run -p sceptre --no-default-features --features ort-dynamic,download
+      - cargo publish --dry-run -p sceptre-cli --no-default-features --features ort-dynamic,download

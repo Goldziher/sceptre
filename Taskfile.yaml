@@ -63,6 +63,16 @@ tasks:
       - cargo upgrade --incompatible
       - uv lock --upgrade
 
+  release:build:
+    desc: Build the release CLI binary (bundled ONNX Runtime) for the current platform
+    cmds:
+      - task: rust:release:build
+
+  release:dry-run:
+    desc: Validate that sceptre then sceptre-cli package cleanly, without publishing
+    cmds:
+      - task: rust:release:dry-run
+
   clean:
     desc: Remove Rust build artifacts
     cmds:
