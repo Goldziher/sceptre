@@ -67,3 +67,12 @@ feature-gated option behind the `ModelBackend` seam but is not on the delivery p
 - Revisit if: `candle-onnx` upstream adds bidirectional LSTM, padded MaxPool, and a fast CPU
   LSTM kernel; or a hard no-C++-runtime requirement lands and `tract` cannot run the models —
   in which case the hand-written `candle` path becomes the fallback despite its cost.
+
+## Status update (2026-08-01)
+
+The pure-Rust `tract` backend has been implemented behind the `ModelBackend` seam
+(`inference/tract_backend.rs`) and is unit-tested; it consumes the ONNX models directly,
+so the "BiLSTM/Resize validation spike" referenced above is resolved for functional loading
+and inference. Full EasyOCR output parity across backends is still pending the golden harness
+— there is no cross-backend numeric-parity test yet. This does not change the decision:
+`candle` stays deferred and `ort` remains the primary native backend.

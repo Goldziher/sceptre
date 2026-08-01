@@ -26,4 +26,4 @@ A Cargo workspace: one rlib core plus a thin CLI. Shared metadata, dependency pi
 
 ## Repo root
 
-- `adrs/` — MADR decision records. `scripts/` — model export / golden-fixture tooling. `poly.toml`, `rustfmt.toml`, `deny.toml`, `Taskfile.yaml`, `.github/workflows/ci.yaml`.
+- `adrs/` — MADR decision records. `tools/` (Rust crate) + `python/sceptre_rs_tools/` — model export / golden-fixture tooling. `poly.toml`, `rustfmt.toml`, `deny.toml`, `Taskfile.yaml`, `.github/workflows/ci.yaml`.

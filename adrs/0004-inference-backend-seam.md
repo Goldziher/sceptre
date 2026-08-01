@@ -41,3 +41,11 @@ backend's intra-op threads.
   pure-Rust backends without touching the pipeline.
 - Good: the pure-Rust target has a defined fallback.
 - Bad: an abstraction layer plus a per-backend BiLSTM verification step.
+
+## Status update (2026-08-01)
+
+Both native backends have landed behind the `ModelBackend` seam: `ort` (default,
+`inference/ort_backend.rs`) and `tract` (pure-Rust, `inference/tract_backend.rs`),
+each feature-gated and unit-tested. `candle` remains reserved and unimplemented
+(the cargo feature is an empty stub); see
+[ADR 0009](0009-candle-evaluation-ort-primary.md) for why it is off the critical path.

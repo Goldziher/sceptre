@@ -5,8 +5,10 @@ pipeline — **CRAFT** text detection followed by **gen2 CRNN** recognition with
 CTC decoding — running the models over ONNX. Ships as a **library**, a **CLI**
 (`sceptre`), and an **MCP server**.
 
-> **Status:** early scaffolding. The workspace, configuration, and module
-> structure are in place; the pipeline stages are being implemented.
+> **Status:** working. The full CRAFT detection → CRNN + CTC recognition pipeline
+> runs end-to-end through the library, CLI, and MCP server on both the `ort`
+> (native) and `tract` (pure-Rust) backends; models download on first use.
+> Cross-backend parity fixtures against EasyOCR are opt-in and not yet generated.
 
 ## Why
 
@@ -93,7 +95,7 @@ Recognition language, backend, and thread budget follow the flags passed to
 | --- | --- |
 | `ort` | Native ONNX Runtime backend (desktop/server) |
 | `tract` | Pure-Rust ONNX backend (WASM/Android) |
-| `candle` | Pure-Rust native-tensor backend |
+| `candle` | Reserved for a future pure-Rust native-tensor backend — not yet implemented (see ADR 0009) |
 | `download` | Runtime model download + cache from Hugging Face |
 | `mcp` | MCP (`rmcp`) server surface |
 
@@ -111,6 +113,26 @@ task check    # cargo fmt + clippy -D warnings + test + poly lint
 - Coding conventions live in `.ai-rulez/` (the source of truth for the generated
   `CLAUDE.md` / `AGENTS.md`); run `ai-rulez generate` after editing them.
 - Architecture decisions are recorded under [`adrs/`](adrs/).
+
+### Benchmarks
+
+Microbenchmarks use criterion behind a `bench` cargo feature:
+
+```sh
+task bench
+cargo bench -p sceptre --features bench            # full run
+cargo bench -p sceptre --features bench -- --test  # fast smoke, skips timing
+```
+
+Results are local only — there is no CI perf gate; CI just compile-checks the benches.
+
+### Parity testing
+
+The crate ships golden/parity tests against real EasyOCR output. They skip by
+default and opt in when you supply downloaded models plus the `test_documents`
+submodule via an environment flag. See
+[`crates/sceptre/tests/data/golden/README.md`](crates/sceptre/tests/data/golden/README.md)
+for regeneration.
 
 ## License
 
