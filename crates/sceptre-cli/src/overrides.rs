@@ -4,8 +4,25 @@ use clap::Args;
 
 use sceptre::OcrConfig;
 
+/// Lower bound (inclusive) for detection probability thresholds.
+const MIN_PROBABILITY: f32 = 0.0;
+/// Upper bound (inclusive) for detection probability thresholds.
+const MAX_PROBABILITY: f32 = 1.0;
+
+/// Parse and range-check a probability threshold at the clap layer.
+///
+/// Rejects `NaN` and any value outside `[MIN_PROBABILITY, MAX_PROBABILITY]`,
+/// so out-of-range thresholds fail at parse time with a clear message.
+fn parse_probability(raw: &str) -> core::result::Result<f32, String> {
+    let value: f32 = raw.parse().map_err(|_| format!("`{raw}` is not a number"))?;
+    if value.is_nan() || !(MIN_PROBABILITY..=MAX_PROBABILITY).contains(&value) {
+        return Err(format!("must be between {MIN_PROBABILITY} and {MAX_PROBABILITY}"));
+    }
+    Ok(value)
+}
+
 /// Optional overrides applied on top of the loaded configuration.
-#[derive(Debug, Args)]
+#[derive(Debug, Default, Args)]
 pub struct OcrOverrides {
     /// Recognition languages (repeatable), e.g. `--lang english --lang latin`.
     #[arg(long = "lang", value_enum)]
@@ -20,11 +37,11 @@ pub struct OcrOverrides {
     backend: Option<BackendArg>,
 
     /// Text confidence threshold for detection.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_probability)]
     text_threshold: Option<f32>,
 
     /// Link confidence threshold for detection.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_probability)]
     link_threshold: Option<f32>,
 }
 

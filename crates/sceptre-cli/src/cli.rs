@@ -200,7 +200,8 @@ impl Cli {
             }
             #[cfg(feature = "mcp")]
             Commands::Mcp => {
-                anyhow::bail!("the MCP server is available via a future release; build with --features mcp")
+                let reader = build_reader(&OcrOverrides::default())?;
+                sceptre::mcp::serve(reader).context("running the MCP server")
             }
         }
     }

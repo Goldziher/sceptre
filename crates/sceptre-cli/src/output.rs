@@ -136,10 +136,21 @@ fn format_quad(quad: &Quad) -> String {
 }
 
 /// Human-readable label for a model role.
+///
+/// The recognizer language uses its serde snake_case token (e.g. `english`,
+/// `chinese_simplified`) so the text label matches the JSON/config spelling.
 fn role_label(role: &ModelRole) -> String {
     match role {
         ModelRole::Detector => "detector".to_string(),
-        ModelRole::Recognizer(language) => format!("recognizer:{language:?}"),
+        ModelRole::Recognizer(language) => format!("recognizer:{}", language_token(language)),
+    }
+}
+
+/// The serde snake_case token for a [`Language`], or its Debug form if serialization fails.
+fn language_token(language: &sceptre::Language) -> String {
+    match serde_json::to_value(language) {
+        Ok(serde_json::Value::String(token)) => token,
+        _ => format!("{language:?}"),
     }
 }
 
@@ -236,5 +247,17 @@ mod tests {
     #[test]
     fn should_format_quad_rounding_coordinates() {
         assert_eq!(format_quad(&sample_quad()), "1,3 11,3 11,9 1,9");
+    }
+
+    #[test]
+    fn should_label_recognizer_role_with_snake_case_language() {
+        let role = ModelRole::Recognizer(sceptre::Language::ChineseSimplified);
+        assert_eq!(role_label(&role), "recognizer:chinese_simplified");
+    }
+
+    #[test]
+    fn should_label_recognizer_role_with_lowercase_english() {
+        let role = ModelRole::Recognizer(sceptre::Language::English);
+        assert_eq!(role_label(&role), "recognizer:english");
     }
 }

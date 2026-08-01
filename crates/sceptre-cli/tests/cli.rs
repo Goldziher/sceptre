@@ -60,6 +60,15 @@ fn should_fail_recognize_on_missing_image() {
 }
 
 #[test]
+fn should_reject_out_of_range_text_threshold_at_parse() {
+    sceptre()
+        .args(["run", "some.png", "--text-threshold", "2.0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("between 0 and 1"));
+}
+
+#[test]
 fn should_list_models_offline() {
     sceptre()
         .args(["models", "list"])
