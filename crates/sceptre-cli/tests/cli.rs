@@ -97,3 +97,12 @@ fn should_strip_color_when_no_color_set() {
         .success()
         .stdout(predicate::str::contains("\u{1b}").not());
 }
+
+#[test]
+fn should_reject_out_of_range_link_threshold_at_parse() {
+    sceptre()
+        .args(["run", "some.png", "--link-threshold", "2.0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("between 0 and 1"));
+}

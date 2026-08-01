@@ -118,3 +118,23 @@ impl OcrOverrides {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_probability;
+
+    #[test]
+    fn should_accept_probabilities_within_the_unit_interval() {
+        assert_eq!(parse_probability("0.0").expect("zero is valid"), 0.0);
+        assert_eq!(parse_probability("1.0").expect("one is valid"), 1.0);
+        assert_eq!(parse_probability("0.5").expect("a mid value is valid"), 0.5);
+    }
+
+    #[test]
+    fn should_reject_out_of_range_nan_and_unparseable_probabilities() {
+        assert!(parse_probability("-0.1").is_err(), "a negative value is rejected");
+        assert!(parse_probability("1.1").is_err(), "a value above one is rejected");
+        assert!(parse_probability("nan").is_err(), "NaN is rejected");
+        assert!(parse_probability("abc").is_err(), "a non-numeric value is rejected");
+    }
+}
