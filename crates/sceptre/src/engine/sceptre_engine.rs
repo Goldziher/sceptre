@@ -49,18 +49,16 @@ impl SceptreEngine {
         }
     }
 
-    /// The recognition language group. gen2 packs each group into one recognizer, so
-    /// a single model serves the run; a request for more than one language is an error
-    /// because combined multi-language model selection is not yet implemented.
+    /// The recognizer to serve the run, resolved from the configured language set.
+    ///
+    /// Every gen2 recognizer already packs Latin/English into its charset, so English
+    /// is the common base: a set is served by the single non-English recognizer that
+    /// covers it (e.g. `[English, Korean]` → `korean_g2`, which recognizes both), and
+    /// an English-only or empty set falls back to `english_g2`. Two or more distinct
+    /// non-English languages need different models and are rejected, mirroring
+    /// EasyOCR's language-group model selection.
     fn language(&self) -> Result<Language> {
-        match self.config.model.languages.as_slice() {
-            [] => Ok(Language::default()),
-            [single] => Ok(*single),
-            _ => Err(OcrError::config(
-                "multiple recognition languages are configured, but only single-language recognition is \
-                 implemented; configure exactly one language",
-            )),
-        }
+        resolve_recognition_language(&self.config.model.languages)
     }
 
     /// Read a model file resolved by the provider and load it into the configured
@@ -165,6 +163,28 @@ impl OcrEngine for SceptreEngine {
     }
 }
 
+/// Resolve the single gen2 recognizer that serves a configured language set.
+///
+/// English is the common base every gen2 charset already covers, so the set is served
+/// by its one non-English language (`[English, Korean]` → `Korean`), or by `English`
+/// when the set is English-only or empty. Two or more distinct non-English languages
+/// need different models and are rejected (mirrors EasyOCR's group selection).
+fn resolve_recognition_language(languages: &[Language]) -> Result<Language> {
+    let non_english: Vec<Language> = languages
+        .iter()
+        .copied()
+        .filter(|language| *language != Language::English)
+        .collect();
+    match non_english.as_slice() {
+        [] => Ok(Language::English),
+        [single] => Ok(*single),
+        _ => Err(OcrError::config(format!(
+            "languages {non_english:?} require different recognizer models; configure at most one \
+             non-English language (each gen2 model already covers Latin/English)"
+        ))),
+    }
+}
+
 /// Crop every detected region from `grey`, dropping any region that produces no crop
 /// (a zero-area box after clamping, or a degenerate quad) so one bad region never
 /// aborts the whole run. Dropped regions are logged rather than silently discarded.
@@ -225,6 +245,47 @@ fn full_image_corners(width: u32, height: u32) -> [[f32; 2]; QUAD_CORNERS] {
 mod tests {
     use super::*;
     use crate::detect::DetectedRegion;
+
+    #[test]
+    fn resolve_language_uses_the_non_english_group_for_a_mixed_set() {
+        // [English, Korean] is served by korean_g2, whose charset covers both. ~keep
+        assert_eq!(
+            resolve_recognition_language(&[Language::English, Language::Korean]).unwrap(),
+            Language::Korean
+        );
+        assert_eq!(
+            resolve_recognition_language(&[Language::Korean, Language::English]).unwrap(),
+            Language::Korean
+        );
+    }
+
+    #[test]
+    fn resolve_language_falls_back_to_english_for_english_only_or_empty() {
+        assert_eq!(resolve_recognition_language(&[]).unwrap(), Language::English);
+        assert_eq!(
+            resolve_recognition_language(&[Language::English]).unwrap(),
+            Language::English
+        );
+    }
+
+    #[test]
+    fn resolve_language_keeps_a_single_non_english_group() {
+        assert_eq!(
+            resolve_recognition_language(&[Language::Latin]).unwrap(),
+            Language::Latin
+        );
+        assert_eq!(
+            resolve_recognition_language(&[Language::Japanese]).unwrap(),
+            Language::Japanese
+        );
+    }
+
+    #[test]
+    fn resolve_language_rejects_two_distinct_non_english_groups() {
+        let error = resolve_recognition_language(&[Language::Korean, Language::Japanese])
+            .expect_err("korean + japanese need different models");
+        assert!(matches!(error, OcrError::Config { .. }));
+    }
 
     fn crop_with_corners(corners: [[f32; 2]; QUAD_CORNERS]) -> RegionCrop {
         RegionCrop {
