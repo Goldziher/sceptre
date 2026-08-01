@@ -14,9 +14,17 @@ publish = false
 name = "sceptre-tools"
 path = "src/main.rs"
 
+[features]
+default = []
+# Enables the `snapshot` subcommand, which runs the real sceptre pipeline (ort ~keep
+# backend + model download) to regenerate the sceptre-snapshot golden fixtures. ~keep
+ort = ["dep:sceptre", "dep:serde_json"]
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+sceptre = { workspace = true, optional = true, features = ["ort-bundled", "download"] }
+serde_json = { workspace = true, optional = true }
 
 [lints]
 workspace = true
