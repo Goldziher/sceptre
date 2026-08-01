@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn should_weight_green_above_red_above_blue() {
-        // Pure green must be brighter than pure red, which must beat pure blue,
+        // Pure green must be brighter than pure red, which must beat pure blue, ~keep
         // matching the BT.601 ordering GREEN_WEIGHT > RED_WEIGHT > BLUE_WEIGHT. ~keep
         let image = rgb_image(3, 1, vec![255, 0, 0, 0, 255, 0, 0, 0, 255]);
         let grey = to_grayscale(&image).expect("grayscale succeeds");
@@ -84,8 +84,8 @@ mod tests {
 
     #[test]
     fn should_match_opencv_fixed_point_luma_for_known_pixel() {
-        // OpenCV: (100*4899 + 150*9617 + 200*1868 + 8192) >> 14
-        //       = (489900 + 1442550 + 373600 + 8192) >> 14 = 2314242 >> 14 = 141.
+        // OpenCV: (100*4899 + 150*9617 + 200*1868 + 8192) >> 14 ~keep
+        //       = (489900 + 1442550 + 373600 + 8192) >> 14 = 2314242 >> 14 = 141. ~keep
         let image = rgb_image(1, 1, vec![100, 150, 200]);
         let grey = to_grayscale(&image).expect("grayscale succeeds");
         assert_eq!(grey.get_pixel(0, 0)[0], 141);

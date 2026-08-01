@@ -78,7 +78,7 @@ impl SceptreEngine {
             return Ok(backend.clone());
         }
         let backend = self.load(self.models.detector()?)?;
-        // A concurrent first call may win the race to `set`; both loaded sessions are
+        // A concurrent first call may win the race to `set`; both loaded sessions are ~keep
         // valid, so the loser just uses its own copy and drops the cache write. ~keep
         let _ = self.detector_cache.set(backend.clone());
         Ok(backend)
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn should_emit_every_line_including_low_confidence_matching_upstream() {
-        // EasyOCR applies no confidence filter, so even a very low-confidence line is
+        // EasyOCR applies no confidence filter, so even a very low-confidence line is ~keep
         // emitted; sceptre must not silently drop it. ~keep
         let crops = vec![
             crop_with_corners([[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]]),
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn should_emit_empty_all_blank_line_matching_upstream() {
-        // An all-blank CTC decode yields empty text at confidence 0.0. EasyOCR still
+        // An all-blank CTC decode yields empty text at confidence 0.0. EasyOCR still ~keep
         // appends it, so sceptre must too (parity over cleanliness). ~keep
         let crops = vec![crop_with_corners([[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]])];
         let texts = vec![text("", 0.0)];
@@ -294,12 +294,12 @@ mod tests {
         let grey = GrayImage::from_raw(4, 3, (0..12u8).collect()).expect("valid grayscale buffer");
         let regions = DetectedRegions {
             regions: vec![
-                // A valid 2x2 window.
+                // A valid 2x2 window. ~keep
                 DetectedRegion {
                     corners: [[1.0, 0.0], [3.0, 0.0], [3.0, 2.0], [1.0, 2.0]],
                     axis_aligned: true,
                 },
-                // A zero-area box that clamps to nothing and must be dropped.
+                // A zero-area box that clamps to nothing and must be dropped. ~keep
                 DetectedRegion {
                     corners: [[2.0, 1.0], [2.0, 1.0], [2.0, 1.0], [2.0, 1.0]],
                     axis_aligned: true,

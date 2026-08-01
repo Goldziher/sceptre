@@ -23,6 +23,19 @@ disable = ["MD013", "MD024", "MD033", "MD036", "MD041"]
 [fmt.markdown.rumdl]
 disable = ["MD013", "MD024", "MD033", "MD036", "MD041"]
 
+[lint.uncomment]
+enabled = true
+code_only = false
+remove_todos = false
+remove_fixme = false
+remove_docs = false
+use_default_ignores = true
+preserve_patterns = ["SAFETY", "HACK", "WORKAROUND", "NOTE"]
+
+[per-file-ignores]
+"basemind.toml" = ["comment", "doc-comment"]
+"**/*.generated.*" = ["comment", "doc-comment"]
+
 [hooks]
 stages = ["pre-commit"]
 

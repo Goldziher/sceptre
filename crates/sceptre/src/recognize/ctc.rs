@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn should_decode_two_distinct_timesteps_into_two_chars() {
-        // Columns are [blank, class 1 = '0', class 2 = '1']; each timestep favors a
+        // Columns are [blank, class 1 = '0', class 2 = '1']; each timestep favors a ~keep
         // different non-blank class, so no collapse occurs. ~keep
         let logits = arr2(&[[0.0f32, 5.0, 0.0], [0.0, 0.0, 5.0]]);
         let decoded = decode_greedy(&logits, &english(), &[]);
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn should_compute_exact_custom_mean_confidence() {
-        // Softmax([ln 0.25, ln 0.75]) = [0.25, 0.75]; argmax is class 1 ('0') at
+        // Softmax([ln 0.25, ln 0.75]) = [0.25, 0.75]; argmax is class 1 ('0') at ~keep
         // prob 0.75, so custom_mean([0.75]) = 0.75.powf(2.0 / sqrt(1)) = 0.5625. ~keep
         let logits = arr2(&[[(0.25f32).ln(), (0.75f32).ln()]]);
         let decoded = decode_greedy(&logits, &english(), &[]);

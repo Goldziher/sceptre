@@ -134,7 +134,7 @@ fn verify_sha256(bytes: &[u8], expected_sha256: &str, model_name: &str) -> Resul
 fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    // Per-process-and-call-unique temp name so concurrent downloads of the same
+    // Per-process-and-call-unique temp name so concurrent downloads of the same ~keep
     // model never share (and clobber) one in-flight temp file. ~keep
     static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 

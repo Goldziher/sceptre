@@ -146,7 +146,7 @@ mod tests {
     #[test]
     #[cfg(not(feature = "download"))]
     fn download_models_errors_without_the_download_feature() {
-        // Without the `download` feature the underlying fetch cannot run, so the
+        // Without the `download` feature the underlying fetch cannot run, so the ~keep
         // whole prefetch fails with an `OcrError::Model`. ~keep
         let config = config_with_empty_cache(vec![Language::English]);
         let error = download_models(&config).expect_err("download requires the `download` feature");

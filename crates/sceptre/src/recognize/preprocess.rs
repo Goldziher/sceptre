@@ -138,8 +138,8 @@ mod tests {
 
     #[test]
     fn portrait_crop_resizes_to_narrow_strip_matching_align_collate() {
-        // w=10, h=40 (w < h): AlignCollate fixes height to 64 and width to
-        // ceil(64 * 10/40) = 16 — a narrow strip, matching EasyOCR's final output
+        // w=10, h=40 (w < h): AlignCollate fixes height to 64 and width to ~keep
+        // ceil(64 * 10/40) = 16 — a narrow strip, matching EasyOCR's final output ~keep
         // (get_image_list's intermediate resize does not change these dimensions). ~keep
         let crop = make_crop(10, 40, 128);
         let tensor = prepare_batch(&[crop]).expect("portrait crop should preprocess");

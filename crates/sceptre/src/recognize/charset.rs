@@ -37,7 +37,7 @@ impl Charset {
             Language::Korean => KOREAN_G2,
             Language::Cyrillic => CYRILLIC_G2,
         };
-        // Guard against a stray trailing newline (LF or CRLF) from asset tooling;
+        // Guard against a stray trailing newline (LF or CRLF) from asset tooling; ~keep
         // the gen2 charset itself never contains a newline or carriage return. ~keep
         let raw = raw.trim_end_matches(['\n', '\r']);
         Self {

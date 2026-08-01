@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn should_bound_segmap_to_bbox_matching_whole_map_points() {
-        // Two separated blobs; the bounded per-component build (segmap + dilation +
+        // Two separated blobs; the bounded per-component build (segmap + dilation + ~keep
         // point collection) must yield identical global points to the whole-map path. ~keep
         let mut region = Array2::<f32>::zeros((30, 24));
         for row in 2..8 {

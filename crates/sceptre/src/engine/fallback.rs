@@ -36,7 +36,7 @@ impl FallbackEngine {
 
 impl std::fmt::Debug for FallbackEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `dyn OcrEngine` is not `Debug`, so summarize by arity rather than contents.
+        // `dyn OcrEngine` is not `Debug`, so summarize by arity rather than contents. ~keep
         f.debug_struct("FallbackEngine")
             .field("engines", &self.engines.len())
             .finish()
@@ -54,9 +54,9 @@ impl OcrEngine for FallbackEngine {
                 Err(error) => last_error = Some(error),
             }
         }
-        // No engine produced a non-empty result. Prefer surfacing an error when one
-        // occurred; otherwise return the last (empty) success. The non-empty engine
-        // list guaranteed by `new` means at least one branch is populated.
+        // No engine produced a non-empty result. Prefer surfacing an error when one ~keep
+        // occurred; otherwise return the last (empty) success. The non-empty engine ~keep
+        // list guaranteed by `new` means at least one branch is populated. ~keep
         if let Some(error) = last_error {
             return Err(error);
         }

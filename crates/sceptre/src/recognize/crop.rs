@@ -94,7 +94,7 @@ fn crop_free_quad(gray: &GrayImage, corners: &[[f32; 2]; QUAD_CORNERS]) -> Resul
     ];
     let destination = [(0.0, 0.0), (last_x, 0.0), (last_x, last_y), (0.0, last_y)];
 
-    // `from_control_points(source, destination)` maps input->output; `warp_into`
+    // `from_control_points(source, destination)` maps input->output; `warp_into` ~keep
     // inverts it internally so each output pixel samples its input pre-image. ~keep
     let projection = Projection::from_control_points(source, destination)
         .ok_or_else(|| OcrError::image("free-quad corners do not form an invertible perspective"))?;
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn should_slice_expected_sub_rectangle_when_axis_aligned() {
         let image = sample_image();
-        // Columns 1..3, rows 0..2 -> a 2x2 window.
+        // Columns 1..3, rows 0..2 -> a 2x2 window. ~keep
         let corners = [[1.0, 0.0], [3.0, 0.0], [3.0, 2.0], [1.0, 2.0]];
 
         let crop = crop_region(&image, &corners, true).expect("crop succeeds");
@@ -169,14 +169,14 @@ mod tests {
     #[test]
     fn should_clamp_axis_aligned_corners_that_exceed_the_image() {
         let image = sample_image();
-        // Requests x up to 10 and y up to 8; must clamp to width 4, height 3.
+        // Requests x up to 10 and y up to 8; must clamp to width 4, height 3. ~keep
         let corners = [[2.0, 1.0], [10.0, 1.0], [10.0, 8.0], [2.0, 8.0]];
 
         let crop = crop_region(&image, &corners, true).expect("crop succeeds");
 
         assert_eq!(crop.width, 2);
         assert_eq!(crop.height, 2);
-        // Rows 1..3, cols 2..4: (12,13) then (22,23).
+        // Rows 1..3, cols 2..4: (12,13) then (22,23). ~keep
         assert_eq!(crop.gray, vec![12, 13, 22, 23]);
     }
 
@@ -205,9 +205,9 @@ mod tests {
     #[test]
     fn should_reproduce_source_when_rectangular_quad_warped() {
         let image = horizontal_gradient();
-        // A perfectly rectangular quad passed as a free quad must warp to ~the
-        // same pixels as the axis-aligned slice. A flipped or transposed warp
-        // direction would sample outside and collapse to the border (0).
+        // A perfectly rectangular quad passed as a free quad must warp to ~the ~keep
+        // same pixels as the axis-aligned slice. A flipped or transposed warp ~keep
+        // direction would sample outside and collapse to the border (0). ~keep
         let corners = [[0.0, 0.0], [9.0, 0.0], [9.0, 3.0], [0.0, 3.0]];
 
         let warped = crop_region(&image, &corners, false).expect("warp succeeds");
@@ -217,8 +217,8 @@ mod tests {
         assert_eq!(warped.height, sliced.height, "warp height matches slice height");
         assert!(warped.gray.iter().any(|&p| p > 0), "warp is not a blank border fill");
 
-        // Correct direction reproduces the horizontal gradient; EasyOCR's
-        // `maxWidth - 1` destination introduces at most ~1 level of resample.
+        // Correct direction reproduces the horizontal gradient; EasyOCR's ~keep
+        // `maxWidth - 1` destination introduces at most ~1 level of resample. ~keep
         for (index, (&actual, &expected)) in warped.gray.iter().zip(sliced.gray.iter()).enumerate() {
             let diff = (actual as i32 - expected as i32).abs();
             assert!(diff <= 1, "pixel {index}: warped {actual} vs sliced {expected}");

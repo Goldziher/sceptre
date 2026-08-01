@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn should_run_full_pipeline_and_produce_regions() {
-        // Channel-last [1, 8, 8, 2]: a solid region block (rows 1..7, cols 1..7)
+        // Channel-last [1, 8, 8, 2]: a solid region block (rows 1..7, cols 1..7) ~keep
         // over zero link yields one connected component past the thresholds. ~keep
         let (height, width) = (8usize, 8usize);
         let mut output = ArrayD::<f32>::zeros(IxDyn(&[1, height, width, 2]));

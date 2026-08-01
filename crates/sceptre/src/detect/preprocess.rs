@@ -167,7 +167,7 @@ mod tests {
         let image = solid_image(50, 50, [255, 255, 255]);
         let prepared = prepare(&image, 2560, 1.0).expect("prepare succeeds");
 
-        // Pixel (63, 63) is padding (image is 50x50); EasyOCR normalizes the zero
+        // Pixel (63, 63) is padding (image is 50x50); EasyOCR normalizes the zero ~keep
         // canvas, so it holds (0 - mean*255)/(std*255), not 0.0. ~keep
         let expected = (0.0 - 0.485 * 255.0) / (0.229 * 255.0);
         assert!((prepared.tensor[[0, 0, 63, 63]] - expected).abs() < 1e-4);
@@ -175,8 +175,8 @@ mod tests {
 
     #[test]
     fn should_truncate_fractional_target_dimensions() {
-        // 50w x 15h, mag_ratio 0.7 (target < canvas so ratio == 0.7): target_h = 15*0.7
-        // = 10.5. Python int() truncates to 10; round() would give 11. With target_h 10,
+        // 50w x 15h, mag_ratio 0.7 (target < canvas so ratio == 0.7): target_h = 15*0.7 ~keep
+        // = 10.5. Python int() truncates to 10; round() would give 11. With target_h 10, ~keep
         // row 10 is padding (normalized zero); with 11 it would be a real white pixel. ~keep
         let image = solid_image(50, 15, [255, 255, 255]);
         let prepared = prepare(&image, 2560, 0.7).expect("prepare succeeds");
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn should_match_per_pixel_formula_in_real_and_padding_regions() {
-        // 3x2 resized image padded to 4x4: assert exact f32 equality against the old
+        // 3x2 resized image padded to 4x4: assert exact f32 equality against the old ~keep
         // per-pixel formula across the whole tensor, covering real and padding pixels. ~keep
         let mut resized = RgbImage::new(3, 2);
         resized.put_pixel(0, 0, image::Rgb([10, 20, 30]));

@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn should_merge_line_of_three_and_keep_distant_line_separate() {
-        // Exercises the running-mean accumulation: three adjacent same-height boxes
+        // Exercises the running-mean accumulation: three adjacent same-height boxes ~keep
         // accumulate into one line/group, a fourth far below forms its own line. ~keep
         let config = config_with(0.0);
         let a = axis_box(10.0, 50.0, 10.0, 30.0);

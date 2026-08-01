@@ -137,7 +137,7 @@ fn should_score_half_overlapping_boxes_as_iou_one_third() {
         y_max: 1.0,
     };
 
-    // intersection = 1x1 = 1, union = 2 + 2 - 1 = 3.
+    // intersection = 1x1 = 1, union = 2 + 2 - 1 = 3. ~keep
     assert_eq!(iou(a, b), 1.0 / 3.0);
 }
 
@@ -159,9 +159,9 @@ fn should_parse_golden_fixture_with_multiple_lines() {
 #[cfg(feature = "ort")]
 #[ignore = "requires local CRAFT + recognizer ONNX models (EASYOCR_TEST_*_ONNX)"]
 fn should_run_the_real_engine_end_to_end_over_english_png() {
-    // Exercises the full detect → crop → recognize wiring through the public
-    // `Reader` with a local-file model provider; asserts the pipeline runs without
-    // error and produces at least one line. Text parity is the golden test's job.
+    // Exercises the full detect → crop → recognize wiring through the public ~keep
+    // `Reader` with a local-file model provider; asserts the pipeline runs without ~keep
+    // error and produces at least one line. Text parity is the golden test's job. ~keep
     let provider = Arc::new(LocalModelProvider::from_env());
     let reader = Reader::builder()
         .model_provider(provider)
@@ -199,7 +199,7 @@ fn should_match_golden_text_for_english_png() {
         "recognized text must match the golden fixture exactly"
     );
 
-    // Once detection produces real quads, extend this with a per-line box IoU
-    // check against expected boxes recorded alongside `expected_lines`, using
-    // the `iou` helper above and the EasyOCR parity threshold (>= 0.5).
+    // Once detection produces real quads, extend this with a per-line box IoU ~keep
+    // check against expected boxes recorded alongside `expected_lines`, using ~keep
+    // the `iou` helper above and the EasyOCR parity threshold (>= 0.5). ~keep
 }

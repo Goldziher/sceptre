@@ -56,7 +56,7 @@ impl ModelBackend for OrtBackend {
         let value = OrtTensor::from_array((shape, data))
             .map_err(|error| inference_error("build the ONNX Runtime input tensor", error))?;
 
-        // A panic in a prior `run` poisons the mutex; recover the guard so one bad
+        // A panic in a prior `run` poisons the mutex; recover the guard so one bad ~keep
         // call does not permanently brick every later inference on this backend. ~keep
         let mut session = self.session.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let outputs = session

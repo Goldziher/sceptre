@@ -95,7 +95,7 @@ impl CrnnRecognizer {
         let adjusted: Vec<RegionCrop> = indices.iter().map(|&index| self.adjust_crop(&crops[index])).collect();
         let second = self.run_pass(&adjusted, ignore)?;
         for (candidate, &index) in second.into_iter().zip(indices.iter()) {
-            // Ties go to the second (contrast-adjusted) pass, matching EasyOCR's
+            // Ties go to the second (contrast-adjusted) pass, matching EasyOCR's ~keep
             // `if pred1 > pred2 { pred1 } else { pred2 }`. ~keep
             if candidate.confidence >= results[index].confidence {
                 results[index] = candidate;
@@ -219,8 +219,8 @@ mod tests {
 
     #[test]
     fn should_replace_low_confidence_result_when_second_pass_scores_higher() {
-        // First pass: softmax([0.2, 0.5, 0.3]) -> class 1 ('0') at 0.5, custom_mean 0.25.
-        // Second pass: softmax([0.05, 0.05, 0.9]) -> class 2 ('1') at 0.9, custom_mean 0.81.
+        // First pass: softmax([0.2, 0.5, 0.3]) -> class 1 ('0') at 0.5, custom_mean 0.25. ~keep
+        // Second pass: softmax([0.05, 0.05, 0.9]) -> class 2 ('1') at 0.9, custom_mean 0.81. ~keep
         // contrast_ths 0.9 forces the retry; 0.81 > 0.25 replaces the result with "1". ~keep
         let first = logits([(0.2f32).ln(), (0.5f32).ln(), (0.3f32).ln()]);
         let second = logits([(0.05f32).ln(), (0.05f32).ln(), (0.9f32).ln()]);
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn should_keep_first_result_when_second_pass_scores_lower() {
-        // First pass strong on class 2 ('1') at 0.9 (custom_mean 0.81); the retry is
+        // First pass strong on class 2 ('1') at 0.9 (custom_mean 0.81); the retry is ~keep
         // still triggered by contrast_ths 0.95 but its weaker class 1 result loses. ~keep
         let first = logits([(0.05f32).ln(), (0.05f32).ln(), (0.9f32).ln()]);
         let second = logits([(0.2f32).ln(), (0.5f32).ln(), (0.3f32).ln()]);

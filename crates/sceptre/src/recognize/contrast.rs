@@ -89,10 +89,10 @@ mod tests {
 
     #[test]
     fn should_compute_linear_interpolated_percentiles_and_contrast() {
-        // sorted: [0, 50, 100, 150, 200], n = 5.
-        // high (90th): rank = 0.9 * 4 = 3.6 -> 150 + (200-150)*0.6 = 180.
-        // low  (10th): rank = 0.1 * 4 = 0.4 ->   0 + (50-0)*0.4   = 20.
-        // contrast = (180 - 20) / max(10, 200) = 160 / 200 = 0.8.
+        // sorted: [0, 50, 100, 150, 200], n = 5. ~keep
+        // high (90th): rank = 0.9 * 4 = 3.6 -> 150 + (200-150)*0.6 = 180. ~keep
+        // low  (10th): rank = 0.1 * 4 = 0.4 ->   0 + (50-0)*0.4   = 20. ~keep
+        // contrast = (180 - 20) / max(10, 200) = 160 / 200 = 0.8. ~keep
         let gray = [0u8, 50, 100, 150, 200];
         let (contrast, high, low) = contrast_grey(&gray);
         assert_close(high, 180.0, "high");
@@ -102,17 +102,17 @@ mod tests {
 
     #[test]
     fn should_stretch_low_contrast_input() {
-        // sorted: [70,80,90,100,110,120,130,140,150,180,200], n = 11.
-        // high (90th): rank = 0.9 * 10 = 9 -> 180. low (10th): rank = 1 -> 80.
-        // contrast = (180 - 80) / max(10, 260) = 100 / 260 ~= 0.3846 < 0.4 -> stretch.
-        // ratio = 200 / max(10, 100) = 2.0; v -> (v - 80 + 25) * 2, clamped.
+        // sorted: [70,80,90,100,110,120,130,140,150,180,200], n = 11. ~keep
+        // high (90th): rank = 0.9 * 10 = 9 -> 180. low (10th): rank = 1 -> 80. ~keep
+        // contrast = (180 - 80) / max(10, 260) = 100 / 260 ~= 0.3846 < 0.4 -> stretch. ~keep
+        // ratio = 200 / max(10, 100) = 2.0; v -> (v - 80 + 25) * 2, clamped. ~keep
         let gray = [70u8, 80, 90, 100, 110, 120, 130, 140, 150, 180, 200];
         let (contrast, _, _) = contrast_grey(&gray);
         assert!(contrast < 0.4, "input must be low-contrast, got {contrast}");
         let adjusted = adjust_contrast_grey(&gray, 0.4);
         let expected = vec![30u8, 50, 70, 90, 110, 130, 150, 170, 190, 250, 255];
         assert_eq!(adjusted, expected);
-        // Spread widens from 130 (200-70) to 225 (255-30).
+        // Spread widens from 130 (200-70) to 225 (255-30). ~keep
         let input_spread = *gray.iter().max().unwrap() - *gray.iter().min().unwrap();
         let output_spread = *adjusted.iter().max().unwrap() - *adjusted.iter().min().unwrap();
         assert!(
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn should_return_high_contrast_input_unchanged() {
-        // contrast = 0.8 >= target 0.4 -> pixels returned unchanged.
+        // contrast = 0.8 >= target 0.4 -> pixels returned unchanged. ~keep
         let gray = [0u8, 50, 100, 150, 200];
         let adjusted = adjust_contrast_grey(&gray, 0.4);
         assert_eq!(adjusted, gray.to_vec());

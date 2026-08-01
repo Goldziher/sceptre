@@ -133,8 +133,8 @@ fn should_return_region_quads_from_detect() {
 
 #[test]
 fn should_merge_lines_into_one_from_recognize_line() {
-    // Distinct confidences whose arithmetic mean is exact in f32 (0.5 + 0.75) / 2 == 0.625,
-    // so the assertion below fails for any wrong aggregation (sum, first, max, ...).
+    // Distinct confidences whose arithmetic mean is exact in f32 (0.5 + 0.75) / 2 == 0.625, ~keep
+    // so the assertion below fails for any wrong aggregation (sum, first, max, ...). ~keep
     let reader = Reader::builder()
         .engine(FakeEngine::lines(vec![
             text_line_with_confidence("hello", 0.5),
@@ -155,7 +155,7 @@ fn should_merge_lines_into_one_from_recognize_line() {
         line.confidence, 0.625,
         "merged confidence must be the arithmetic mean of the line confidences"
     );
-    // `tiny_image()` is 1x1, so the merged quad must span the whole image.
+    // `tiny_image()` is 1x1, so the merged quad must span the whole image. ~keep
     assert_eq!(
         line.quad.points,
         [
@@ -294,8 +294,8 @@ fn should_return_last_error_when_all_engines_fail() {
 
 #[test]
 fn should_return_error_when_earlier_engine_errors_and_later_engine_is_empty() {
-    // An error anywhere in the chain is preferred over a trailing empty success,
-    // regardless of position — the caller learns something went wrong.
+    // An error anywhere in the chain is preferred over a trailing empty success, ~keep
+    // regardless of position — the caller learns something went wrong. ~keep
     let fallback =
         FallbackEngine::new(vec![FakeEngine::error("boom"), FakeEngine::empty()]).expect("non-empty engine list");
 

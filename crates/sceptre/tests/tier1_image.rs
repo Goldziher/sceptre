@@ -16,10 +16,10 @@ fn image_path(name: &str) -> std::path::PathBuf {
 /// A tiny, hand-computed 2x2 RGB8 buffer: red, green, blue, white pixels, row-major.
 fn checkerboard_2x2_rgb8() -> Vec<u8> {
     vec![
-        255, 0, 0, // (0,0) red
-        0, 255, 0, // (1,0) green
-        0, 0, 255, // (0,1) blue
-        255, 255, 255, // (1,1) white
+        255, 0, 0, // (0,0) red ~keep
+        0, 255, 0, // (1,0) green ~keep
+        0, 0, 255, // (0,1) blue ~keep
+        255, 255, 255, // (1,1) white ~keep
     ]
 }
 
@@ -35,7 +35,7 @@ fn should_round_trip_rgb8_pixels_when_length_matches_dimensions() {
 
 #[test]
 fn should_return_error_when_rgb8_length_does_not_match_dimensions() {
-    // A 2x2 RGB8 buffer needs 12 bytes; 10 is short by one pixel.
+    // A 2x2 RGB8 buffer needs 12 bytes; 10 is short by one pixel. ~keep
     let too_short = vec![0u8; 10];
 
     let result = Image::from_rgb8(2, 2, too_short);
