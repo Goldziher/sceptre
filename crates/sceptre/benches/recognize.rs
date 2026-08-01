@@ -8,8 +8,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use image::{DynamicImage, GrayImage, RgbImage};
 use sceptre::bench::{
-    ctc_decode_for_benchmark, english_class_count, load_corpus_image, recognize_crop_preprocess_for_benchmark,
-    synthetic_logits,
+    ctc_decode_for_benchmark, ctc_decode_reference_for_benchmark, english_class_count, load_corpus_image,
+    recognize_crop_preprocess_for_benchmark, recognize_crop_preprocess_reference_for_benchmark, synthetic_logits,
 };
 
 /// Timesteps in the synthetic logits fed to the CTC decode bench.
@@ -46,15 +46,21 @@ fn region_corners(gray: &GrayImage) -> [[f32; 2]; 4] {
 fn bench_crop_preprocess(criterion: &mut Criterion) {
     let gray = corpus_gray("images/english_and_korean.png");
     let corners = region_corners(&gray);
-    criterion.bench_function("recognize/crop_preprocess", |b| {
+    criterion.bench_function("recognize/crop_preprocess/optimized", |b| {
         b.iter(|| recognize_crop_preprocess_for_benchmark(&gray, &corners));
+    });
+    criterion.bench_function("recognize/crop_preprocess/reference", |b| {
+        b.iter(|| recognize_crop_preprocess_reference_for_benchmark(&gray, &corners));
     });
 }
 
 fn bench_ctc_decode(criterion: &mut Criterion) {
     let logits = synthetic_logits(TIMESTEPS, english_class_count());
-    criterion.bench_function("recognize/ctc_decode", |b| {
+    criterion.bench_function("recognize/ctc_decode/optimized", |b| {
         b.iter(|| ctc_decode_for_benchmark(&logits));
+    });
+    criterion.bench_function("recognize/ctc_decode/reference", |b| {
+        b.iter(|| ctc_decode_reference_for_benchmark(&logits));
     });
 }
 

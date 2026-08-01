@@ -32,6 +32,17 @@ pub(crate) fn bench_preprocess(
     Ok(preprocess::prepare(image, canvas_size, mag_ratio)?.tensor)
 }
 
+/// Reference-implementation twin of [`bench_preprocess`] driving the pre-optimization
+/// channel-strided `get_pixel` normalize, for the A/B benchmark baseline (ADR 0019).
+#[cfg(feature = "bench")]
+pub(crate) fn bench_preprocess_reference(
+    image: &crate::types::Image,
+    canvas_size: u32,
+    mag_ratio: f32,
+) -> crate::error::Result<crate::inference::Tensor> {
+    Ok(preprocess::prepare_reference(image, canvas_size, mag_ratio)?.tensor)
+}
+
 /// Run the detection postprocess stage (box extraction + coordinate adjustment)
 /// on heat-maps and return the adjusted boxes. Crate-internal `bench` shim.
 #[cfg(feature = "bench")]

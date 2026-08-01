@@ -66,6 +66,33 @@ pub(super) fn prepare(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result
     })
 }
 
+/// Reference variant of [`prepare`] that normalizes via
+/// [`normalize_into_tensor_reference`]; retained for the A/B benchmark baseline.
+/// The resize and padding are shared with [`prepare`]; only the normalize path
+/// differs.
+#[cfg(feature = "bench")]
+pub(super) fn prepare_reference(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result<Prepared> {
+    let width = image.width();
+    let height = image.height();
+    if width == 0 || height == 0 {
+        return Err(OcrError::image("cannot preprocess an image with zero width or height"));
+    }
+
+    let (ratio, target_h, target_w) = resize_dimensions(height, width, canvas_size, mag_ratio);
+    let source = RgbImage::from_raw(width, height, image.as_rgb8().to_vec())
+        .ok_or_else(|| OcrError::image("failed to build RgbImage from raw RGB8 buffer"))?;
+    let resized = resize(&source, target_w, target_h, FilterType::Triangle);
+
+    let padded_h = pad_to_multiple(target_h, ALIGN);
+    let padded_w = pad_to_multiple(target_w, ALIGN);
+    let tensor = normalize_into_tensor_reference(&resized, padded_h, padded_w)?;
+
+    Ok(Prepared {
+        tensor,
+        inv_ratio: 1.0 / ratio,
+    })
+}
+
 /// Compute the resize ratio and target height/width, following `resize_aspect_ratio`:
 /// `target = min(mag_ratio * max(h, w), canvas_size)`, `ratio = target / max(h, w)`.
 /// Target dimensions truncate (matching Python `int()`) and clamp to at least one pixel.
@@ -93,6 +120,38 @@ fn pad_to_multiple(value: u32, align: u32) -> u32 {
 /// the normalized value of a raw zero, `(0 - mean) / std` (matching EasyOCR, which
 /// normalizes the whole zero-padded canvas — see [`prepare`]).
 fn normalize_into_tensor(resized: &RgbImage, padded_h: u32, padded_w: u32) -> Result<Tensor> {
+    let (target_w, target_h) = resized.dimensions();
+    let plane = (padded_h * padded_w) as usize;
+    let mut tensor = Tensor::zeros(IxDyn(&[BATCH, CHANNELS, padded_h as usize, padded_w as usize]));
+    let data = tensor
+        .as_slice_mut()
+        .ok_or_else(|| OcrError::inference("detection tensor is not in contiguous standard layout"))?;
+    let raw = resized.as_raw();
+    let padded_w = padded_w as usize;
+    let target_w = target_w as usize;
+    let row_stride = target_w * CHANNELS;
+    for channel in 0..CHANNELS {
+        let mean = IMAGENET_MEAN[channel] * U8_MAX;
+        let std = IMAGENET_STD[channel] * U8_MAX;
+        let channel_plane = &mut data[channel * plane..(channel + 1) * plane];
+        channel_plane.fill((0.0 - mean) / std);
+        for y in 0..target_h as usize {
+            let destination = &mut channel_plane[y * padded_w..y * padded_w + target_w];
+            let source = &raw[y * row_stride..y * row_stride + row_stride];
+            for (cell, pixel) in destination.iter_mut().zip(source.chunks_exact(CHANNELS)) {
+                *cell = (f32::from(pixel[channel]) - mean) / std;
+            }
+        }
+    }
+    Ok(tensor)
+}
+
+/// Reference implementation of [`normalize_into_tensor`] retained for the
+/// differential test and the A/B benchmark baseline: reads each channel byte
+/// through the bounds-checked, channel-strided [`RgbImage::get_pixel`], which
+/// blocks autovectorization (see ADR 0019).
+#[cfg(any(test, feature = "bench"))]
+fn normalize_into_tensor_reference(resized: &RgbImage, padded_h: u32, padded_w: u32) -> Result<Tensor> {
     let (target_w, target_h) = resized.dimensions();
     let plane = (padded_h * padded_w) as usize;
     let mut tensor = Tensor::zeros(IxDyn(&[BATCH, CHANNELS, padded_h as usize, padded_w as usize]));
@@ -227,6 +286,39 @@ mod tests {
     fn should_reject_zero_dimension_image() {
         let image = Image::from_rgb8(0, 0, Vec::new()).expect("empty image is valid");
         assert!(prepare(&image, 64, 1.0).is_err());
+    }
+
+    #[test]
+    fn optimized_normalize_matches_reference_bitwise() {
+        // Fill a resized image with deterministic pseudo-random RGB (an LCG), pad to ~keep
+        // multiples of 32, and require the optimized contiguous-slice normalize to ~keep
+        // match the channel-strided get_pixel reference bit-for-bit across every ~keep
+        // channel plane, covering real and padding regions. ~keep
+        let (target_w, target_h) = (37u32, 19u32);
+        let mut resized = RgbImage::new(target_w, target_h);
+        let mut state: u32 = 0x1234_5678;
+        let mut next = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        };
+        for y in 0..target_h {
+            for x in 0..target_w {
+                resized.put_pixel(x, y, image::Rgb([next(), next(), next()]));
+            }
+        }
+        let padded_h = pad_to_multiple(target_h, ALIGN);
+        let padded_w = pad_to_multiple(target_w, ALIGN);
+
+        let optimized = normalize_into_tensor(&resized, padded_h, padded_w).expect("optimized tensor");
+        let reference = normalize_into_tensor_reference(&resized, padded_h, padded_w).expect("reference tensor");
+
+        assert_eq!(optimized.shape(), reference.shape(), "shapes must match");
+        let optimized = optimized.as_slice().expect("optimized tensor is contiguous");
+        let reference = reference.as_slice().expect("reference tensor is contiguous");
+        assert_eq!(optimized.len(), reference.len());
+        for (index, (a, b)) in optimized.iter().zip(reference.iter()).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "element {index} differs bitwise");
+        }
     }
 
     #[test]

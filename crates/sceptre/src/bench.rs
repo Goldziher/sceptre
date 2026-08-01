@@ -156,6 +156,14 @@ pub fn detect_preprocess_for_benchmark(image: &Image, canvas_size: u32, mag_rati
     black_box(&tensor);
 }
 
+/// A/B baseline twin of [`detect_preprocess_for_benchmark`] driving the reference
+/// (pre-optimization) detection normalize.
+pub fn detect_preprocess_reference_for_benchmark(image: &Image, canvas_size: u32, mag_ratio: f32) {
+    let tensor =
+        crate::detect::bench_preprocess_reference(image, canvas_size, mag_ratio).expect("corpus image preprocesses");
+    black_box(&tensor);
+}
+
 /// Drive detection postprocessing (threshold + connected components → boxes,
 /// then coordinate adjustment) on synthetic heat-maps.
 pub fn detect_postprocess_for_benchmark(
@@ -184,10 +192,25 @@ pub fn recognize_crop_preprocess_for_benchmark(gray: &GrayImage, corners: &[[f32
     black_box(&tensor);
 }
 
+/// A/B baseline twin of [`recognize_crop_preprocess_for_benchmark`] driving the
+/// reference (pre-optimization) recognition normalize.
+pub fn recognize_crop_preprocess_reference_for_benchmark(gray: &GrayImage, corners: &[[f32; 2]; 4]) {
+    let tensor =
+        crate::recognize::bench_crop_preprocess_reference(gray, corners).expect("crop preprocesses to a batch");
+    black_box(&tensor);
+}
+
 /// Drive greedy CTC decoding (softmax + argmax + collapse + confidence) on
 /// synthetic logits, using the English charset and no ignored classes.
 pub fn ctc_decode_for_benchmark(logits: &Array2<f32>) {
     let decoded = crate::recognize::bench_ctc_decode(logits.view());
+    black_box(&decoded);
+}
+
+/// A/B baseline twin of [`ctc_decode_for_benchmark`] driving the reference
+/// (materialized `Array2`) greedy CTC decoder.
+pub fn ctc_decode_reference_for_benchmark(logits: &Array2<f32>) {
+    let decoded = crate::recognize::bench_ctc_decode_reference(logits.view());
     black_box(&decoded);
 }
 

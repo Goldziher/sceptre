@@ -10,8 +10,8 @@ use std::time::Duration;
 use criterion::{Criterion, criterion_group, criterion_main};
 use sceptre::DetectionConfig;
 use sceptre::bench::{
-    detect_group_for_benchmark, detect_postprocess_for_benchmark, detect_preprocess_for_benchmark, load_corpus_image,
-    synthetic_boxes, synthetic_heatmaps,
+    detect_group_for_benchmark, detect_postprocess_for_benchmark, detect_preprocess_for_benchmark,
+    detect_preprocess_reference_for_benchmark, load_corpus_image, synthetic_boxes, synthetic_heatmaps,
 };
 
 /// Detection canvas cap (EasyOCR default).
@@ -39,8 +39,11 @@ const MEASUREMENT_SECS: u64 = 8;
 
 fn bench_preprocess(criterion: &mut Criterion) {
     let image = load_corpus_image("images/invoice_image.png");
-    criterion.bench_function("detect/preprocess", |b| {
+    criterion.bench_function("detect/preprocess/optimized", |b| {
         b.iter(|| detect_preprocess_for_benchmark(&image, CANVAS_SIZE, MAG_RATIO));
+    });
+    criterion.bench_function("detect/preprocess/reference", |b| {
+        b.iter(|| detect_preprocess_reference_for_benchmark(&image, CANVAS_SIZE, MAG_RATIO));
     });
 }
 

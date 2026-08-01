@@ -87,11 +87,62 @@ pub(crate) fn prepare_batch(crops: &[RegionCrop]) -> Result<Tensor> {
     Ok(tensor)
 }
 
+/// Reference variant of [`prepare_batch`] that fills each plane with
+/// [`fill_plane_reference`]; retained for the differential test and the A/B
+/// benchmark baseline. The resize and layout are shared with [`prepare_batch`];
+/// only the plane-fill path differs.
+#[cfg(any(test, feature = "bench"))]
+pub(crate) fn prepare_batch_reference(crops: &[RegionCrop]) -> Result<Tensor> {
+    if crops.is_empty() {
+        return Err(OcrError::inference("prepare_batch requires at least one crop"));
+    }
+
+    let resized: Vec<GrayImage> = crops.iter().map(resize_crop).collect::<Result<_>>()?;
+    let max_w = resized.iter().map(GrayImage::width).max().unwrap_or(MIN_WIDTH);
+
+    let plane_width = max_w as usize;
+    let mut tensor = Tensor::zeros(IxDyn(&[resized.len(), CHANNELS, IMG_H as usize, plane_width]));
+    let plane = IMG_H as usize * plane_width;
+    let buffer = tensor
+        .as_slice_mut()
+        .ok_or_else(|| OcrError::inference("recognition tensor is not contiguous"))?;
+
+    for (index, image) in resized.iter().enumerate() {
+        fill_plane_reference(buffer, image, index * plane, plane_width);
+    }
+
+    Ok(tensor)
+}
+
 /// Write one `[1, 64, plane_width]` image plane into the contiguous NCHW `buffer`
 /// starting at `base`, row-major, edge-replicating the last real column across the
 /// padding. The written values are identical to the per-element formula: each real
 /// pixel is [`normalize`]d and each padded cell repeats its row's last real column.
+///
+/// Iterates the image's contiguous grayscale backing slice ([`GrayImage::as_raw`],
+/// row-major single channel) and zips each source row with its destination row, so
+/// the per-pixel [`normalize`] loop autovectorizes; the arithmetic and write order
+/// are identical to the bounds-checked `get_pixel` form (see ADR 0019).
 fn fill_plane(buffer: &mut [f32], image: &GrayImage, base: usize, plane_width: usize) {
+    let real_w = image.width() as usize;
+    let raw = image.as_raw();
+    for y in 0..IMG_H as usize {
+        let row_base = base + y * plane_width;
+        let source = &raw[y * real_w..y * real_w + real_w];
+        let destination = &mut buffer[row_base..row_base + real_w];
+        for (cell, &value) in destination.iter_mut().zip(source.iter()) {
+            *cell = normalize(value);
+        }
+        let last_column = buffer[row_base + real_w - 1];
+        buffer[row_base + real_w..row_base + plane_width].fill(last_column);
+    }
+}
+
+/// Reference implementation of [`fill_plane`] retained for the differential test
+/// and the A/B benchmark baseline: reads each pixel through the bounds-checked
+/// [`GrayImage::get_pixel`], which blocks autovectorization (see ADR 0019).
+#[cfg(any(test, feature = "bench"))]
+fn fill_plane_reference(buffer: &mut [f32], image: &GrayImage, base: usize, plane_width: usize) {
     let real_w = image.width() as usize;
     for y in 0..IMG_H {
         let row_base = base + y as usize * plane_width;
@@ -172,6 +223,32 @@ mod tests {
             "padding replicates the last real column"
         );
         assert!((padded - zero_normalized).abs() > 1e-3, "padding is not a zeroed pixel");
+    }
+
+    #[test]
+    fn optimized_fill_plane_matches_reference_bitwise() {
+        // Vary aspect ratios (portrait, landscape, square, single-pixel) and pixel ~keep
+        // values so the batch exercises real + padded columns across several plane ~keep
+        // widths; the optimized contiguous-slice fill must match the get_pixel ~keep
+        // reference bit-for-bit. ~keep
+        let crops = vec![
+            make_crop(40, 5, 90),
+            make_crop(8, 5, 210),
+            make_crop(3, 17, 45),
+            make_crop(64, 64, 255),
+            make_crop(1, 1, 0),
+            make_crop(23, 9, 137),
+        ];
+        let optimized = prepare_batch(&crops).expect("optimized batch");
+        let reference = prepare_batch_reference(&crops).expect("reference batch");
+
+        assert_eq!(optimized.shape(), reference.shape(), "shapes must match");
+        let optimized = optimized.as_slice().expect("optimized tensor is contiguous");
+        let reference = reference.as_slice().expect("reference tensor is contiguous");
+        assert_eq!(optimized.len(), reference.len());
+        for (index, (a, b)) in optimized.iter().zip(reference.iter()).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "element {index} differs bitwise");
+        }
     }
 
     #[test]

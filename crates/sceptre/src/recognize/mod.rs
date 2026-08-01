@@ -35,10 +35,29 @@ pub(crate) fn bench_crop_preprocess(
     preprocess::prepare_batch(std::slice::from_ref(&crop))
 }
 
+/// Reference-implementation twin of [`bench_crop_preprocess`] driving the
+/// pre-optimization `get_pixel` plane fill, for the A/B benchmark baseline (ADR 0019).
+#[cfg(feature = "bench")]
+pub(crate) fn bench_crop_preprocess_reference(
+    gray: &image::GrayImage,
+    corners: &[[f32; 2]; 4],
+) -> crate::error::Result<crate::inference::Tensor> {
+    let crop = crop::crop_region(gray, corners, true)?;
+    preprocess::prepare_batch_reference(std::slice::from_ref(&crop))
+}
+
 /// Greedy-decode recognizer logits with the English charset. Crate-internal
 /// `bench` shim over `decode_greedy`.
 #[cfg(feature = "bench")]
 pub(crate) fn bench_ctc_decode(logits: ndarray::ArrayView2<f32>) -> RecognizedText {
     let charset = charset::Charset::for_language(crate::config::Language::English);
     ctc::decode_greedy(logits, &charset, &[])
+}
+
+/// Reference-implementation twin of [`bench_ctc_decode`] driving the materialized
+/// `Array2` softmax + argmax decoder, for the A/B benchmark baseline (ADR 0019).
+#[cfg(feature = "bench")]
+pub(crate) fn bench_ctc_decode_reference(logits: ndarray::ArrayView2<f32>) -> RecognizedText {
+    let charset = charset::Charset::for_language(crate::config::Language::English);
+    ctc::decode_greedy_reference(logits, &charset, &[])
 }
