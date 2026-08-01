@@ -9,6 +9,7 @@ use std::sync::Mutex;
 
 use ndarray::{ArrayD, IxDyn};
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor as OrtTensor;
 
 use super::{ModelBackend, Tensor};
@@ -29,9 +30,25 @@ impl OrtBackend {
     /// When `threads > 0` the session's intra-op thread pool is capped to that
     /// value; `0` leaves ONNX Runtime's own default in place. The ONNX bytes are
     /// parsed in memory, so no temporary file is written.
+    ///
+    /// The session runs at the maximum graph optimization level, and memory-pattern
+    /// planning is disabled because the CRAFT and gen2 CRNN graphs take dynamic-width
+    /// inputs; both settings preserve the computed values.
     pub(crate) fn load(model_bytes: &[u8], threads: usize) -> Result<Self> {
         let mut builder =
             Session::builder().map_err(|error| inference_error("create an ONNX Runtime session builder", error))?;
+        // `All` (ORT_ENABLE_ALL) is the highest level, applying every fusion, constant ~keep
+        // folding, and layout optimization regardless of the runtime's default. ~keep
+        builder = builder
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .map_err(|error| {
+                inference_error("set the ONNX Runtime graph optimization level", ort::Error::from(error))
+            })?;
+        // Memory-pattern pre-planning assumes stable tensor shapes; with dynamic-width ~keep
+        // inputs it cannot amortize and only inflates the peak arena, so disable it. ~keep
+        builder = builder.with_memory_pattern(false).map_err(|error| {
+            inference_error("disable ONNX Runtime memory-pattern planning", ort::Error::from(error))
+        })?;
         if threads > 0 {
             builder = builder
                 .with_intra_threads(threads)
