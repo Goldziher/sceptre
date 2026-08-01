@@ -73,23 +73,34 @@ pub(crate) fn prepare_batch(crops: &[RegionCrop]) -> Result<Tensor> {
     let resized: Vec<GrayImage> = crops.iter().map(resize_crop).collect::<Result<_>>()?;
     let max_w = resized.iter().map(GrayImage::width).max().unwrap_or(MIN_WIDTH);
 
-    let mut tensor = Tensor::zeros(IxDyn(&[resized.len(), CHANNELS, IMG_H as usize, max_w as usize]));
+    let plane_width = max_w as usize;
+    let mut tensor = Tensor::zeros(IxDyn(&[resized.len(), CHANNELS, IMG_H as usize, plane_width]));
+    let plane = IMG_H as usize * plane_width;
+    let buffer = tensor
+        .as_slice_mut()
+        .ok_or_else(|| OcrError::inference("recognition tensor is not contiguous"))?;
 
     for (index, image) in resized.iter().enumerate() {
-        let real_w = image.width();
-        for y in 0..IMG_H {
-            let row = y as usize;
-            for x in 0..real_w {
-                tensor[[index, 0, row, x as usize]] = normalize(image.get_pixel(x, y)[0]);
-            }
-            let last_column = tensor[[index, 0, row, (real_w - 1) as usize]];
-            for x in real_w..max_w {
-                tensor[[index, 0, row, x as usize]] = last_column;
-            }
-        }
+        fill_plane(buffer, image, index * plane, plane_width);
     }
 
     Ok(tensor)
+}
+
+/// Write one `[1, 64, plane_width]` image plane into the contiguous NCHW `buffer`
+/// starting at `base`, row-major, edge-replicating the last real column across the
+/// padding. The written values are identical to the per-element formula: each real
+/// pixel is [`normalize`]d and each padded cell repeats its row's last real column.
+fn fill_plane(buffer: &mut [f32], image: &GrayImage, base: usize, plane_width: usize) {
+    let real_w = image.width() as usize;
+    for y in 0..IMG_H {
+        let row_base = base + y as usize * plane_width;
+        for x in 0..real_w {
+            buffer[row_base + x] = normalize(image.get_pixel(x as u32, y)[0]);
+        }
+        let last_column = buffer[row_base + real_w - 1];
+        buffer[row_base + real_w..row_base + plane_width].fill(last_column);
+    }
 }
 
 #[cfg(test)]
@@ -161,5 +172,41 @@ mod tests {
             "padding replicates the last real column"
         );
         assert!((padded - zero_normalized).abs() > 1e-3, "padding is not a zeroed pixel");
+    }
+
+    #[test]
+    fn tensor_matches_per_pixel_formula_exactly_including_padding() {
+        let wide = make_crop(40, 5, 90);
+        let narrow = make_crop(8, 5, 210);
+        // Independently recompute the resized narrow crop to compare against. ~keep
+        let expected = resize_crop(&make_crop(8, 5, 210)).expect("resize narrow crop");
+        let real_w = expected.width();
+
+        let tensor = prepare_batch(&[wide, narrow]).expect("batch should preprocess");
+        let max_w = tensor.shape()[3] as u32;
+        assert!(
+            real_w < max_w,
+            "narrow crop must be padded for this test to cover padding"
+        );
+
+        for (x, y) in [(0u32, 0u32), (3, 2), (real_w - 1, IMG_H - 1)] {
+            let want = normalize(expected.get_pixel(x, y)[0]);
+            assert_eq!(
+                tensor[[1, 0, y as usize, x as usize]],
+                want,
+                "real pixel ({x}, {y}) must equal the per-element normalize formula"
+            );
+        }
+
+        for y in [0u32, IMG_H / 2, IMG_H - 1] {
+            let last_real = normalize(expected.get_pixel(real_w - 1, y)[0]);
+            for x in real_w..max_w {
+                assert_eq!(
+                    tensor[[1, 0, y as usize, x as usize]],
+                    last_real,
+                    "padded cell ({x}, {y}) must equal the row's last real column"
+                );
+            }
+        }
     }
 }
