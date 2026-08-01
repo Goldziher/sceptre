@@ -19,4 +19,4 @@ Each step gates the next. On failure:
 - `cargo fmt` — re-stage formatted files.
 - clippy — fix, or justify with a one-line `//` comment ending in `~keep`.
 - tests — diagnose the failure; never `#[ignore]` to bypass.
-- poly — fix the reported typo / markdown / deny / rust-max-lines issue.
+- poly — fix the reported typo / markdown / deny / uncomment (`~keep`) issue.

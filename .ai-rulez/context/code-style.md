@@ -9,7 +9,7 @@ Conventions baked into context so they ship into every AI tool's config.
 ## Module layout
 
 - One concern per file. Folder modules get a thin `mod.rs` (declare submodules + re-export); logic lives in named siblings.
-- 1000-line cap on `crates/*/src/**/*.rs`, enforced by the `rust-max-lines` poly check. Refactor by extraction, never by lifting the cap.
+- 1000-line cap on `crates/*/src/**/*.rs`, enforced by the `max_lines` integration test in `cargo test`. Refactor by extraction, never by lifting the cap.
 - The library re-exports a curated flat surface from `lib.rs` (`pub use error::{OcrError, Result}`, `pub use types::*`, the config types), so consumers write `use sceptre::{Reader, OcrConfig, OcrResult}`.
 
 ## Errors
