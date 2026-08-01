@@ -9,11 +9,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
-# The tract backend is still a stub, so cargo-machete would otherwise flag its
-# optional dep as unused until that implementation lands. ~keep
-[package.metadata.cargo-machete]
-ignored = ["tract-onnx"]
-
 [lib]
 name = "sceptre"
 
