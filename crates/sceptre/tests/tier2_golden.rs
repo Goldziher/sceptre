@@ -84,16 +84,20 @@ fn should_treat_unset_require_models_as_optional() {
 /// the committed placeholder.
 #[cfg(feature = "ort")]
 fn run_dual_golden_parity(image_file: &str, golden_stem: &str, language: Language) {
-    let config = config_for(language);
-    if !models_available(&config) {
-        assert!(
-            !require_models(),
-            "SCEPTRE_REQUIRE_MODELS is set but the models for {image_file} are not cached in the \
-             Hugging Face hub cache (HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub); \
-             run the model-provisioning step first"
-        );
+    // Opt-in: parity needs a working inference backend AND cached models, so it runs only ~keep
+    // under SCEPTRE_REQUIRE_MODELS. The default `cargo test` skips it — a cached model must ~keep
+    // not trigger a real run under a backend that cannot load (e.g. the default ort-dynamic ~keep
+    // with no ORT_DYLIB_PATH would panic on session creation). ~keep
+    if !require_models() {
         return;
     }
+    let config = config_for(language);
+    assert!(
+        models_available(&config),
+        "SCEPTRE_REQUIRE_MODELS is set but the models for {image_file} are not cached in the \
+         Hugging Face hub cache (HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub); \
+         run the model-provisioning step first"
+    );
 
     let reader = Reader::builder()
         .config(config)
