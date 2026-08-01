@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use ndarray::Axis;
+use rayon::prelude::*;
 
 use crate::config::{Decoder, RecognitionConfig};
 use crate::error::{OcrError, Result};
@@ -72,10 +73,13 @@ impl CrnnRecognizer {
         for chunk in crops.chunks(batch_size) {
             let tensor = super::preprocess::prepare_batch(chunk)?;
             let logits = super::crnn::run_crnn(self.backend.as_ref(), tensor)?;
-            for row in 0..chunk.len() {
-                let row_logits = logits.index_axis(Axis(0), row).to_owned();
-                results.push(super::ctc::decode_greedy(&row_logits, &self.charset, ignore));
-            }
+            // Decode each region on the shared Rayon pool; indexed mapping keeps the ~keep
+            // output in input order and each row borrows a view, avoiding a per-row copy. ~keep
+            let decoded: Vec<RecognizedText> = (0..chunk.len())
+                .into_par_iter()
+                .map(|row| super::ctc::decode_greedy(logits.index_axis(Axis(0), row), &self.charset, ignore))
+                .collect();
+            results.extend(decoded);
         }
         Ok(results)
     }
@@ -215,6 +219,34 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].text, "0");
         assert!(results[0].confidence > 0.0, "a confident crop scores above zero");
+    }
+
+    #[test]
+    fn should_decode_multi_region_batch_in_input_order() {
+        // One chunk of three regions, each `[T=2, C=3]` over [blank, '0', '1'] with a ~keep
+        // distinct argmax path: region 0 -> "0", region 1 -> "1", region 2 -> "01". A ~keep
+        // parallel, order-preserving decode must return them in that exact order. ~keep
+        let rows = [
+            [0.0f32, 5.0, 0.0, 0.0, 5.0, 0.0], // region 0: "0" ~keep
+            [0.0, 0.0, 5.0, 0.0, 0.0, 5.0],    // region 1: "1" ~keep
+            [0.0, 5.0, 0.0, 0.0, 0.0, 5.0],    // region 2: "01" ~keep
+        ];
+        let flat: Vec<f32> = rows.iter().flatten().copied().collect();
+        let batch_logits = ArrayD::from_shape_vec(IxDyn(&[3, 2, 3]), flat).expect("valid batch logits shape");
+        let backend = Arc::new(ScriptedBackend::new(vec![batch_logits]));
+        // batch_size 3 keeps all regions in one chunk; contrast_ths 0.0 disables the retry. ~keep
+        let config = RecognitionConfig {
+            batch_size: 3,
+            contrast_ths: 0.0,
+            ..RecognitionConfig::default()
+        };
+        let recognizer = english_recognizer(backend, config);
+
+        let crops = [sample_crop(), sample_crop(), sample_crop()];
+        let results = recognizer.recognize(&crops).expect("recognition succeeds");
+
+        let decoded: Vec<&str> = results.iter().map(|result| result.text.as_str()).collect();
+        assert_eq!(decoded, vec!["0", "1", "01"], "results stay in input order");
     }
 
     #[test]

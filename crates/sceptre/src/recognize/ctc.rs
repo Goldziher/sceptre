@@ -4,7 +4,7 @@
 //! index 0; greedy decoding collapses repeats and drops blanks. Confidence uses
 //! the `custom_mean` formula from `recognition.py`.
 
-use ndarray::{Array2, ArrayView1, ArrayViewMut1};
+use ndarray::{Array2, ArrayView1, ArrayView2, ArrayViewMut1};
 
 use super::charset::Charset;
 use super::recognizer::RecognizedText;
@@ -19,7 +19,7 @@ const CUSTOM_MEAN_EXPONENT_NUMERATOR: f32 = 2.0;
 
 /// Greedy-decode one crop's logits `[T, num_classes]` (raw, pre-softmax) into text
 /// with a confidence. `ignore` lists CTC class indices to suppress (allowlist/blocklist).
-pub(crate) fn decode_greedy(logits: &Array2<f32>, charset: &Charset, ignore: &[usize]) -> RecognizedText {
+pub(crate) fn decode_greedy(logits: ArrayView2<f32>, charset: &Charset, ignore: &[usize]) -> RecognizedText {
     let probs = probability_rows(logits, ignore);
     let per_timestep: Vec<(usize, f32)> = probs.rows().into_iter().map(argmax_row).collect();
     let confidence = custom_mean(&collect_max_probs(&per_timestep));
@@ -31,7 +31,7 @@ pub(crate) fn decode_greedy(logits: &Array2<f32>, charset: &Charset, ignore: &[u
 ///
 /// Mirrors `recognition.py::recognizer_predict`: `softmax` → zero `ignore_idx` →
 /// divide by the row sum (guarding a zero sum).
-fn probability_rows(logits: &Array2<f32>, ignore: &[usize]) -> Array2<f32> {
+fn probability_rows(logits: ArrayView2<f32>, ignore: &[usize]) -> Array2<f32> {
     let mut probs = Array2::<f32>::zeros(logits.raw_dim());
     for (out_row, in_row) in probs.rows_mut().into_iter().zip(logits.rows()) {
         fill_probability_row(out_row, in_row, ignore);
@@ -128,7 +128,7 @@ mod tests {
         // Columns are [blank, class 1 = '0', class 2 = '1']; each timestep favors a ~keep
         // different non-blank class, so no collapse occurs. ~keep
         let logits = arr2(&[[0.0f32, 5.0, 0.0], [0.0, 0.0, 5.0]]);
-        let decoded = decode_greedy(&logits, &english(), &[]);
+        let decoded = decode_greedy(logits.view(), &english(), &[]);
         assert_eq!(decoded.text, "01");
         assert!(decoded.confidence > 0.0, "two confident timesteps score above zero");
     }
@@ -136,14 +136,14 @@ mod tests {
     #[test]
     fn should_collapse_repeated_argmax_into_single_char() {
         let logits = arr2(&[[0.0f32, 5.0, 0.0], [0.0, 5.0, 0.0]]);
-        let decoded = decode_greedy(&logits, &english(), &[]);
+        let decoded = decode_greedy(logits.view(), &english(), &[]);
         assert_eq!(decoded.text, "0");
     }
 
     #[test]
     fn should_return_empty_text_and_zero_confidence_when_all_blank() {
         let logits = arr2(&[[5.0f32, 0.0, 0.0], [5.0, 0.0, 0.0]]);
-        let decoded = decode_greedy(&logits, &english(), &[]);
+        let decoded = decode_greedy(logits.view(), &english(), &[]);
         assert_eq!(decoded.text, "");
         assert_eq!(decoded.confidence, 0.0);
     }
@@ -153,7 +153,7 @@ mod tests {
         // Softmax([ln 0.25, ln 0.75]) = [0.25, 0.75]; argmax is class 1 ('0') at ~keep
         // prob 0.75, so custom_mean([0.75]) = 0.75.powf(2.0 / sqrt(1)) = 0.5625. ~keep
         let logits = arr2(&[[(0.25f32).ln(), (0.75f32).ln()]]);
-        let decoded = decode_greedy(&logits, &english(), &[]);
+        let decoded = decode_greedy(logits.view(), &english(), &[]);
         assert_eq!(decoded.text, "0");
         assert!(
             (decoded.confidence - 0.5625).abs() < 1e-5,
@@ -166,9 +166,9 @@ mod tests {
     fn should_let_ignore_change_the_decoded_character() {
         // Class 1 ('0') outscores class 2 ('1'); ignoring class 1 lets class 2 win. ~keep
         let logits = arr2(&[[(0.1f32).ln(), (0.6f32).ln(), (0.3f32).ln()]]);
-        let without_ignore = decode_greedy(&logits, &english(), &[]);
+        let without_ignore = decode_greedy(logits.view(), &english(), &[]);
         assert_eq!(without_ignore.text, "0");
-        let with_ignore = decode_greedy(&logits, &english(), &[1]);
+        let with_ignore = decode_greedy(logits.view(), &english(), &[1]);
         assert_eq!(with_ignore.text, "1");
     }
 }
