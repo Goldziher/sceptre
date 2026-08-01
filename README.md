@@ -18,7 +18,7 @@ a **CLI**, or an **MCP server**.
 [![docs.rs](https://img.shields.io/docsrs/sceptre?style=flat-square&color=f5b301)](https://docs.rs/sceptre)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-[Install](#install) · [Quickstart](#quickstart) · [Why sceptre](#why-sceptre) · [Benchmarks](#benchmarks) · [How it works](#how-it-works)
+[Install](#install) · [Quickstart](#quickstart) · [Why sceptre](#why-sceptre) · [Benchmarks](#benchmarks) · [How it works](#how-it-works) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
