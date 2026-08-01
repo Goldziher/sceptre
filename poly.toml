@@ -37,6 +37,8 @@ preserve_patterns = ["SAFETY", "HACK", "WORKAROUND", "NOTE"]
 [per-file-ignores]
 "basemind.toml" = ["comment", "doc-comment"]
 "**/*.generated.*" = ["comment", "doc-comment"]
+# Python uses `#` comments idiomatically; the uncomment hook targets Rust/TOML. ~keep
+"python/**" = ["comment", "doc-comment"]
 
 [hooks]
 stages = ["pre-commit"]

@@ -503,7 +503,7 @@ def _detections_match(left: list[Detection], right: list[Detection]) -> bool:
     """True when two detection lists carry identical text and quads in the same order."""
     if len(left) != len(right):
         return False
-    return all(a.text == b.text and a.quad == b.quad for a, b in zip(left, right))
+    return all(a.text == b.text and a.quad == b.quad for a, b in zip(left, right, strict=True))
 
 
 def _apply_batch(
