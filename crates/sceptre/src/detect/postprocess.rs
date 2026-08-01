@@ -266,6 +266,13 @@ fn compute_niter(stat: &LabelStat) -> u32 {
 /// for even `niter` and grows one pixel more on the anchor side for odd `niter`.
 /// Out-of-buffer neighbours are background (`BORDER_CONSTANT`). A zero `niter`
 /// (unit kernel) is a no-op. See ADR 0018.
+///
+/// A box structuring element is the Minkowski composition of its horizontal and
+/// vertical line elements, so the 2D window max is computed separably as a
+/// horizontal line-max pass followed by a vertical one — both using the same
+/// per-axis `anchor`. This is `O(area * kernel)` instead of `O(area * kernel^2)`
+/// while remaining bit-identical for symmetric (even `niter`) and asymmetric
+/// (odd `niter`, even kernel) cases alike.
 fn dilate_segmap(segmap: GrayImage, niter: u32) -> GrayImage {
     if niter == 0 {
         return segmap;
@@ -274,33 +281,74 @@ fn dilate_segmap(segmap: GrayImage, niter: u32) -> GrayImage {
     let kernel = (DILATION_KERNEL_OFFSET + niter) as i32;
     let anchor = kernel / 2;
     let source = segmap.as_raw();
+    let mut horizontal = vec![0u8; source.len()];
+    dilate_along_axis(source, &mut horizontal, width, height, kernel, anchor, Axis::Horizontal);
     let mut dilated = vec![0u8; source.len()];
-    for y in 0..height as i32 {
-        for x in 0..width as i32 {
-            if kernel_hits_foreground(source, width, height, x, y, kernel, anchor) {
-                dilated[(y as u32 * width + x as u32) as usize] = SEGMAP_FOREGROUND;
-            }
-        }
-    }
+    dilate_along_axis(&horizontal, &mut dilated, width, height, kernel, anchor, Axis::Vertical);
     GrayImage::from_raw(width, height, dilated).expect("dilated segmap keeps the source dimensions")
 }
 
-/// Whether any in-bounds pixel under the `kernel`-square structuring element,
-/// anchored at `anchor`, is foreground — the max over the dilation window.
-fn kernel_hits_foreground(source: &[u8], width: u32, height: u32, x: i32, y: i32, kernel: i32, anchor: i32) -> bool {
-    for j in 0..kernel {
-        let sample_y = y + j - anchor;
-        if sample_y < 0 || sample_y >= height as i32 {
+/// Axis a single separable dilation pass runs along.
+#[derive(Clone, Copy)]
+enum Axis {
+    Horizontal,
+    Vertical,
+}
+
+/// One separable line-max pass: for every output pixel, write foreground when any
+/// in-bounds sample in the `kernel`-length line window (anchored at `anchor`) is
+/// foreground. Since the buffer is 0/255, the max reduces to a first-hit test.
+fn dilate_along_axis(
+    source: &[u8],
+    destination: &mut [u8],
+    width: u32,
+    height: u32,
+    kernel: i32,
+    anchor: i32,
+    axis: Axis,
+) {
+    // Stride/extent along the pass axis vs. the orthogonal iteration axis. ~keep
+    let (extent, stride) = match axis {
+        Axis::Horizontal => (width as i32, 1usize),
+        Axis::Vertical => (height as i32, width as usize),
+    };
+    let (outer, inner) = match axis {
+        Axis::Horizontal => (height, width),
+        Axis::Vertical => (width, height),
+    };
+    for outer_index in 0..outer {
+        let base = match axis {
+            Axis::Horizontal => (outer_index * width) as usize,
+            Axis::Vertical => outer_index as usize,
+        };
+        for center in 0..inner as i32 {
+            if line_hits_foreground(source, base, stride, extent, center, kernel, anchor) {
+                destination[base + center as usize * stride] = SEGMAP_FOREGROUND;
+            }
+        }
+    }
+}
+
+/// Whether any in-bounds sample along a single line window is foreground — the max
+/// over one axis of the dilation window. `base` is the buffer offset of line index
+/// `0`, `stride` the buffer step between consecutive samples, and `extent` the line
+/// length; out-of-line samples are background (`BORDER_CONSTANT`).
+fn line_hits_foreground(
+    source: &[u8],
+    base: usize,
+    stride: usize,
+    extent: i32,
+    center: i32,
+    kernel: i32,
+    anchor: i32,
+) -> bool {
+    for offset in 0..kernel {
+        let sample = center + offset - anchor;
+        if sample < 0 || sample >= extent {
             continue;
         }
-        for i in 0..kernel {
-            let sample_x = x + i - anchor;
-            if sample_x < 0 || sample_x >= width as i32 {
-                continue;
-            }
-            if source[(sample_y as u32 * width + sample_x as u32) as usize] != 0 {
-                return true;
-            }
+        if source[base + sample as usize * stride] != 0 {
+            return true;
         }
     }
     false
@@ -543,6 +591,102 @@ mod tests {
             let bounded = collect_points(&dilate_segmap(segmap, niter), &window);
             let reference = whole_map_points(label, &labels, &text_score, &link_score, niter);
             assert_eq!(bounded, reference, "label {label} points must match whole-map build");
+        }
+    }
+
+    /// Straightforward O(kernel^2) box-dilation reference: `dst(x, y) = max` over
+    /// the full `(i, j)` kernel window of `src(x + i - anchor, y + j - anchor)`,
+    /// with out-of-buffer samples treated as background. Written inline so the
+    /// separable pass is checked against an independent two-loop implementation.
+    fn reference_box_dilate(segmap: &GrayImage, niter: u32) -> GrayImage {
+        if niter == 0 {
+            return segmap.clone();
+        }
+        let (width, height) = segmap.dimensions();
+        let kernel = (DILATION_KERNEL_OFFSET + niter) as i32;
+        let anchor = kernel / 2;
+        let source = segmap.as_raw();
+        let mut dilated = vec![0u8; source.len()];
+        for y in 0..height as i32 {
+            for x in 0..width as i32 {
+                let mut hit = false;
+                for j in 0..kernel {
+                    let sample_y = y + j - anchor;
+                    if sample_y < 0 || sample_y >= height as i32 {
+                        continue;
+                    }
+                    for i in 0..kernel {
+                        let sample_x = x + i - anchor;
+                        if sample_x < 0 || sample_x >= width as i32 {
+                            continue;
+                        }
+                        if source[(sample_y as u32 * width + sample_x as u32) as usize] != 0 {
+                            hit = true;
+                        }
+                    }
+                }
+                if hit {
+                    dilated[(y as u32 * width + x as u32) as usize] = SEGMAP_FOREGROUND;
+                }
+            }
+        }
+        GrayImage::from_raw(width, height, dilated).expect("reference dilation keeps dimensions")
+    }
+
+    /// A hand-built dilation test case: map dimensions plus foreground pixels.
+    struct DilationPattern {
+        width: u32,
+        height: u32,
+        foreground: Vec<(u32, u32)>,
+    }
+
+    impl DilationPattern {
+        fn new(width: u32, height: u32, foreground: &[(u32, u32)]) -> Self {
+            Self {
+                width,
+                height,
+                foreground: foreground.to_vec(),
+            }
+        }
+    }
+
+    fn segmap_from(width: u32, height: u32, foreground: &[(u32, u32)]) -> GrayImage {
+        let mut buffer = vec![0u8; (width * height) as usize];
+        for &(x, y) in foreground {
+            buffer[(y * width + x) as usize] = SEGMAP_FOREGROUND;
+        }
+        GrayImage::from_raw(width, height, buffer).expect("segmap pattern")
+    }
+
+    #[test]
+    fn should_match_reference_box_dilation_byte_for_byte() {
+        // Hand-built patterns: isolated pixel, small block, L-shape, and two ~keep
+        // near-border blocks that exercise BORDER_CONSTANT clipping. ~keep
+        let patterns: [DilationPattern; 5] = [
+            DilationPattern::new(7, 7, &[(3, 3)]),
+            DilationPattern::new(10, 10, &[(4, 4), (5, 4), (4, 5), (5, 5)]),
+            DilationPattern::new(9, 9, &[(2, 2), (2, 3), (2, 4), (3, 4), (4, 4)]),
+            DilationPattern::new(8, 8, &[(0, 0), (1, 0), (0, 1), (1, 1)]),
+            DilationPattern::new(8, 6, &[(6, 4), (7, 4), (6, 5), (7, 5)]),
+        ];
+        for pattern in patterns {
+            let DilationPattern {
+                width,
+                height,
+                foreground,
+            } = pattern;
+            let segmap = segmap_from(width, height, &foreground);
+            // Covers even niter (symmetric kernel) and odd niter (even kernel, ~keep
+            // asymmetric anchor: e.g. niter 3 -> kernel 4, anchor 2). ~keep
+            for niter in 0..=5u32 {
+                let separable = dilate_segmap(segmap.clone(), niter);
+                let reference = reference_box_dilate(&segmap, niter);
+                assert_eq!(
+                    separable.as_raw(),
+                    reference.as_raw(),
+                    "niter {niter} on {width}x{height} pattern must match the O(k^2) reference byte-for-byte",
+                );
+            }
         }
     }
 
