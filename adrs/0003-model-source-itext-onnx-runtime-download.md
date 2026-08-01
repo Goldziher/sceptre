@@ -40,3 +40,12 @@ rejects a model).
 - Good: one consistent, permissively-licensed source for every model.
 - Bad: first run needs network access; we depend on an external host (mitigated
   by caching + checksums, and the fallback export path).
+
+## Status update (2026-08-01)
+
+The cache location moved from the bespoke `~/.cache/sceptre` layout to Hugging
+Face's native on-disk hub cache (`HF_HUB_CACHE` / `HF_HOME` /
+`~/.cache/huggingface/hub`), so the library, the CLI, the `sceptre-tools`
+snapshot tool, and the parity harness share one store. See ADR 0017, which
+extends this decision; the source (`itextresearch` ONNX, runtime download,
+sha256 verification) is unchanged.

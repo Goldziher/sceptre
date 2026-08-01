@@ -60,3 +60,11 @@ and what a golden fixture is compared against.
 - Bad: two generators (Python `sceptre_rs_tools.golden` for the reference, `sceptre-tools
   snapshot` for the snapshot) must be kept in sync with the fixture schema.
 - Bad: HF-cache resolution is duplicated in the harness until the library adopts it.
+
+## Status update (2026-08-01)
+
+The library adopted Hugging Face hub-cache resolution (ADR 0017), so the bespoke
+`HfCacheModelProvider` and its `std::fs` resolver were removed from
+`tests/helpers`. Real-model tests now gate availability via the library's
+`model_manifest` and build the reader with the default provider; the dual-golden
+comparison and `SCEPTRE_REQUIRE_MODELS` gating are unchanged.
