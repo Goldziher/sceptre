@@ -24,9 +24,8 @@ fn tiny_image() -> Image {
     Image::from_rgb8(1, 1, vec![0, 0, 0]).expect("1x1 rgb8 buffer has the exact required length")
 }
 
-/// Builds a `TextLine` fixture with an arbitrary quad, carrying only `text` as the
-/// value under test.
-fn text_line(text: &str) -> TextLine {
+/// Builds a `TextLine` fixture with an arbitrary quad and an explicit `confidence`.
+fn text_line_with_confidence(text: &str, confidence: f32) -> TextLine {
     TextLine {
         quad: Quad {
             points: [
@@ -37,8 +36,14 @@ fn text_line(text: &str) -> TextLine {
             ],
         },
         text: text.to_string(),
-        confidence: 0.99,
+        confidence,
     }
+}
+
+/// Builds a `TextLine` fixture with an arbitrary quad, carrying only `text` as the
+/// value under test.
+fn text_line(text: &str) -> TextLine {
+    text_line_with_confidence(text, 0.99)
 }
 
 /// A test-local `OcrEngine` whose output is fully controlled by the test.
@@ -128,8 +133,13 @@ fn should_return_region_quads_from_detect() {
 
 #[test]
 fn should_merge_lines_into_one_from_recognize_line() {
+    // Distinct confidences whose arithmetic mean is exact in f32 (0.5 + 0.75) / 2 == 0.625,
+    // so the assertion below fails for any wrong aggregation (sum, first, max, ...).
     let reader = Reader::builder()
-        .engine(FakeEngine::lines(vec![text_line("hello"), text_line("world")]))
+        .engine(FakeEngine::lines(vec![
+            text_line_with_confidence("hello", 0.5),
+            text_line_with_confidence("world", 0.75),
+        ]))
         .build()
         .expect("building a reader with an injected engine");
 
@@ -137,7 +147,25 @@ fn should_merge_lines_into_one_from_recognize_line() {
         .recognize_line(&tiny_image(), &ReadOptions::default())
         .expect("fake engine never errors");
 
-    assert_eq!(line.text, "hello world");
+    assert_eq!(
+        line.text, "hello world",
+        "line texts must join with a single ASCII space"
+    );
+    assert_eq!(
+        line.confidence, 0.625,
+        "merged confidence must be the arithmetic mean of the line confidences"
+    );
+    // `tiny_image()` is 1x1, so the merged quad must span the whole image.
+    assert_eq!(
+        line.quad.points,
+        [
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(1.0, 1.0),
+            Point::new(0.0, 1.0),
+        ],
+        "merged quad must span the entire image"
+    );
 }
 
 #[test]
