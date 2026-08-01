@@ -37,6 +37,20 @@ jobs:
       - name: Build (release)
         run: cargo build --release --workspace --features "${{ matrix.features }}"
 
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (benches)
+        run: cargo clippy -p sceptre --all-targets --features bench -- -D warnings
+      - name: Compile-check benches
+        # Benches are compile-checked here, not perf-run; timing runs are manual. ~keep
+        run: cargo check -p sceptre --benches --features bench
+
   python:
     runs-on: ubuntu-latest
     steps:

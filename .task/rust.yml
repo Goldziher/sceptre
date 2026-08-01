@@ -21,6 +21,11 @@ tasks:
     cmds:
       - cargo clippy --workspace --all-targets --tests -- -D warnings
 
+  bench:
+    desc: Run the criterion microbenchmarks for the sceptre hot paths
+    cmds:
+      - cargo bench -p sceptre --features bench
+
   check:
     desc: Run fmt check, clippy, and the test suite for the Rust workspace
     cmds:

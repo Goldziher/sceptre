@@ -26,6 +26,11 @@ tasks:
     cmds:
       - task: rust:test
 
+  bench:
+    desc: Run the criterion microbenchmarks for the sceptre hot paths
+    cmds:
+      - task: rust:bench
+
   lint:
     desc: Lint Rust (poly) and Python (ruff) code
     cmds:

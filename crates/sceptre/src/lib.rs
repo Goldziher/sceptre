@@ -13,7 +13,8 @@
 //! 2. **Recognition** ([`recognize`]) — each box is cropped, normalized, and run
 //!    through a gen2 CRNN; the logits are CTC-decoded into text.
 //! 3. **Inference backend** ([`inference`]) — a runtime-neutral [`inference::ModelBackend`]
-//!    seam abstracts over `ort` (native), `tract` (pure-Rust), and `candle` (deferred).
+//!    seam abstracts over `ort` (native) and `tract` (pure-Rust), with `candle`
+//!    reserved as a deferred pure-Rust fallback.
 //!
 //! Models are resolved and cached by [`models`]; behavior is configured through
 //! [`config`].
@@ -28,6 +29,10 @@ pub(crate) mod inference;
 pub(crate) mod models;
 pub(crate) mod recognize;
 pub(crate) mod types;
+
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 
 #[cfg(feature = "mcp")]
 pub mod mcp;
