@@ -88,6 +88,6 @@ fn no_source_file_exceeds_the_module_line_cap() {
         .join("\n");
     assert!(
         offenders.is_empty(),
-        "these crates/*/src/**/*.rs files exceed the {MAX_LINES}-line module cap — split them into submodules:\n{report}",
+        "these crates/*/src/**/*.rs files exceed the {MAX_LINES}-line cap — split them into submodules:\n{report}",
     );
 }
