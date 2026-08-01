@@ -1,25 +1,17 @@
 //! Shared helpers for the parity / golden test harness.
 //!
-//! This module carries pure, always-on logic (corpus path resolution, fuzzy
-//! word-level F1, axis-aligned box IoU, golden-fixture parsing) plus the
-//! [`HfCacheModelProvider`], which resolves the CRAFT + gen2 ONNX models from the
-//! Hugging Face hub cache on disk without any download. See ADR 0016.
+//! This module carries pure, always-on logic: corpus path resolution, fuzzy
+//! word-level F1, axis-aligned box IoU, and golden-fixture parsing. Model
+//! resolution now lives in the library's default provider, which reads the
+//! Hugging Face hub cache (see ADR 0017); the harness no longer resolves models.
 
 // Only a subset of these helpers is exercised by any single test binary or
 // feature configuration, so unused-symbol warnings here are expected. ~keep
 #![allow(dead_code)]
 
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
-use sceptre::{BBox, Language, ModelProvider, OcrError, Result};
-
-/// Logical name of the CRAFT detector export, matching `models::registry`.
-const CRAFT_MODEL_NAME: &str = "craft_mlt_25k";
-
-/// Owner segment of the upstream Hugging Face model repos, matching `models::registry`.
-const REGISTRY_OWNER: &str = "itextresearch";
+use sceptre::BBox;
 
 /// Walk up from `CARGO_MANIFEST_DIR` to the first ancestor that both looks like a
 /// Cargo root (`Cargo.toml`) and contains a `test_documents/` directory, and return
@@ -201,121 +193,6 @@ pub fn golden_lines(json: &str) -> Vec<String> {
         .collect()
 }
 
-/// A [`ModelProvider`] that resolves the CRAFT + gen2 ONNX models from the local
-/// Hugging Face hub cache — pure path resolution, no network and no download.
-///
-/// The cache root is `HF_HUB_CACHE` if set, else `$HF_HOME/hub`, else
-/// `~/.cache/huggingface/hub`. Each model lives at
-/// `<root>/models--<owner>--<name>/snapshots/<rev>/<file>`; the newest snapshot
-/// directory containing the file wins.
-pub struct HfCacheModelProvider;
-
-impl HfCacheModelProvider {
-    /// Construct a provider bound to the local Hugging Face hub cache.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Whether both the CRAFT detector and the English recognizer resolve on disk,
-    /// used to gate the real-model parity tests.
-    pub fn available() -> bool {
-        let provider = Self::new();
-        provider.detector().is_ok() && provider.recognizer(Language::English).is_ok()
-    }
-}
-
-impl Default for HfCacheModelProvider {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ModelProvider for HfCacheModelProvider {
-    fn detector(&self) -> Result<PathBuf> {
-        let (repo, file) = model_repo_and_file(CRAFT_MODEL_NAME);
-        resolve_in_hf_cache(&repo, &file)
-            .ok_or_else(|| OcrError::model(format!("CRAFT model `{file}` not found in the Hugging Face cache")))
-    }
-
-    fn recognizer(&self, language: Language) -> Result<PathBuf> {
-        let (repo, file) = model_repo_and_file(recognizer_model_name(language));
-        resolve_in_hf_cache(&repo, &file)
-            .ok_or_else(|| OcrError::model(format!("recognizer model `{file}` not found in the Hugging Face cache")))
-    }
-}
-
-/// Logical gen2 recognizer model name for a language, matching `models::registry`.
-fn recognizer_model_name(language: Language) -> &'static str {
-    match language {
-        Language::English => "english_g2",
-        Language::Latin => "latin_g2",
-        Language::ChineseSimplified => "zh_sim_g2",
-        Language::Japanese => "japanese_g2",
-        Language::Korean => "korean_g2",
-        Language::Cyrillic => "cyrillic_g2",
-    }
-}
-
-/// Map a logical model name to its `(repo_id, file_name)`, matching `models::registry`.
-fn model_repo_and_file(model_name: &str) -> (String, String) {
-    (
-        format!("{REGISTRY_OWNER}/itext-EasyOCR-{model_name}"),
-        format!("itext-EasyOCR-{model_name}.onnx"),
-    )
-}
-
-/// Root of the Hugging Face hub cache, honoring `HF_HUB_CACHE` then `HF_HOME`.
-fn hf_hub_cache_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("HF_HUB_CACHE") {
-        if !dir.is_empty() {
-            return Some(PathBuf::from(dir));
-        }
-    }
-    if let Ok(home) = std::env::var("HF_HOME") {
-        if !home.is_empty() {
-            return Some(PathBuf::from(home).join("hub"));
-        }
-    }
-    let home = std::env::var("HOME").ok().filter(|home| !home.is_empty())?;
-    Some(PathBuf::from(home).join(".cache").join("huggingface").join("hub"))
-}
-
-/// The on-disk cache directory name for a `owner/name` repo id.
-fn repo_cache_dir_name(repo_id: &str) -> String {
-    format!("models--{}", repo_id.replace('/', "--"))
-}
-
-/// Resolve `<hub>/models--owner--name/snapshots/<rev>/<file>` against the discovered
-/// Hugging Face cache root. `None` if the root or the file is unresolved.
-fn resolve_in_hf_cache(repo_id: &str, file: &str) -> Option<PathBuf> {
-    resolve_in_hub(&hf_hub_cache_dir()?, repo_id, file)
-}
-
-/// Resolve a model file within an explicit hub root, preferring the newest snapshot
-/// directory that actually contains the file. Kept env-free so it is unit-testable.
-fn resolve_in_hub(hub: &Path, repo_id: &str, file: &str) -> Option<PathBuf> {
-    let snapshots = hub.join(repo_cache_dir_name(repo_id)).join("snapshots");
-    let mut candidates: Vec<(SystemTime, PathBuf)> = fs::read_dir(&snapshots)
-        .ok()?
-        .filter_map(std::result::Result::ok)
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| {
-            let candidate = entry.path().join(file);
-            if candidate.exists() {
-                let modified = entry
-                    .metadata()
-                    .and_then(|meta| meta.modified())
-                    .unwrap_or(SystemTime::UNIX_EPOCH);
-                Some((modified, candidate))
-            } else {
-                None
-            }
-        })
-        .collect();
-    candidates.sort_by_key(|(modified, _)| *modified);
-    candidates.pop().map(|(_, path)| path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,63 +281,5 @@ mod tests {
         let golden = DualGolden::parse(r#"{"placeholder": true, "easyocr": {"lines": []}, "sceptre": {"lines": []}}"#);
         assert!(golden.placeholder);
         assert!(golden.easyocr.lines.is_empty());
-    }
-
-    #[test]
-    fn should_map_registry_repo_and_file_for_english() {
-        let (repo, file) = model_repo_and_file(recognizer_model_name(Language::English));
-        assert_eq!(repo, "itextresearch/itext-EasyOCR-english_g2");
-        assert_eq!(file, "itext-EasyOCR-english_g2.onnx");
-    }
-
-    #[test]
-    fn should_map_registry_repo_and_file_for_craft() {
-        let (repo, file) = model_repo_and_file(CRAFT_MODEL_NAME);
-        assert_eq!(repo, "itextresearch/itext-EasyOCR-craft_mlt_25k");
-        assert_eq!(file, "itext-EasyOCR-craft_mlt_25k.onnx");
-    }
-
-    #[test]
-    fn should_build_hf_cache_dir_name_from_repo_id() {
-        assert_eq!(
-            repo_cache_dir_name("itextresearch/itext-EasyOCR-english_g2"),
-            "models--itextresearch--itext-EasyOCR-english_g2"
-        );
-    }
-
-    #[test]
-    fn should_resolve_a_model_planted_in_a_fake_hub_root() {
-        let root = std::env::temp_dir().join(format!("sceptre-hf-resolve-{}", std::process::id()));
-        let snapshot = root
-            .join("models--itextresearch--itext-EasyOCR-english_g2")
-            .join("snapshots")
-            .join("deadbeef");
-        fs::create_dir_all(&snapshot).expect("create fake snapshot dir");
-        let file = snapshot.join("itext-EasyOCR-english_g2.onnx");
-        fs::write(&file, b"onnx").expect("write fake model file");
-
-        let resolved = resolve_in_hub(
-            &root,
-            "itextresearch/itext-EasyOCR-english_g2",
-            "itext-EasyOCR-english_g2.onnx",
-        );
-
-        assert_eq!(resolved, Some(file));
-        fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn should_not_resolve_a_missing_model_in_an_empty_hub_root() {
-        let root = std::env::temp_dir().join(format!("sceptre-hf-empty-{}", std::process::id()));
-        fs::create_dir_all(&root).expect("create empty hub root");
-
-        let resolved = resolve_in_hub(
-            &root,
-            "itextresearch/itext-EasyOCR-english_g2",
-            "itext-EasyOCR-english_g2.onnx",
-        );
-
-        assert_eq!(resolved, None);
-        fs::remove_dir_all(&root).ok();
     }
 }

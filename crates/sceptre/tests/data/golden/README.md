@@ -40,9 +40,10 @@ ships as a placeholder.
 
 ## Model gating
 
-The real-model tests resolve CRAFT + gen2 ONNX models from the local Hugging Face
-hub cache (`~/.cache/huggingface/hub`, or `HF_HUB_CACHE` / `HF_HOME`). When the
-models are absent the tests **skip** (and pass). Set `SCEPTRE_REQUIRE_MODELS=1` to
+The real-model tests gate on the library's `model_manifest`, which resolves CRAFT
++ gen2 ONNX models from the shared Hugging Face hub cache (`HF_HUB_CACHE` /
+`HF_HOME` / `~/.cache/huggingface/hub`). When the models are absent the tests
+**skip** (and pass). Set `SCEPTRE_REQUIRE_MODELS=1` to
 force them to run and fail if the models cannot be resolved — this is what CI uses
 so a broken model cache is visible.
 

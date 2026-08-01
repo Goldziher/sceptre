@@ -44,7 +44,13 @@ pub struct ModelConfig {
     pub languages: Vec<Language>,
     /// Inference backend.
     pub backend: Backend,
-    /// Override for the model cache directory (default `~/.cache/sceptre`).
+    /// Override for the Hugging Face hub cache ROOT that stores model artifacts.
+    ///
+    /// `None` (the default) resolves the root from the environment in Hugging
+    /// Face's order: `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` →
+    /// `~/.cache/huggingface/hub`. Setting it points the library, the CLI, and the
+    /// tooling at one shared cache store (see ADR 0017); artifacts still live under
+    /// `<root>/models--<owner>--<name>/snapshots/<rev>/<file>`.
     pub cache_dir: Option<PathBuf>,
     /// Override for the Hugging Face registry owner hosting the ONNX exports.
     ///

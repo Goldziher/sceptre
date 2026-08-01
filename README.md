@@ -30,9 +30,11 @@ for now (see [`adrs/0002`](adrs/0002-scope-gen2-recognizers-and-craft.md)).
 
 ONNX artifacts come from the
 [`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch) repos on
-Hugging Face (Apache-2.0, dynamic-width). They are downloaded on first use,
-cached under `~/.cache/sceptre`, and sha256-verified — nothing is committed to
-the repo (see [`adrs/0003`](adrs/0003-model-source-itext-onnx-runtime-download.md)).
+Hugging Face (Apache-2.0, dynamic-width). They are downloaded on first use into
+the shared Hugging Face hub cache (`HF_HUB_CACHE` / `HF_HOME` /
+`~/.cache/huggingface/hub`), and sha256-verified — nothing is committed to the
+repo (see [`adrs/0003`](adrs/0003-model-source-itext-onnx-runtime-download.md) and
+[`adrs/0017`](adrs/0017-hf-hub-native-cache.md)).
 
 ## Install
 

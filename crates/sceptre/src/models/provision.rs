@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::config::{Language, OcrConfig};
 use crate::error::Result;
 
-use super::download::{self, cache_path, default_cache_dir};
+use super::download::{self, hf_cache_root, resolve_cached};
 use super::registry::{ModelEntry, craft_entry, effective_repo, recognizer_entry};
 
 /// The role a model plays in the pipeline.
@@ -51,43 +51,43 @@ pub fn model_manifest(config: &OcrConfig) -> Result<Vec<ModelInfo>> {
 /// that are missing, and return the resulting (now-cached) manifest. Requires the
 /// `download` feature; without it the underlying fetch returns an [`crate::OcrError::Model`].
 pub fn download_models(config: &OcrConfig) -> Result<Vec<ModelInfo>> {
-    let cache_dir = resolve_cache_dir(config)?;
+    let cache_override = config.model.cache_dir.as_deref();
     let owner = config.model.registry_owner.as_deref();
     let mut manifest = Vec::with_capacity(config.model.languages.len() + 1);
-    manifest.push(fetch(&craft_entry(), ModelRole::Detector, &cache_dir, owner)?);
+    manifest.push(fetch(&craft_entry(), ModelRole::Detector, cache_override, owner)?);
     for &language in &config.model.languages {
         let entry = recognizer_entry(language);
-        manifest.push(fetch(&entry, ModelRole::Recognizer(language), &cache_dir, owner)?);
+        manifest.push(fetch(&entry, ModelRole::Recognizer(language), cache_override, owner)?);
     }
     Ok(manifest)
 }
 
-/// Resolve the cache directory: the config override or the platform default.
+/// Resolve the Hugging Face hub cache root: the config override or the environment default.
 fn resolve_cache_dir(config: &OcrConfig) -> Result<PathBuf> {
-    match config.model.cache_dir.clone() {
-        Some(dir) => Ok(dir),
-        None => default_cache_dir(),
-    }
+    hf_cache_root(config.model.cache_dir.as_deref())
 }
 
 /// Inspect the cache for `entry` without touching the network.
 fn info_for(entry: &ModelEntry, role: ModelRole, cache_dir: &Path, owner: Option<&str>) -> Result<ModelInfo> {
     let repo = effective_repo(entry, owner)?;
-    let path = cache_path(cache_dir, &repo, entry.file);
-    let cached = path.is_file();
+    let path = resolve_cached(cache_dir, &repo, entry.file);
+    let cached = path.is_some();
     Ok(ModelInfo {
         name: entry.name.to_string(),
         repo,
         role,
         cached,
-        path: cached.then_some(path),
+        path,
     })
 }
 
 /// Download `entry` if missing and describe it as a now-cached [`ModelInfo`].
-fn fetch(entry: &ModelEntry, role: ModelRole, cache_dir: &Path, owner: Option<&str>) -> Result<ModelInfo> {
+///
+/// `cache_override` is the raw config override for the hub cache root (`None` uses
+/// the environment default); `ensure` builds the hub client from it.
+fn fetch(entry: &ModelEntry, role: ModelRole, cache_override: Option<&Path>, owner: Option<&str>) -> Result<ModelInfo> {
     let repo = effective_repo(entry, owner)?;
-    let path = download::ensure(entry, cache_dir, owner)?;
+    let path = download::ensure(entry, cache_override, owner)?;
     Ok(ModelInfo {
         name: entry.name.to_string(),
         repo,

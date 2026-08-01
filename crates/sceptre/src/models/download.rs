@@ -1,15 +1,22 @@
-//! Download and cache model artifacts.
+//! Download and cache model artifacts through the Hugging Face hub cache.
 //!
-//! Resolves a [`ModelEntry`] to a local path under the cache directory (default
-//! `~/.cache/sceptre`), downloading from Hugging Face when the `download`
-//! feature is enabled and verifying its SHA-256 against the registry pin when one
-//! is present (the gen2 artifacts are currently unpinned; see the registry).
+//! Resolves a [`ModelEntry`] to a local path inside Hugging Face's native on-disk
+//! cache — `<root>/models--<owner>--<name>/snapshots/<rev>/<file>` — so the
+//! library, the CLI `models download`, the `sceptre-tools snapshot` tool, and the
+//! parity harness all share one cache store (see ADR 0017, which extends ADR
+//! 0003). The cache root defaults to `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` →
+//! `$HF_HOME/hub` → `~/.cache/huggingface/hub`, overridable via
+//! [`crate::config::ModelConfig::cache_dir`]. Downloads run through `hf-hub` when
+//! the `download` feature is enabled, verifying the SHA-256 against the registry
+//! pin when one is present (the gen2 artifacts are currently unpinned; see the
+//! registry).
 //!
 //! The registry host is re-pointable: the optional `registry_owner` override
 //! (see [`crate::config::ModelConfig`] and ADR 0003) swaps the owner segment of
 //! the repo id so the same exports can be served from a mirror.
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use crate::error::{OcrError, Result};
 use crate::models::registry::ModelEntry;
@@ -19,39 +26,122 @@ use crate::models::registry::effective_repo;
 
 /// Ensure a model artifact is present locally, returning its path.
 ///
-/// The returned path is stable and lives under `cache_dir`, namespaced by the
-/// effective repo id and file name so distinct models never collide. A cached
-/// file is reused when its SHA-256 matches [`ModelEntry::sha256`] (or when that
-/// pin is empty); otherwise the artifact is fetched from Hugging Face, verified,
-/// and only then written into place.
+/// Downloads `entry` through the Hugging Face hub cache: a cache hit returns the
+/// on-disk path without re-downloading, a miss fetches and populates the cache.
+/// `cache_dir_override` overrides the hub cache root (see [`hf_cache_root`]); when
+/// `None` the client resolves the root from the environment. After download the
+/// artifact is verified against [`ModelEntry::sha256`] (empty pin → skipped).
 #[cfg(feature = "download")]
-pub fn ensure(entry: &ModelEntry, cache_dir: &Path, registry_owner: Option<&str>) -> Result<PathBuf> {
+pub fn ensure(entry: &ModelEntry, cache_dir_override: Option<&Path>, registry_owner: Option<&str>) -> Result<PathBuf> {
     let repo = effective_repo(entry, registry_owner)?;
-    let path = cache_path(cache_dir, &repo, entry.file);
+    let (owner, name) = match repo.split_once('/') {
+        Some((owner, name)) => (owner, name),
+        None => ("", repo.as_str()),
+    };
 
-    if path.is_file() && cached_file_is_valid(&path, entry.sha256)? {
-        return Ok(path);
-    }
+    let client = match cache_dir_override {
+        Some(override_dir) => {
+            let root = hf_cache_root(Some(override_dir))?;
+            hf_hub::HFClient::builder()
+                .cache_dir(root)
+                .build_sync()
+                .map_err(|source| {
+                    model_error(format!("could not create the Hugging Face client for `{repo}`"), source)
+                })?
+        }
+        None => hf_hub::HFClientSync::new()
+            .map_err(|source| model_error(format!("could not create the Hugging Face client for `{repo}`"), source))?,
+    };
 
-    let bytes = fetch_from_hub(&repo, entry.file)?;
-    verify_sha256(&bytes, entry.sha256, entry.name)?;
-    write_atomically(&path, &bytes)?;
+    let path = client
+        .model(owner, name)
+        .download_file()
+        .filename(entry.file.to_string())
+        .send()
+        .map_err(|source| model_error(format!("could not download `{}` from `{repo}`", entry.file), source))?;
+
+    verify_sha256_file(&path, entry.sha256, entry.name)?;
     Ok(path)
 }
 
 /// Ensure a model artifact is present locally, returning its path.
 #[cfg(not(feature = "download"))]
-pub fn ensure(_entry: &ModelEntry, _cache_dir: &Path, _registry_owner: Option<&str>) -> Result<PathBuf> {
+pub fn ensure(
+    _entry: &ModelEntry,
+    _cache_dir_override: Option<&Path>,
+    _registry_owner: Option<&str>,
+) -> Result<PathBuf> {
     Err(OcrError::model(
         "model download requires the `download` feature; provide a local model path instead",
     ))
 }
 
-/// Default cache directory: `~/.cache/sceptre` (or the platform cache dir).
-pub fn default_cache_dir() -> Result<PathBuf> {
-    dirs::cache_dir()
-        .map(|d| d.join("sceptre"))
-        .ok_or_else(|| OcrError::model("could not determine a cache directory"))
+/// Resolve the Hugging Face hub cache root.
+///
+/// When `override_dir` is `Some`, it is returned verbatim (the config override).
+/// Otherwise the root is resolved from the environment in HF's documented order:
+/// `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` →
+/// `$HOME/.cache/huggingface/hub`. Empty environment values are ignored. Errors
+/// with [`OcrError::Model`] when `$HOME` cannot be resolved and no earlier source
+/// applied. Dependency-free so it works without the `download` feature.
+pub(crate) fn hf_cache_root(override_dir: Option<&Path>) -> Result<PathBuf> {
+    if let Some(dir) = override_dir {
+        return Ok(dir.to_path_buf());
+    }
+    if let Some(dir) = non_empty_env("HF_HUB_CACHE") {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(dir) = non_empty_env("HUGGINGFACE_HUB_CACHE") {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(home) = non_empty_env("HF_HOME") {
+        return Ok(PathBuf::from(home).join("hub"));
+    }
+    let home = non_empty_env("HOME")
+        .ok_or_else(|| OcrError::model("could not determine the Hugging Face cache root: $HOME is unset"))?;
+    Ok(PathBuf::from(home).join(".cache").join("huggingface").join("hub"))
+}
+
+/// Read an environment variable, treating an unset or empty value as absent.
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|value| !value.is_empty())
+}
+
+/// The on-disk cache directory name for a `owner/name` repo id.
+///
+/// Mirrors Hugging Face's layout: `itextresearch/itext-EasyOCR-english_g2`
+/// becomes `models--itextresearch--itext-EasyOCR-english_g2`.
+pub(crate) fn repo_cache_dir_name(repo_id: &str) -> String {
+    format!("models--{}", repo_id.replace('/', "--"))
+}
+
+/// Resolve a cached model file within the hub cache without touching the network.
+///
+/// Under `<root>/<repo_cache_dir_name>/snapshots/`, returns the file inside the
+/// newest snapshot subdirectory (by modification time) that actually contains
+/// `file`, or `None` when the repo, the snapshots directory, or the file is
+/// absent. This is the offline "is it cached, and where" check.
+pub(crate) fn resolve_cached(root: &Path, repo_id: &str, file: &str) -> Option<PathBuf> {
+    let snapshots = root.join(repo_cache_dir_name(repo_id)).join("snapshots");
+    let mut candidates: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(&snapshots)
+        .ok()?
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let candidate = entry.path().join(file);
+            if candidate.exists() {
+                let modified = entry
+                    .metadata()
+                    .and_then(|meta| meta.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                Some((modified, candidate))
+            } else {
+                None
+            }
+        })
+        .collect();
+    candidates.sort_by_key(|(modified, _)| *modified);
+    candidates.pop().map(|(_, path)| path)
 }
 
 /// Number of hex characters emitted per byte when formatting a digest.
@@ -62,52 +152,32 @@ const HEX_CHARS_PER_BYTE: usize = 2;
 #[cfg(feature = "download")]
 const HASH_CHUNK_BYTES: usize = 64 * 1024;
 
-/// Build the stable on-disk path for `file` from `repo`, under `cache_dir`.
+/// Verify a file at `path` against a non-empty SHA-256 pin, warning when unpinned.
 ///
-/// Each `owner/name` segment of the repo id becomes a directory component, so
-/// the layout is `<cache_dir>/<owner>/<name>/<file>`.
-pub(crate) fn cache_path(cache_dir: &Path, repo: &str, file: &str) -> PathBuf {
-    let mut path = cache_dir.to_path_buf();
-    for segment in repo.split('/') {
-        path.push(segment);
-    }
-    path.push(file);
-    path
-}
-
-/// Whether an already-cached file satisfies the (possibly empty) SHA-256 pin.
-///
-/// An empty pin accepts any cached bytes; a non-empty pin requires a
-/// case-insensitive hex match of the file's computed digest.
+/// Streams the file through the hasher (`sha256_file`) and compares
+/// case-insensitively against `expected_sha256`. An empty pin skips verification
+/// with a warning, matching the registry's currently-unpinned artifacts.
 #[cfg(feature = "download")]
-fn cached_file_is_valid(path: &Path, expected_sha256: &str) -> Result<bool> {
+fn verify_sha256_file(path: &Path, expected_sha256: &str, model_name: &str) -> Result<()> {
     if expected_sha256.is_empty() {
-        return Ok(true);
+        tracing::warn!(
+            model = model_name,
+            "model artifact has no pinned sha256; skipping integrity verification"
+        );
+        return Ok(());
     }
     let actual = sha256_file(path)?;
-    Ok(actual.eq_ignore_ascii_case(expected_sha256))
-}
-
-/// Fetch `file` from `repo` on Hugging Face into memory (blocking, rustls).
-#[cfg(feature = "download")]
-fn fetch_from_hub(repo: &str, file: &str) -> Result<Vec<u8>> {
-    let (owner, name) = match repo.split_once('/') {
-        Some((owner, name)) => (owner, name),
-        None => ("", repo),
-    };
-    let client = hf_hub::HFClientSync::new()
-        .map_err(|source| model_error(format!("could not create the Hugging Face client for `{repo}`"), source))?;
-    let bytes = client
-        .model(owner, name)
-        .download_file_to_bytes()
-        .filename(file.to_string())
-        .send()
-        .map_err(|source| model_error(format!("could not download `{file}` from `{repo}`"), source))?;
-    Ok(bytes.to_vec())
+    if actual.eq_ignore_ascii_case(expected_sha256) {
+        Ok(())
+    } else {
+        Err(OcrError::model(format!(
+            "sha256 mismatch for `{model_name}`: expected {expected_sha256}, got {actual}"
+        )))
+    }
 }
 
 /// Verify `bytes` against a non-empty SHA-256 pin, warning when unpinned.
-#[cfg(feature = "download")]
+#[cfg(all(test, feature = "download"))]
 fn verify_sha256(bytes: &[u8], expected_sha256: &str, model_name: &str) -> Result<()> {
     if expected_sha256.is_empty() {
         tracing::warn!(
@@ -126,30 +196,8 @@ fn verify_sha256(bytes: &[u8], expected_sha256: &str, model_name: &str) -> Resul
     }
 }
 
-/// Write `bytes` to `path` atomically: write a sibling temp file, then rename.
-///
-/// The rename keeps a partially written artifact from ever being observed at the
-/// final path.
-#[cfg(feature = "download")]
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    // Per-process-and-call-unique temp name so concurrent downloads of the same ~keep
-    // model never share (and clobber) one in-flight temp file. ~keep
-    static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let unique = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let temp = path.with_extension(format!("{}.{unique}.part", std::process::id()));
-    std::fs::write(&temp, bytes)?;
-    std::fs::rename(&temp, path)?;
-    Ok(())
-}
-
 /// Compute the lowercase hex SHA-256 of an in-memory buffer.
-#[cfg(feature = "download")]
+#[cfg(all(test, feature = "download"))]
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -199,8 +247,59 @@ fn model_error(message: String, source: impl std::error::Error + Send + Sync + '
     }
 }
 
-#[cfg(all(test, feature = "download"))]
+#[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_cache_dir_name_mirrors_the_hugging_face_layout() {
+        assert_eq!(
+            repo_cache_dir_name("itextresearch/itext-EasyOCR-english_g2"),
+            "models--itextresearch--itext-EasyOCR-english_g2"
+        );
+    }
+
+    #[test]
+    fn hf_cache_root_returns_the_override_verbatim() {
+        let override_dir = Path::new("/custom/hub/cache");
+        assert_eq!(hf_cache_root(Some(override_dir)).unwrap(), override_dir);
+    }
+
+    #[test]
+    fn resolve_cached_finds_a_file_planted_in_a_snapshot() {
+        let root = std::env::temp_dir().join(format!("sceptre-resolve-{}", std::process::id()));
+        let repo = "itextresearch/itext-EasyOCR-english_g2";
+        let file = "itext-EasyOCR-english_g2.onnx";
+        let snapshot = root.join(repo_cache_dir_name(repo)).join("snapshots").join("deadbeef");
+        std::fs::create_dir_all(&snapshot).unwrap();
+        let planted = snapshot.join(file);
+        std::fs::write(&planted, b"onnx").unwrap();
+
+        assert_eq!(resolve_cached(&root, repo, file), Some(planted));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resolve_cached_returns_none_when_the_file_is_absent() {
+        let root = std::env::temp_dir().join(format!("sceptre-resolve-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        assert_eq!(
+            resolve_cached(
+                &root,
+                "itextresearch/itext-EasyOCR-english_g2",
+                "itext-EasyOCR-english_g2.onnx"
+            ),
+            None
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+}
+
+#[cfg(all(test, feature = "download"))]
+mod download_tests {
     use super::*;
 
     /// Lowercase hex SHA-256 of the empty input, per the FIPS 180-4 test vector.
@@ -232,16 +331,6 @@ mod tests {
     }
 
     #[test]
-    fn cache_path_namespaces_by_owner_repo_and_file() {
-        let cache_dir = Path::new("/cache/sceptre");
-        let path = cache_path(cache_dir, "itextresearch/itext-EasyOCR-english_g2", "english_g2.onnx");
-        assert_eq!(
-            path,
-            Path::new("/cache/sceptre/itextresearch/itext-EasyOCR-english_g2/english_g2.onnx")
-        );
-    }
-
-    #[test]
     fn sha256_file_hashes_written_bytes() {
         let dir = std::env::temp_dir().join(format!("sceptre-hash-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -254,15 +343,16 @@ mod tests {
     }
 
     #[test]
-    fn cached_file_is_valid_matches_pin_and_rejects_wrong_pin() {
-        let dir = std::env::temp_dir().join(format!("sceptre-cache-{}", std::process::id()));
+    fn verify_sha256_file_matches_pin_and_rejects_wrong_pin() {
+        let dir = std::env::temp_dir().join(format!("sceptre-verify-file-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("abc.bin");
         std::fs::write(&file, b"abc").unwrap();
 
-        assert!(cached_file_is_valid(&file, ABC_SHA256).unwrap());
-        assert!(!cached_file_is_valid(&file, EMPTY_SHA256).unwrap());
-        assert!(cached_file_is_valid(&file, "").unwrap());
+        assert!(verify_sha256_file(&file, ABC_SHA256, "abc_model").is_ok());
+        assert!(verify_sha256_file(&file, EMPTY_SHA256, "abc_model").is_err());
+        // An empty pin skips verification and accepts any bytes. ~keep
+        assert!(verify_sha256_file(&file, "", "unpinned_model").is_ok());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -273,12 +363,12 @@ mod tests {
         use crate::models::registry::craft_entry;
 
         let cache_dir = std::env::temp_dir().join(format!("sceptre-net-{}", std::process::id()));
-        let path = ensure(&craft_entry(), &cache_dir, None).expect("craft download should succeed");
+        let path = ensure(&craft_entry(), Some(cache_dir.as_path()), None).expect("craft download should succeed");
         assert!(path.is_file(), "downloaded artifact must exist at {}", path.display());
         assert!(path.starts_with(&cache_dir), "artifact must live under the cache dir");
 
         // A second call must hit the cache and return the same stable path. ~keep
-        let again = ensure(&craft_entry(), &cache_dir, None).expect("cached lookup should succeed");
+        let again = ensure(&craft_entry(), Some(cache_dir.as_path()), None).expect("cached lookup should succeed");
         assert_eq!(path, again);
 
         std::fs::remove_dir_all(&cache_dir).ok();

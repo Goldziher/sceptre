@@ -32,7 +32,6 @@ mcp = ["dep:rmcp", "dep:schemars", "dep:tokio"]
 bench = []
 
 [dependencies]
-dirs = { workspace = true }
 hf-hub = { workspace = true, optional = true }
 image = { workspace = true }
 imageproc = { workspace = true }

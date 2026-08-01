@@ -3,9 +3,11 @@
 //! Each committed example image (`tests/data/images/*`) is replayed through the
 //! real, default-engine `Reader` and compared against a dual golden fixture in
 //! `tests/data/golden/*.json` — an authoritative Python EasyOCR reference and a
-//! sceptre snapshot (see `tests/data/golden/README.md`). Models are resolved from
-//! the local Hugging Face hub cache by [`helpers::HfCacheModelProvider`]; no
-//! download happens here.
+//! sceptre snapshot (see `tests/data/golden/README.md`). Availability is gated via
+//! the library's own `model_manifest`, and the reader is built with the default
+//! provider, which resolves models from the shared Hugging Face hub cache (ADR
+//! 0017); the test only builds a reader once the manifest reports every model
+//! cached, so no download happens here.
 //!
 //! Real-model tests are gated on `SCEPTRE_REQUIRE_MODELS`: when the models are not
 //! resolvable, the tests skip (pass) by default, but panic when the env var is
@@ -18,11 +20,9 @@ mod helpers;
 
 #[cfg(feature = "ort")]
 use std::path::PathBuf;
-#[cfg(feature = "ort")]
-use std::sync::Arc;
 
 #[cfg(feature = "ort")]
-use sceptre::{ReadOptions, Reader};
+use sceptre::{OcrConfig, ReadOptions, Reader};
 
 /// Fuzzy word-F1 floor for reference parity, mirroring the corpus tolerance.
 #[cfg(feature = "ort")]
@@ -50,6 +50,15 @@ fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")
 }
 
+/// Whether every model the default English config needs is already cached, per the
+/// library's own manifest (pure filesystem inspection of the Hugging Face hub cache).
+#[cfg(feature = "ort")]
+fn models_available() -> bool {
+    sceptre::model_manifest(&OcrConfig::default())
+        .map(|manifest| manifest.iter().all(|info| info.cached))
+        .unwrap_or(false)
+}
+
 #[test]
 fn should_treat_unset_require_models_as_optional() {
     // With the env var unset in the default test environment, real-model tests must ~keep
@@ -67,19 +76,19 @@ fn should_treat_unset_require_models_as_optional() {
 #[test]
 #[cfg(feature = "ort")]
 fn should_match_dual_golden_for_english_png() {
-    if !helpers::HfCacheModelProvider::available() {
+    if !models_available() {
         assert!(
             !require_models(),
-            "SCEPTRE_REQUIRE_MODELS is set but CRAFT + english_g2 could not be resolved from the \
-             Hugging Face cache (~/.cache/huggingface/hub); run the model-provisioning step first"
+            "SCEPTRE_REQUIRE_MODELS is set but CRAFT + english_g2 are not cached in the \
+             Hugging Face hub cache (HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub); \
+             run the model-provisioning step first"
         );
         return;
     }
 
     let reader = Reader::builder()
-        .model_provider(Arc::new(helpers::HfCacheModelProvider::new()))
         .build()
-        .expect("building the reader with the Hugging Face cache model provider");
+        .expect("building the reader with the default Hugging Face cache model provider");
 
     let image_path = data_dir().join("images/english.png");
     let result = reader

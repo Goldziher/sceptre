@@ -3001,7 +3001,6 @@ name = "sceptre"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "dirs",
  "hf-hub",
  "image",
  "imageproc",
