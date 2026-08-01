@@ -170,11 +170,18 @@ impl OcrEngine for SceptreEngine {
 /// when the set is English-only or empty. Two or more distinct non-English languages
 /// need different models and are rejected (mirrors EasyOCR's group selection).
 fn resolve_recognition_language(languages: &[Language]) -> Result<Language> {
-    let non_english: Vec<Language> = languages
+    // Distinct non-English groups only: repeated entries (`--lang korean --lang korean`) ~keep
+    // name one recognizer, so dedupe before checking arity rather than matching length. ~keep
+    let mut non_english: Vec<Language> = Vec::new();
+    for language in languages
         .iter()
         .copied()
         .filter(|language| *language != Language::English)
-        .collect();
+    {
+        if !non_english.contains(&language) {
+            non_english.push(language);
+        }
+    }
     match non_english.as_slice() {
         [] => Ok(Language::English),
         [single] => Ok(*single),
@@ -277,6 +284,19 @@ mod tests {
         assert_eq!(
             resolve_recognition_language(&[Language::Japanese]).unwrap(),
             Language::Japanese
+        );
+    }
+
+    #[test]
+    fn resolve_language_dedupes_repeated_non_english_groups() {
+        // Repeated flags/config entries name one recognizer, not two. ~keep
+        assert_eq!(
+            resolve_recognition_language(&[Language::Korean, Language::Korean]).unwrap(),
+            Language::Korean
+        );
+        assert_eq!(
+            resolve_recognition_language(&[Language::English, Language::Korean, Language::Korean]).unwrap(),
+            Language::Korean
         );
     }
 
