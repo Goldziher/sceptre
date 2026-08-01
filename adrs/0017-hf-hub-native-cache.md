@@ -65,3 +65,16 @@ name.
   streaming the returned file (real pins can be added later).
 - Neutral: the flat `~/.cache/sceptre` layout is abandoned; a previously cached
   copy there is simply re-downloaded into the hub cache once.
+
+## Status update (2026-08-01)
+
+`ensure` is now **offline-first**: when the artifact already resolves in the hub cache it
+is returned directly, skipping hf-hub's per-run revision revalidation (a `304` round-trip
+to the Hub that cost a network RTT every run). This makes the CLI work fully offline and
+roughly halves cold-run latency. The tradeoff: a cache hit trusts the bytes that were
+sha256-verified at download time and does **not** re-hash them against the registry pin on
+every run — matching how `hf-hub`/`cargo`/`pip` treat their caches. Consequence: if a pin
+in the registry is bumped for an updated upstream artifact, a machine holding the old cached
+copy keeps serving it until that snapshot is re-fetched (clear the hub cache to force a
+re-download). Per-run integrity re-verification was deliberately traded for the offline-first
+speed win; the download path still verifies the pin.

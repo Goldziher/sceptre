@@ -35,8 +35,8 @@ Every fixture carries two goldens for the same image (see ADR 0016):
 
 `quad` is four `[x, y]` corners, clockwise from top-left. While `placeholder` is
 `true`, the fixture has not been regenerated from real runs and the parity
-assertions are skipped (the test only verifies the pipeline runs). `english.json`
-ships as a placeholder.
+assertions are skipped (the test only verifies the pipeline runs). The committed
+fixtures are generated from real EasyOCR and sceptre runs (`placeholder: false`).
 
 ## Model gating
 

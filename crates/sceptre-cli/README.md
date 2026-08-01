@@ -7,8 +7,8 @@ reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s pipeline (*
 then **gen2 CRNN** recognition over ONNX). One self-contained binary, no Python runtime, matching
 EasyOCR across six scripts (English, Latin, Chinese-simplified, Japanese, Korean, Cyrillic).
 
-Models download from Hugging Face on first use, cache locally, and are sha256-verified — every run
-after that is fully offline.
+Models download from Hugging Face on first use, cache locally, and are sha256-verified on download —
+every run after that reads the cache with no network.
 
 ## Install
 

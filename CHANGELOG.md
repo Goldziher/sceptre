@@ -21,6 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   multi-image batch mode (models load once) and multi-language recognition.
 - MCP server exposing a `readtext` tool for agent integrations.
 - Offline-first model provisioning: models download from Hugging Face on first use, cache locally,
-  and are sha256-verified — every run thereafter is fully offline.
+  and are sha256-verified on download — every run thereafter reads the cache with no network.
 
 [0.1.0]: https://github.com/Goldziher/sceptre/releases/tag/v0.1.0

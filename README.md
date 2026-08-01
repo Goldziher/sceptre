@@ -47,7 +47,8 @@ cargo install sceptre-cli
 ```
 
 The models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached
-under the standard HF cache, and sha256-verified. Every run after that is fully offline.
+under the standard HF cache, and sha256-verified on download. Every run after that reads the cached
+models with no network.
 
 > The default build loads ONNX Runtime at runtime (`ORT_DYLIB_PATH`). For a zero-config native
 > binary that bundles the runtime, install with `--features ort-bundled`.
@@ -73,6 +74,9 @@ for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.li
 }
 # Ok::<(), sceptre::OcrError>(())
 ```
+
+The library ships `default = []`, so enable a backend and model download:
+`sceptre = { version = "0.1", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
 
 **MCP server** — expose a `readtext` tool to an agent:
 
