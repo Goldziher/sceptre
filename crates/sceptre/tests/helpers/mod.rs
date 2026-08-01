@@ -77,6 +77,49 @@ fn tokenize(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_lowercase).collect()
 }
 
+/// Bag-of-characters F1 between a hypothesis and a reference string.
+///
+/// Whitespace is ignored and characters are lowercased, then multiset
+/// precision/recall/F1 is scored over the remaining characters. This is the
+/// appropriate parity metric for scripts without word boundaries (Japanese,
+/// Chinese), where [`word_f1`]'s whitespace tokenization would treat a whole line
+/// as a single brittle token. Two empty strings score `1.0`; one empty side `0.0`.
+pub fn char_f1(hypothesis: &str, reference: &str) -> f32 {
+    let hypothesis_chars = char_bag(hypothesis);
+    let reference_chars = char_bag(reference);
+
+    if hypothesis_chars.is_empty() && reference_chars.is_empty() {
+        return 1.0;
+    }
+    if hypothesis_chars.is_empty() || reference_chars.is_empty() {
+        return 0.0;
+    }
+
+    let mut remaining = reference_chars.clone();
+    let mut matched = 0usize;
+    for character in &hypothesis_chars {
+        if let Some(position) = remaining.iter().position(|candidate| candidate == character) {
+            remaining.remove(position);
+            matched += 1;
+        }
+    }
+
+    if matched == 0 {
+        return 0.0;
+    }
+
+    let precision = matched as f32 / hypothesis_chars.len() as f32;
+    let recall = matched as f32 / reference_chars.len() as f32;
+    2.0 * precision * recall / (precision + recall)
+}
+
+fn char_bag(text: &str) -> Vec<char> {
+    text.chars()
+        .filter(|character| !character.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 /// Intersection-over-union of two axis-aligned boxes, used to score box parity
 /// against the golden fixture. Returns `0.0` for degenerate or disjoint boxes.
 pub fn box_iou(a: BBox, b: BBox) -> f32 {
@@ -235,6 +278,29 @@ mod tests {
     fn should_score_partial_overlap_word_f1() {
         // hypothesis {a, b}, reference {a, b, c}: precision 1.0, recall 2/3, F1 0.8. ~keep
         assert!((word_f1("a b", "a b c") - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn should_score_identical_cjk_as_char_f1_one() {
+        assert_eq!(char_f1("清潔できれいな", "清潔できれいな"), 1.0);
+    }
+
+    #[test]
+    fn should_ignore_whitespace_in_char_f1() {
+        // "NO LTTB" vs "NOLTTB" differ only in a space, which char_f1 ignores. ~keep
+        assert_eq!(char_f1("NO LTTB", "NOLTTB"), 1.0);
+    }
+
+    #[test]
+    fn should_score_near_identical_cjk_high_under_char_f1() {
+        // One trailing punctuation char differs (7 vs 8 chars): F1 = 2*7/(7+8) ~ 0.933. ~keep
+        let f1 = char_f1("ポイ橋て禁止", "ポイ橋て禁止』");
+        assert!(f1 > 0.9, "near-identical CJK should score high, got {f1}");
+    }
+
+    #[test]
+    fn should_score_disjoint_char_f1_zero() {
+        assert_eq!(char_f1("abc", "xyz"), 0.0);
     }
 
     #[test]
