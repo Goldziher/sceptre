@@ -1,8 +1,8 @@
 //! The gen2 model registry.
 //!
 //! Source: the `itextresearch/itext-EasyOCR-*` ONNX repos on Hugging Face
-//! (Apache-2.0, dynamic-width). `sha256` values are filled in once each artifact
-//! is pinned.
+//! (Apache-2.0, dynamic-width). Each `sha256` is pinned to the current upstream
+//! artifact and verified on download (see [`crate::models::download`]).
 
 use crate::config::Language;
 use crate::error::{OcrError, Result};
@@ -28,7 +28,7 @@ pub const fn craft_entry() -> ModelEntry {
         name: "craft_mlt_25k",
         hf_repo: "itextresearch/itext-EasyOCR-craft_mlt_25k",
         file: "itext-EasyOCR-craft_mlt_25k.onnx",
-        sha256: "",
+        sha256: "f441eb402f3625d2a4490b3861efd614711bc20c516b4cf05f498c8673a2d255",
     }
 }
 
@@ -76,37 +76,37 @@ pub const fn recognizer_entry(language: Language) -> ModelEntry {
             name: "english_g2",
             hf_repo: "itextresearch/itext-EasyOCR-english_g2",
             file: "itext-EasyOCR-english_g2.onnx",
-            sha256: "",
+            sha256: "cd944f5c1da6fca788ad393e219ec6e560dc5329d25662956162202cab282f80",
         },
         Language::Latin => ModelEntry {
             name: "latin_g2",
             hf_repo: "itextresearch/itext-EasyOCR-latin_g2",
             file: "itext-EasyOCR-latin_g2.onnx",
-            sha256: "",
+            sha256: "8c0a97f31cb8f0acf4216fa274772e85d80cd5fd37ce996deecb764a40216334",
         },
         Language::ChineseSimplified => ModelEntry {
             name: "zh_sim_g2",
             hf_repo: "itextresearch/itext-EasyOCR-zh_sim_g2",
             file: "itext-EasyOCR-zh_sim_g2.onnx",
-            sha256: "",
+            sha256: "976a960784b3cf57d7de8ab039daf83f6c0999eb745745965c4ec611b74acdca",
         },
         Language::Japanese => ModelEntry {
             name: "japanese_g2",
             hf_repo: "itextresearch/itext-EasyOCR-japanese_g2",
             file: "itext-EasyOCR-japanese_g2.onnx",
-            sha256: "",
+            sha256: "e520e4a4939019b84dc817d6a1eab59edce560e0ba5a17b336f499265237af67",
         },
         Language::Korean => ModelEntry {
             name: "korean_g2",
             hf_repo: "itextresearch/itext-EasyOCR-korean_g2",
             file: "itext-EasyOCR-korean_g2.onnx",
-            sha256: "",
+            sha256: "fa1028e57feff4a95777b190c496ddf351223f107b1e075449705c0e94661cbd",
         },
         Language::Cyrillic => ModelEntry {
             name: "cyrillic_g2",
             hf_repo: "itextresearch/itext-EasyOCR-cyrillic_g2",
             file: "itext-EasyOCR-cyrillic_g2.onnx",
-            sha256: "",
+            sha256: "f873b0a8f73e2948c9ecdf028d04f576a9d95fe8a2c6ae913aa9bbb74897825d",
         },
     }
 }
