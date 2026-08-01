@@ -63,3 +63,9 @@ backend seam and does not touch `config`/`types`.
 - Bad/limited: `imageproc`'s dilation kernel shape differs slightly from OpenCV's rectangular
   element; parity is asserted at the box level via golden IoU, not per pixel.
 - Neutral: `imageproc` pulls `nalgebra`/`num` into the tree (pure Rust, covered by `cargo-deny`).
+
+## Status update (2026-08-01)
+
+The dilation step is **amended by ADR 0018**: it now uses a custom cv2-exact `MORPH_RECT(1 + niter)`
+kernel instead of `imageproc`'s `LInf` dilation, closing the "differs slightly from OpenCV"
+limitation above. Connected-component labelling and min-area rectangle fitting stay on `imageproc`.
