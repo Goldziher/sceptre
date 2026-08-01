@@ -1,172 +1,85 @@
-//! Tier-2 golden parity skeletons.
+//! Tier-2 golden parity harness.
 //!
-//! These replay each committed example image (`tests/data/images/*`) through the
-//! real, default-engine `Reader` and compare recognized text against a
-//! hand-authored fixture in `tests/data/golden/*.json` (see
-//! `tests/data/golden/README.md`). They require downloaded ONNX models and a
-//! working detect/recognize pipeline, so they are `#[ignore]`d and excluded from
-//! the default `cargo test` run; opt in with `cargo test -- --ignored` once
-//! models are available locally.
+//! Each committed example image (`tests/data/images/*`) is replayed through the
+//! real, default-engine `Reader` and compared against a dual golden fixture in
+//! `tests/data/golden/*.json` — an authoritative Python EasyOCR reference and a
+//! sceptre snapshot (see `tests/data/golden/README.md`). Models are resolved from
+//! the local Hugging Face hub cache by [`helpers::HfCacheModelProvider`]; no
+//! download happens here.
 //!
-//! The `iou` and `golden_lines` helpers below are pure logic with no model
-//! dependency, so they carry their own always-on unit tests.
+//! Real-model tests are gated on `SCEPTRE_REQUIRE_MODELS`: when the models are not
+//! resolvable, the tests skip (pass) by default, but panic when the env var is
+//! truthy so CI surfaces a misconfigured model cache. Their bodies are additionally
+//! `#[cfg(feature = "ort")]`-gated so the default backend-less `cargo test` compiles
+//! and passes. The pure helpers carry their own always-on unit tests in
+//! `tests/helpers/mod.rs`.
 
-use std::path::PathBuf;
-
-use sceptre::{BBox, ReadOptions, Reader};
+mod helpers;
 
 #[cfg(feature = "ort")]
-use sceptre::{Language, ModelProvider};
+use std::path::PathBuf;
 #[cfg(feature = "ort")]
 use std::sync::Arc;
 
-/// A [`ModelProvider`] that serves local ONNX files named by environment variables,
-/// so the real engine can be exercised without any network access. `EASYOCR_TEST_
-/// CRAFT_ONNX` points at a CRAFT detector and `EASYOCR_TEST_RECOG_ONNX` at a gen2
-/// recognizer; the same recognizer serves every language group.
 #[cfg(feature = "ort")]
-struct LocalModelProvider {
-    detector: PathBuf,
-    recognizer: PathBuf,
-}
+use sceptre::{ReadOptions, Reader};
 
+/// Fuzzy word-F1 floor for reference parity, mirroring the corpus tolerance.
 #[cfg(feature = "ort")]
-impl LocalModelProvider {
-    fn from_env() -> Self {
-        let detector = std::env::var("EASYOCR_TEST_CRAFT_ONNX").expect("set EASYOCR_TEST_CRAFT_ONNX to a CRAFT model");
-        let recognizer =
-            std::env::var("EASYOCR_TEST_RECOG_ONNX").expect("set EASYOCR_TEST_RECOG_ONNX to a recognizer model");
-        Self {
-            detector: PathBuf::from(detector),
-            recognizer: PathBuf::from(recognizer),
+const WORD_F1_THRESHOLD: f32 = 0.8;
+
+/// Per-line box-IoU floor, matching the EasyOCR parity threshold.
+#[cfg(feature = "ort")]
+const BOX_IOU_THRESHOLD: f32 = 0.5;
+
+/// Whether `SCEPTRE_REQUIRE_MODELS` is set to a truthy value, forcing real-model
+/// tests to run (and fail loudly if models are missing) instead of skipping.
+fn require_models() -> bool {
+    match std::env::var("SCEPTRE_REQUIRE_MODELS") {
+        Ok(value) => {
+            let value = value.trim().to_ascii_lowercase();
+            !matches!(value.as_str(), "" | "0" | "false" | "no")
         }
-    }
-}
-
-#[cfg(feature = "ort")]
-impl ModelProvider for LocalModelProvider {
-    fn detector(&self) -> sceptre::Result<PathBuf> {
-        Ok(self.detector.clone())
-    }
-
-    fn recognizer(&self, _language: Language) -> sceptre::Result<PathBuf> {
-        Ok(self.recognizer.clone())
+        Err(_) => false,
     }
 }
 
 /// Absolute path to `tests/data/` in this crate.
+#[cfg(feature = "ort")]
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")
 }
 
-/// Intersection-over-union of two axis-aligned boxes, used to score box parity
-/// against the golden fixture once real detection output exists.
-fn iou(a: BBox, b: BBox) -> f32 {
-    let x_min = a.x_min.max(b.x_min);
-    let y_min = a.y_min.max(b.y_min);
-    let x_max = a.x_max.min(b.x_max);
-    let y_max = a.y_max.min(b.y_max);
-    let intersection = (x_max - x_min).max(0.0) * (y_max - y_min).max(0.0);
-
-    let area_a = (a.x_max - a.x_min) * (a.y_max - a.y_min);
-    let area_b = (b.x_max - b.x_min) * (b.y_max - b.y_min);
-    let union = area_a + area_b - intersection;
-
-    if union <= 0.0 { 0.0 } else { intersection / union }
-}
-
-/// Extracts the `{"lines": ["...", ...]}` string array from a golden fixture (see
-/// `tests/data/golden/README.md`). Parsed with `serde_json` so fixture text may
-/// contain commas, quotes, and escapes without splitting incorrectly.
-fn golden_lines(json: &str) -> Vec<String> {
-    let fixture: serde_json::Value = serde_json::from_str(json).expect("golden fixture must be valid JSON");
-    fixture["lines"]
-        .as_array()
-        .expect("golden fixture must have a `lines` array")
-        .iter()
-        .map(|line| {
-            line.as_str()
-                .expect("each golden line must be a JSON string")
-                .to_string()
-        })
-        .collect()
-}
-
 #[test]
-fn should_score_identical_boxes_as_iou_one() {
-    let a = BBox {
-        x_min: 0.0,
-        y_min: 0.0,
-        x_max: 10.0,
-        y_max: 10.0,
-    };
-
-    assert_eq!(iou(a, a), 1.0);
+fn should_treat_unset_require_models_as_optional() {
+    // With the env var unset in the default test environment, real-model tests must ~keep
+    // be allowed to skip rather than being forced to run. ~keep
+    if std::env::var("SCEPTRE_REQUIRE_MODELS").is_err() {
+        assert!(!require_models());
+    }
 }
 
-#[test]
-fn should_score_disjoint_boxes_as_iou_zero() {
-    let a = BBox {
-        x_min: 0.0,
-        y_min: 0.0,
-        x_max: 1.0,
-        y_max: 1.0,
-    };
-    let b = BBox {
-        x_min: 5.0,
-        y_min: 5.0,
-        x_max: 6.0,
-        y_max: 6.0,
-    };
-
-    assert_eq!(iou(a, b), 0.0);
-}
-
-#[test]
-fn should_score_half_overlapping_boxes_as_iou_one_third() {
-    let a = BBox {
-        x_min: 0.0,
-        y_min: 0.0,
-        x_max: 2.0,
-        y_max: 1.0,
-    };
-    let b = BBox {
-        x_min: 1.0,
-        y_min: 0.0,
-        x_max: 3.0,
-        y_max: 1.0,
-    };
-
-    // intersection = 1x1 = 1, union = 2 + 2 - 1 = 3. ~keep
-    assert_eq!(iou(a, b), 1.0 / 3.0);
-}
-
-#[test]
-fn should_parse_golden_fixture_lines() {
-    let lines = golden_lines(r#"{"lines": ["EASY OCR"]}"#);
-
-    assert_eq!(lines, vec!["EASY OCR".to_string()]);
-}
-
-#[test]
-fn should_parse_golden_fixture_with_multiple_lines() {
-    let lines = golden_lines(r#"{"lines": ["first line", "second line"]}"#);
-
-    assert_eq!(lines, vec!["first line".to_string(), "second line".to_string()]);
-}
-
+/// Exercises the full detect -> crop -> recognize pipeline through the public
+/// `Reader` with models resolved from the Hugging Face cache, and checks the dual
+/// golden: exact equality against the sceptre snapshot plus fuzzy word-F1 and
+/// per-line box-IoU against the EasyOCR reference. Parity assertions are skipped
+/// while a fixture is still the committed placeholder.
 #[test]
 #[cfg(feature = "ort")]
-#[ignore = "requires local CRAFT + recognizer ONNX models (EASYOCR_TEST_*_ONNX)"]
-fn should_run_the_real_engine_end_to_end_over_english_png() {
-    // Exercises the full detect → crop → recognize wiring through the public ~keep
-    // `Reader` with a local-file model provider; asserts the pipeline runs without ~keep
-    // error and produces at least one line. Text parity is the golden test's job. ~keep
-    let provider = Arc::new(LocalModelProvider::from_env());
+fn should_match_dual_golden_for_english_png() {
+    if !helpers::HfCacheModelProvider::available() {
+        assert!(
+            !require_models(),
+            "SCEPTRE_REQUIRE_MODELS is set but CRAFT + english_g2 could not be resolved from the \
+             Hugging Face cache (~/.cache/huggingface/hub); run the model-provisioning step first"
+        );
+        return;
+    }
+
     let reader = Reader::builder()
-        .model_provider(provider)
+        .model_provider(Arc::new(helpers::HfCacheModelProvider::new()))
         .build()
-        .expect("building the reader with a local model provider");
+        .expect("building the reader with the Hugging Face cache model provider");
 
     let image_path = data_dir().join("images/english.png");
     let result = reader
@@ -177,29 +90,79 @@ fn should_run_the_real_engine_end_to_end_over_english_png() {
         !result.lines.is_empty(),
         "the real engine should detect and recognize at least one line in english.png"
     );
-}
 
-#[test]
-#[ignore = "requires downloaded models"]
-fn should_match_golden_text_for_english_png() {
     let golden_path = data_dir().join("golden/english.json");
     let golden_json =
         std::fs::read_to_string(&golden_path).unwrap_or_else(|err| panic!("reading {}: {err}", golden_path.display()));
-    let expected_lines = golden_lines(&golden_json);
+    let golden = helpers::DualGolden::parse(&golden_json);
 
-    let reader = Reader::builder().build().expect("building the default reader");
-    let image_path = data_dir().join("images/english.png");
-    let result = reader
-        .readtext(&image_path, &ReadOptions::default())
-        .expect("running the default engine over english.png");
+    if golden.placeholder {
+        // Fixtures are not yet regenerated; the pipeline ran, which is all we can ~keep
+        // assert until real goldens land (see tests/data/golden/README.md). ~keep
+        return;
+    }
 
-    let actual_lines: Vec<String> = result.lines.iter().map(|line| line.text.clone()).collect();
+    assert_sceptre_snapshot(&result, &golden);
+    assert_easyocr_reference(&result, &golden);
+}
+
+/// Exact-equality check of recognized text against the sceptre snapshot golden.
+#[cfg(feature = "ort")]
+fn assert_sceptre_snapshot(result: &sceptre::OcrResult, golden: &helpers::DualGolden) {
+    let actual: Vec<String> = result.lines.iter().map(|line| line.text.clone()).collect();
+    let expected: Vec<String> = golden.sceptre.lines.iter().map(|line| line.text.clone()).collect();
     assert_eq!(
-        actual_lines, expected_lines,
-        "recognized text must match the golden fixture exactly"
+        actual, expected,
+        "recognized text must match the sceptre snapshot golden exactly"
+    );
+}
+
+/// Fuzzy word-F1 + per-line box-IoU check against the EasyOCR reference golden.
+#[cfg(feature = "ort")]
+fn assert_easyocr_reference(result: &sceptre::OcrResult, golden: &helpers::DualGolden) {
+    let actual_text = result
+        .lines
+        .iter()
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let reference_text = golden
+        .easyocr
+        .lines
+        .iter()
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let f1 = helpers::word_f1(&actual_text, &reference_text);
+    assert!(
+        f1 >= WORD_F1_THRESHOLD,
+        "word-F1 {f1:.3} against the EasyOCR reference is below the {WORD_F1_THRESHOLD} threshold"
     );
 
-    // Once detection produces real quads, extend this with a per-line box IoU ~keep
-    // check against expected boxes recorded alongside `expected_lines`, using ~keep
-    // the `iou` helper above and the EasyOCR parity threshold (>= 0.5). ~keep
+    for (index, reference_line) in golden.easyocr.lines.iter().enumerate() {
+        let reference_bbox = reference_line.bbox();
+        let best = result
+            .lines
+            .iter()
+            .map(|line| helpers::box_iou(quad_bbox(&line.quad), reference_bbox))
+            .fold(0.0f32, f32::max);
+        assert!(
+            best >= BOX_IOU_THRESHOLD,
+            "reference line {index} (`{}`) has no detection with box-IoU >= {BOX_IOU_THRESHOLD} (best {best:.3})",
+            reference_line.text
+        );
+    }
+}
+
+/// Axis-aligned bounds of a recognized quad, for IoU against a reference box.
+#[cfg(feature = "ort")]
+fn quad_bbox(quad: &sceptre::Quad) -> sceptre::BBox {
+    let xs = quad.points.map(|point| point.x);
+    let ys = quad.points.map(|point| point.y);
+    sceptre::BBox {
+        x_min: xs.iter().copied().fold(f32::INFINITY, f32::min),
+        y_min: ys.iter().copied().fold(f32::INFINITY, f32::min),
+        x_max: xs.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        y_max: ys.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+    }
 }
