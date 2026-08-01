@@ -8,8 +8,9 @@
 //! `$HF_HOME/hub` → `~/.cache/huggingface/hub`, overridable via
 //! [`crate::config::ModelConfig::cache_dir`]. Downloads run through `hf-hub` when
 //! the `download` feature is enabled, verifying the SHA-256 against the registry
-//! pin when one is present (the gen2 artifacts are currently unpinned; see the
-//! registry).
+//! pin (every CRAFT and gen2 artifact is pinned; see the registry). A cached
+//! artifact is trusted (verified when first downloaded) and returned without a
+//! network round-trip.
 //!
 //! The registry host is re-pointable: the optional `registry_owner` override
 //! (see [`crate::config::ModelConfig`] and ADR 0003) swaps the owner segment of
@@ -26,32 +27,29 @@ use crate::models::registry::effective_repo;
 
 /// Ensure a model artifact is present locally, returning its path.
 ///
-/// Downloads `entry` through the Hugging Face hub cache: a cache hit returns the
-/// on-disk path without re-downloading, a miss fetches and populates the cache.
-/// `cache_dir_override` overrides the hub cache root (see [`hf_cache_root`]); when
-/// `None` the client resolves the root from the environment. After download the
-/// artifact is verified against [`ModelEntry::sha256`] (empty pin → skipped).
+/// Offline-first: when the artifact already resolves in the Hugging Face hub cache
+/// it is returned directly — no network — skipping hf-hub's per-call revision
+/// revalidation (a `304` round-trip to the Hub that otherwise costs a network RTT
+/// on every run). Only a cache miss fetches from the Hub, verifying the download
+/// against [`ModelEntry::sha256`] (empty pin → skipped). `cache_dir_override`
+/// overrides the hub cache root (see [`hf_cache_root`]).
 #[cfg(feature = "download")]
 pub fn ensure(entry: &ModelEntry, cache_dir_override: Option<&Path>, registry_owner: Option<&str>) -> Result<PathBuf> {
     let repo = effective_repo(entry, registry_owner)?;
+    let root = hf_cache_root(cache_dir_override)?;
+
+    if let Some(path) = resolve_cached(&root, &repo, entry.file) {
+        return Ok(path);
+    }
+
     let (owner, name) = match repo.split_once('/') {
         Some((owner, name)) => (owner, name),
         None => ("", repo.as_str()),
     };
-
-    let client = match cache_dir_override {
-        Some(override_dir) => {
-            let root = hf_cache_root(Some(override_dir))?;
-            hf_hub::HFClient::builder()
-                .cache_dir(root)
-                .build_sync()
-                .map_err(|source| {
-                    model_error(format!("could not create the Hugging Face client for `{repo}`"), source)
-                })?
-        }
-        None => hf_hub::HFClientSync::new()
-            .map_err(|source| model_error(format!("could not create the Hugging Face client for `{repo}`"), source))?,
-    };
+    let client = hf_hub::HFClient::builder()
+        .cache_dir(root)
+        .build_sync()
+        .map_err(|source| model_error(format!("could not create the Hugging Face client for `{repo}`"), source))?;
 
     let path = client
         .model(owner, name)
@@ -355,6 +353,27 @@ mod download_tests {
         assert!(verify_sha256_file(&file, "", "unpinned_model").is_ok());
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ensure_returns_a_cached_artifact_without_network() {
+        use crate::models::registry::craft_entry;
+
+        let entry = craft_entry();
+        let root = std::env::temp_dir().join(format!("sceptre-ensure-cache-{}", std::process::id()));
+        let snapshot = root
+            .join(repo_cache_dir_name(entry.hf_repo))
+            .join("snapshots")
+            .join("rev0");
+        std::fs::create_dir_all(&snapshot).unwrap();
+        let planted = snapshot.join(entry.file);
+        std::fs::write(&planted, b"onnx-bytes").unwrap();
+
+        // Resolves from the planted cache with no Hub client built and no network. ~keep
+        let path = ensure(&entry, Some(root.as_path()), None).expect("cached artifact resolves offline");
+        assert_eq!(path, planted);
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
