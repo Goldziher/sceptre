@@ -77,24 +77,27 @@ impl ModelBackend for OrtBackend {
 
 /// Move a tensor's backing buffer out in row-major order, copy-free when possible.
 ///
-/// A standard-layout tensor already stores its elements contiguously in row-major
-/// order, so its buffer is taken by move. A non-standard layout (e.g. a transposed
-/// view made owned) is materialized into a fresh contiguous buffer first — the only
-/// case that copies. Either way the returned [`Vec`] matches the tensor's logical
-/// `iter().copied()` order, so downstream inference stays bit-identical.
+/// A standard-layout tensor whose buffer starts at offset 0 and is sized to the shape
+/// has that buffer taken by move (the common case, copy-free). A standard-layout slice
+/// with a nonzero offset or an over-long backing buffer, or a non-standard layout (e.g.
+/// a transposed view), is copied into a fresh contiguous buffer. Either way the returned
+/// [`Vec`] matches the tensor's logical `iter().copied()` order, so inference stays
+/// bit-identical.
 fn input_buffer(input: Tensor) -> (Vec<i64>, Vec<f32>) {
     let shape = shape_to_i64(input.shape());
+    let element_count: usize = input.shape().iter().product();
     if input.is_standard_layout() {
         let (data, offset) = input.into_raw_vec_and_offset();
-        debug_assert!(
-            matches!(offset, None | Some(0)),
-            "a standard-layout tensor must begin at buffer offset 0"
-        );
-        (shape, data)
-    } else {
-        let (data, _) = input.as_standard_layout().into_owned().into_raw_vec_and_offset();
-        (shape, data)
+        let start = offset.unwrap_or(0);
+        // Offset-0 buffers sized to the shape move out copy-free; a standard-layout ~keep
+        // slice's logical elements are the contiguous run [start, start + count). ~keep
+        if start == 0 && data.len() == element_count {
+            return (shape, data);
+        }
+        return (shape, data.into_iter().skip(start).take(element_count).collect());
     }
+    let (data, _) = input.as_standard_layout().into_owned().into_raw_vec_and_offset();
+    (shape, data)
 }
 
 /// Convert an ndarray shape (`&[usize]`) to the `i64` dims `ort` expects.
@@ -186,6 +189,24 @@ mod tests {
 
         assert_eq!(shape, vec![3_i64, 2]);
         assert_eq!(data, manual);
+    }
+
+    #[test]
+    fn input_buffer_slices_standard_layout_with_nonzero_offset() {
+        use ndarray::{Axis, Slice};
+        let mut base = ArrayD::from_shape_vec(IxDyn(&[3, 2]), (0..6).map(|value| value as f32).collect())
+            .expect("build the tensor");
+        base.slice_axis_inplace(Axis(0), Slice::from(1..));
+        assert!(base.is_standard_layout(), "the sliced array must stay standard layout");
+        let manual: Vec<f32> = base.iter().copied().collect();
+
+        let (shape, data) = input_buffer(base);
+
+        assert_eq!(shape, vec![2_i64, 2]);
+        assert_eq!(
+            data, manual,
+            "must return the logical elements, not the full backing buffer"
+        );
     }
 
     #[test]
