@@ -1,5 +1,6 @@
 //! Command definitions and dispatch.
 
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -44,10 +45,11 @@ pub enum ModelsAction {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run the full OCR pipeline over an image.
+    /// Run the full OCR pipeline over one or more images.
     Run {
-        /// Path to the input image.
-        image: PathBuf,
+        /// Paths to the input images (one or more); a single `Reader` is reused across them.
+        #[arg(required = true, num_args = 1..)]
+        images: Vec<PathBuf>,
         #[command(flatten)]
         overrides: OcrOverrides,
         /// Output format.
@@ -115,14 +117,47 @@ fn stdout() -> anstream::Stdout {
     anstream::stdout()
 }
 
-/// Run the full OCR pipeline and render the recognized lines.
-fn run_ocr(image: PathBuf, overrides: OcrOverrides, format: OutputFormat, no_detail: bool) -> Result<()> {
+/// A color-aware stderr writer that strips escapes on non-TTY / `NO_COLOR`.
+fn stderr() -> anstream::Stderr {
+    anstream::stderr()
+}
+
+/// Run the full OCR pipeline over one or more images, reusing a single `Reader`.
+///
+/// A single image keeps the historical single-result output; two or more images
+/// switch to batch rendering where a per-image failure is recorded and the run
+/// continues, exiting non-zero if any image failed.
+fn run_ocr(images: Vec<PathBuf>, overrides: OcrOverrides, format: OutputFormat, no_detail: bool) -> Result<()> {
     let reader = build_reader(&overrides)?;
     let options = ReadOptions { detail: !no_detail };
-    let result = reader
-        .readtext(&image, &options)
-        .with_context(|| format!("running OCR over {image:?}"))?;
-    output::render_result(&result, format, !no_detail, &mut stdout()).context("writing OCR results")?;
+    let detail = !no_detail;
+
+    if let [image] = images.as_slice() {
+        let result = reader
+            .readtext(image, &options)
+            .with_context(|| format!("running OCR over {image:?}"))?;
+        output::render_result(&result, format, detail, &mut stdout()).context("writing OCR results")?;
+        return Ok(());
+    }
+
+    let mut outcomes: Vec<(PathBuf, output::ImageOutcome)> = Vec::with_capacity(images.len());
+    let mut failures = 0usize;
+    for image in &images {
+        match reader.readtext(image, &options) {
+            Ok(result) => outcomes.push((image.clone(), Ok(result))),
+            Err(error) => {
+                failures += 1;
+                let message = format!("{error:#}");
+                // Diagnostic on stderr; the failure is also recorded in the structured stdout output. ~keep
+                let _ = writeln!(stderr(), "error: {}: {message}", image.display());
+                outcomes.push((image.clone(), Err(message)));
+            }
+        }
+    }
+    output::render_batch(&outcomes, format, detail, &mut stdout()).context("writing OCR results")?;
+    if failures > 0 {
+        anyhow::bail!("{failures} of {} image(s) failed", images.len());
+    }
     Ok(())
 }
 
@@ -180,11 +215,11 @@ impl Cli {
     pub fn run(self) -> Result<()> {
         match self.command {
             Commands::Run {
-                image,
+                images,
                 overrides,
                 format,
                 no_detail,
-            } => run_ocr(image, overrides, format, no_detail),
+            } => run_ocr(images, overrides, format, no_detail),
             Commands::Detect {
                 image,
                 overrides,

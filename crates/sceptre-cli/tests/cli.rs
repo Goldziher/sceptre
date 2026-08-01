@@ -50,6 +50,37 @@ fn should_fail_run_on_missing_image() {
 }
 
 #[test]
+fn should_show_variadic_images_arg_in_run_help() {
+    sceptre()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMAGES"));
+}
+
+#[test]
+fn should_report_each_missing_image_and_fail_without_aborting_batch() {
+    sceptre()
+        .args(["run", "/no/such/a.png", "/no/such/b.png"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("/no/such/a.png"))
+        .stderr(predicate::str::contains("/no/such/b.png"));
+}
+
+#[test]
+fn should_emit_json_array_for_batch_of_missing_images() {
+    sceptre()
+        .args(["run", "/no/such/a.png", "/no/such/b.png", "--format", "json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::starts_with("[").trim())
+        .stdout(predicate::str::contains("/no/such/a.png"))
+        .stdout(predicate::str::contains("/no/such/b.png"))
+        .stdout(predicate::str::contains("error"));
+}
+
+#[test]
 fn should_fail_detect_on_missing_image() {
     sceptre().args(["detect", "/no/such/file.png"]).assert().failure();
 }

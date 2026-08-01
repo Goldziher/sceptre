@@ -1,6 +1,7 @@
 //! Rendering of OCR results and model listings to text or JSON.
 
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 use anstyle::Style;
 use clap::ValueEnum;
@@ -40,6 +41,72 @@ pub fn render_result(result: &OcrResult, format: OutputFormat, detail: bool, wri
             }
             Ok(())
         }
+    }
+}
+
+/// One image's outcome in a batch run: recognized text, or a failure message.
+pub type ImageOutcome = Result<OcrResult, String>;
+
+/// Serializable batch entry: `{ "image", "lines" }` on success, `{ "image", "error" }` on failure.
+#[derive(serde::Serialize)]
+struct BatchEntry<'a> {
+    image: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lines: Option<&'a [TextLine]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
+}
+
+/// Render a batch of per-image OCR outcomes as text or JSON.
+///
+/// JSON emits an array of `{ "image", "lines" }` (or `{ "image", "error" }`) objects in input
+/// order. Text prints a per-image path header followed by that image's lines or its error, with a
+/// blank line separating images.
+pub fn render_batch(
+    items: &[(PathBuf, ImageOutcome)],
+    format: OutputFormat,
+    detail: bool,
+    writer: &mut dyn Write,
+) -> io::Result<()> {
+    match format {
+        OutputFormat::Json => {
+            let entries: Vec<BatchEntry<'_>> = items.iter().map(|(path, outcome)| batch_entry(path, outcome)).collect();
+            write_json(&entries, writer)
+        }
+        OutputFormat::Text => {
+            for (path, outcome) in items {
+                writeln!(writer, "{}", styled(&path.display().to_string(), style::heading()))?;
+                match outcome {
+                    Ok(result) => {
+                        for line in &result.lines {
+                            write_text_line(line, detail, writer)?;
+                        }
+                    }
+                    Err(message) => {
+                        writeln!(writer, "{}", styled(&format!("error: {message}"), style::error()))?;
+                    }
+                }
+                writeln!(writer)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Project one image outcome into its serializable [`BatchEntry`].
+fn batch_entry<'a>(path: &'a Path, outcome: &'a ImageOutcome) -> BatchEntry<'a> {
+    let image = path.display().to_string();
+    match outcome {
+        Ok(result) => BatchEntry {
+            image,
+            lines: Some(&result.lines),
+            error: None,
+        },
+        Err(message) => BatchEntry {
+            image,
+            lines: None,
+            error: Some(message),
+        },
     }
 }
 
