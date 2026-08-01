@@ -156,13 +156,17 @@ fn parity_korean_png() {
     run_dual_golden_parity("korean.png", "korean", Language::Korean);
 }
 
-/// Known gap: on this rotated multi-word sign, sceptre splits lines that EasyOCR's
-/// `group_text_box` merges (e.g. `Mairie du` → `Mairie` + `du`), so the merged
-/// reference line's best single-box IoU falls just under the 0.5 threshold (0.471).
-/// Recognition is at parity; this tracks the detection line-grouping divergence.
+/// Known gap: sceptre splits some multi-word lines EasyOCR merges (e.g. `Mairie du`
+/// → `Mairie` + `du`), so a merged reference line's best single-box IoU falls just
+/// under 0.5 (0.471). The line-grouping (`detect::group`) faithfully mirrors
+/// EasyOCR's `group_text_box` with identical thresholds; the divergence is upstream
+/// box geometry — the CRAFT dilation approximation (`detect::postprocess`
+/// `DILATION_KERNEL_DIVISOR`, imageproc symmetric kernel vs `cv2.MORPH_RECT(1+niter)`,
+/// see ADR 0013) yields marginally narrower boxes on odd `niter`. Recognition is at
+/// parity; this tracks that geometry gap.
 #[test]
 #[cfg(feature = "ort")]
-#[ignore = "detection line-grouping under-merges vs EasyOCR group_text_box (french box-IoU 0.471 < 0.5)"]
+#[ignore = "CRAFT dilation approximation yields narrower boxes; french box-IoU 0.471 < 0.5 (see ADR 0013)"]
 fn parity_french_jpg() {
     run_dual_golden_parity("french.jpg", "french", Language::Latin);
 }
