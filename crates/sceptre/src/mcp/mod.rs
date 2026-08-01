@@ -9,9 +9,9 @@ pub mod tools;
 pub mod types;
 
 use crate::engine::Reader;
-use crate::error::Result;
+use crate::error::{OcrError, Result};
 
 /// Run the MCP stdio server backed by `reader`.
 pub fn serve(_reader: Reader) -> Result<()> {
-    todo!("serve the rmcp stdio server exposing the readtext tool")
+    Err(OcrError::config("the MCP server is not yet implemented"))
 }
