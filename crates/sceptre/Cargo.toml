@@ -9,10 +9,10 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
-# The tract backend and the MCP server module are still stubs, so cargo-machete would
-# otherwise flag their optional deps as unused until those implementations land. ~keep
+# The tract backend is still a stub, so cargo-machete would otherwise flag its
+# optional dep as unused until that implementation lands. ~keep
 [package.metadata.cargo-machete]
-ignored = ["rmcp", "schemars", "tokio", "tract-onnx"]
+ignored = ["tract-onnx"]
 
 [lib]
 name = "sceptre"

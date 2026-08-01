@@ -89,7 +89,10 @@ enum Commands {
     },
     /// Run the MCP stdio server.
     #[cfg(feature = "mcp")]
-    Mcp,
+    Mcp {
+        #[command(flatten)]
+        overrides: OcrOverrides,
+    },
 }
 
 /// Build an `OcrConfig` from defaults with the CLI overrides applied.
@@ -199,8 +202,8 @@ impl Cli {
                 Ok(())
             }
             #[cfg(feature = "mcp")]
-            Commands::Mcp => {
-                let reader = build_reader(&OcrOverrides::default())?;
+            Commands::Mcp { overrides } => {
+                let reader = build_reader(&overrides)?;
                 sceptre::mcp::serve(reader).context("running the MCP server")
             }
         }

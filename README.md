@@ -73,12 +73,19 @@ for line in result.lines {
 
 ## MCP server
 
-Build with the `mcp` feature and run the stdio server, which exposes a `readtext`
-tool:
+Build with the `mcp` feature and run the stdio server, which exposes a single
+`readtext` tool:
 
 ```sh
-cargo run -p sceptre-cli --features mcp -- mcp
+cargo run -p sceptre-cli --features mcp -- mcp --lang english
 ```
+
+| Tool | Parameters | Returns |
+| --- | --- | --- |
+| `readtext` | `image_path` (string, required); `detail` (bool, optional, default `true`) | Structured JSON. With `detail`, the full result — each line's `text`, `confidence`, and bounding-box `quad`. Without it, a `lines` array of just the recognized text. |
+
+Recognition language, backend, and thread budget follow the flags passed to
+`sceptre mcp` (e.g. `--lang`, `--backend`, `--threads`).
 
 ## Feature flags
 
