@@ -8,6 +8,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme = "README.md"
+keywords = ["ocr", "text-recognition", "easyocr", "cli", "onnx"]
+categories = ["command-line-utilities", "computer-vision"]
 
 [[bin]]
 name = "sceptre"

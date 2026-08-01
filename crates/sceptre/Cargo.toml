@@ -8,6 +8,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/sceptre"
+readme = "README.md"
+keywords = ["ocr", "text-recognition", "easyocr", "craft", "onnx"]
+categories = ["computer-vision", "text-processing"]
 
 [lib]
 name = "sceptre"
