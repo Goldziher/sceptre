@@ -25,6 +25,9 @@ __pycache__/
 *.safetensors
 *.pth
 
+# comparative benchmark output (machine- and load-specific; reproduce via `task py:benchmark`)
+/benchmark-results
+
 # BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)
 .ai-rulez/.generated-manifest.json
 .claude/

@@ -32,3 +32,10 @@ tasks:
       the opt-in export/torch dependency group to produce real output
     cmds:
       - uv run python -m sceptre_rs_tools.golden
+
+  benchmark:
+    desc: >-
+      Head-to-head benchmark of sceptre (release CLI) vs upstream EasyOCR over the
+      image corpus; requires the opt-in export/torch group and a built release binary
+    cmds:
+      - uv run python -m sceptre_rs_tools.benchmark
