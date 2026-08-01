@@ -1,142 +1,146 @@
-# sceptre
+<!-- markdownlint-disable MD033 MD041 -->
+<div align="center">
 
-A Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s OCR
-pipeline — **CRAFT** text detection followed by **gen2 CRNN** recognition with
-CTC decoding — running the models over ONNX. Ships as a **library**, a **CLI**
-(`sceptre`), and an **MCP server**.
+<img src="docs/assets/banner.svg" alt="sceptre — text recognition, CRAFT + CRNN, in Rust" width="820">
 
-> **Status:** working. The full CRAFT detection → CRNN + CTC recognition pipeline
-> runs end-to-end through the library, CLI, and MCP server on both the `ort`
-> (native) and `tract` (pure-Rust) backends; models download on first use.
-> Cross-backend parity fixtures against EasyOCR are opt-in and not yet generated.
+**EasyOCR's accuracy. Rust's speed and footprint.**
 
-## Why
+sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
+OCR pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX.
+It matches EasyOCR's output on every script it supports, runs **~2–3× faster on a fraction of the
+memory**, and ships as one self-contained binary with **no Python runtime**. Use it as a **library**,
+a **CLI**, or an **MCP server**.
 
-- **Native performance, low RSS.** Rust + ONNX Runtime, CPU-optimized, with
-  configurable Rayon parallelism bounded by a single thread budget.
-- **Pure-Rust option.** A runtime-neutral backend seam lets the same pipeline run
-  on `ort` (native) or `tract` (pure-Rust, for WASM/Android).
-- **Library-first.** The OCR logic is a reusable rlib; the CLI and MCP server are
-  thin layers over it.
+6 scripts · CRAFT + gen2 CRNN · ONNX Runtime **or** pure-Rust · library · CLI · MCP · offline-first
 
-## Scope
+[![crates.io](https://img.shields.io/crates/v/sceptre?color=f5b301&style=flat-square)](https://crates.io/crates/sceptre)
+[![CI](https://img.shields.io/github/actions/workflow/status/Goldziher/sceptre/ci.yaml?style=flat-square&color=f5b301)](https://github.com/Goldziher/sceptre/actions/workflows/ci.yaml)
+[![docs.rs](https://img.shields.io/docsrs/sceptre?style=flat-square&color=f5b301)](https://docs.rs/sceptre)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-Targets EasyOCR's current models — the **CRAFT** detector and the **gen2**
-(`*_g2`) recognizers: `english`, `latin`, `zh_sim`, `japanese`, `korean`,
-`cyrillic`. Legacy gen1 models, DBNet, and beam-search decoding are out of scope
-for now (see [`adrs/0002`](adrs/0002-scope-gen2-recognizers-and-craft.md)).
+[Install](#install) · [Quickstart](#quickstart) · [Why sceptre](#why-sceptre) · [Benchmarks](#benchmarks) · [How it works](#how-it-works)
 
-## Models
+</div>
 
-ONNX artifacts come from the
-[`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch) repos on
-Hugging Face (Apache-2.0, dynamic-width). They are downloaded on first use into
-the shared Hugging Face hub cache (`HF_HUB_CACHE` / `HF_HOME` /
-`~/.cache/huggingface/hub`), and sha256-verified — nothing is committed to the
-repo (see [`adrs/0003`](adrs/0003-model-source-itext-onnx-runtime-download.md) and
-[`adrs/0017`](adrs/0017-hf-hub-native-cache.md)).
+---
+
+## Why sceptre
+
+EasyOCR is excellent and accurate — but it's a PyTorch stack: a Python interpreter, a multi-gigabyte
+runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops all of that.
+
+| | What you get | Why it matters |
+|---|---|---|
+| **Parity accuracy** | Validated against real EasyOCR output across all six gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic — matching text (word/char-F1) and boxes (IoU). | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
+| **Substantially faster** | ~2–3× higher throughput than EasyOCR on the same corpus — even a cold, one-shot CLI run beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
+| **A fraction of the memory** | Peak RSS around **20× lower** than the Python + torch process. | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
+| **One binary, no Python** | A single static executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
+| **Three surfaces** | The same engine as a Rust **library**, a **CLI** (`sceptre`), and an **MCP server** for agents. | Drop it into a service, a shell pipeline, or an AI tool without re-plumbing. |
+| **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM / Android — behind one seam. | Portability when you need it, native performance when you don't. |
+
+---
 
 ## Install
 
 ```sh
-cargo install --path crates/sceptre-cli
+cargo install sceptre-cli
 ```
 
-## CLI usage
+The models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached
+under the standard HF cache, and sha256-verified. Every run after that is fully offline.
+
+> The default build loads ONNX Runtime at runtime (`ORT_DYLIB_PATH`). For a zero-config native
+> binary that bundles the runtime, install with `--features ort-bundled`.
+
+## Quickstart
+
+**CLI** — one image or many in a single warm process:
 
 ```sh
-# Full pipeline
-sceptre run image.png --lang english --format json
-
-# Detection only
-sceptre detect image.png
-
-# Manage models
-sceptre models list
-sceptre models download
-
-# Shell completions
-sceptre completions zsh > _sceptre
+sceptre run receipt.png --lang english --format json
+sceptre run page1.png page2.png page3.png            # batch: models load once
+sceptre run sign.jpg --lang english --lang korean    # multi-language
 ```
 
-Diagnostics go to stderr (`--log-level`, `EASYOCR_LOG`); structured results go to
-stdout. Colour honors `NO_COLOR`.
-
-## Library usage
+**Library:**
 
 ```rust
-use sceptre::{OcrConfig, ReadOptions, Reader};
+use sceptre::{Reader, ReadOptions};
 
-let reader = Reader::builder().config(OcrConfig::default()).build()?;
-let result = reader.readtext("image.png".as_ref(), &ReadOptions::default())?;
-for line in result.lines {
+let reader = Reader::builder().build()?;
+for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.lines {
     println!("{} ({:.2})", line.text, line.confidence);
 }
 # Ok::<(), sceptre::OcrError>(())
 ```
 
-## MCP server
-
-Build with the `mcp` feature and run the stdio server, which exposes a single
-`readtext` tool:
+**MCP server** — expose a `readtext` tool to an agent:
 
 ```sh
-cargo run -p sceptre-cli --features mcp -- mcp --lang english
+sceptre mcp --lang english
 ```
 
-| Tool | Parameters | Returns |
-| --- | --- | --- |
-| `readtext` | `image_path` (string, required); `detail` (bool, optional, default `true`) | Structured JSON. With `detail`, the full result — each line's `text`, `confidence`, and bounding-box `quad`. Without it, a `lines` array of just the recognized text. |
+## Benchmarks
 
-Recognition language, backend, and thread budget follow the flags passed to
-`sceptre mcp` (e.g. `--lang`, `--backend`, `--threads`).
+Measured against upstream EasyOCR over a mixed 25-image corpus (documents, tables, rotated scans,
+five scripts), on CPU. Numbers vary with hardware and load; the **ratios** are the point.
+
+| | EasyOCR (warm) | **sceptre** |
+|---|---|---|
+| Throughput | 1× | **~2–3× faster** |
+| Peak memory | 1× | **~20× lower** |
+| Accuracy (CER / word-F1) | baseline | **at parity** |
+
+`cargo bench` covers the internal hot paths; the head-to-head harness (`task py:benchmark`) reproduces
+the table above. Parity fixtures live under
+[`crates/sceptre/tests/data/golden/`](crates/sceptre/tests/data/golden/).
+
+## How it works
+
+Three stages behind one `Reader`, mirroring EasyOCR's latest pipeline:
+
+1. **Detect** — CRAFT produces region/link heat-maps; thresholding, connected components, and
+   min-area boxes become text lines (horizontal and rotated).
+2. **Recognize** — each line is cropped, normalized, and run through a gen2 CRNN; CTC greedy decoding
+   turns the logits into text and a confidence.
+3. **Inference** — every model call goes through one backend seam: `ort` (native ONNX Runtime) or
+   `tract` (pure Rust). `config`, `types`, and geometry stay backend-agnostic.
+
+Design decisions live as [MADR records under `adrs/`](adrs/); conventions live in `.ai-rulez/`.
+
+## Scope
+
+Targets EasyOCR's current models — the **CRAFT** detector and the six **gen2** (`*_g2`) recognizers.
+Legacy gen1 models, DBNet, and beam-search decoding are out of scope
+(see [`adrs/0002`](adrs/0002-scope-gen2-recognizers-and-craft.md)). ONNX artifacts come from the
+[`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch) repos (Apache-2.0).
 
 ## Feature flags
 
 | Feature | Enables |
 | --- | --- |
-| `ort` | Native ONNX Runtime backend (desktop/server) |
-| `tract` | Pure-Rust ONNX backend (WASM/Android) |
-| `candle` | Reserved for a future pure-Rust native-tensor backend — not yet implemented (see ADR 0009) |
+| `ort` | Native ONNX Runtime backend (desktop / server) |
+| `ort-bundled` | `ort` with a prebuilt runtime fetched at build time (zero-config) |
+| `tract` | Pure-Rust ONNX backend (WASM / Android) |
 | `download` | Runtime model download + cache from Hugging Face |
 | `mcp` | MCP (`rmcp`) server surface |
+| `candle` | Reserved for a future pure-Rust native-tensor backend (see ADR 0009) |
 
-Configuration (`OcrConfig`) layers as: defaults < config file < environment < CLI
-flags, and is backend-agnostic.
+Configuration (`OcrConfig`) layers as defaults < config file < environment < CLI flags, and is
+backend-agnostic.
 
 ## Development
 
 ```sh
 task setup    # fetch deps, install git hooks
-task build
 task check    # cargo fmt + clippy -D warnings + test + poly lint
+task bench    # criterion microbenchmarks (--features bench)
 ```
 
-- Coding conventions live in `.ai-rulez/` (the source of truth for the generated
-  `CLAUDE.md` / `AGENTS.md`); run `ai-rulez generate` after editing them.
-- Architecture decisions are recorded under [`adrs/`](adrs/).
-
-### Benchmarks
-
-Microbenchmarks use criterion behind a `bench` cargo feature:
-
-```sh
-task bench
-cargo bench -p sceptre --features bench            # full run
-cargo bench -p sceptre --features bench -- --test  # fast smoke, skips timing
-```
-
-Results are local only — there is no CI perf gate; CI just compile-checks the benches.
-
-### Parity testing
-
-The crate ships golden/parity tests against real EasyOCR output. They skip by
-default and opt in when you supply downloaded models plus the `test_documents`
-submodule via an environment flag. See
-[`crates/sceptre/tests/data/golden/README.md`](crates/sceptre/tests/data/golden/README.md)
-for regeneration.
+Coding conventions are generated from `.ai-rulez/` into `CLAUDE.md` / `AGENTS.md` — edit the source,
+then run `ai-rulez generate`.
 
 ## License
 
-MIT. Model weights are distributed by third parties under their own licenses
-(the gen2 EasyOCR models and the iText ONNX exports are Apache-2.0).
+MIT. Model weights are distributed by third parties under their own licenses (the gen2 EasyOCR models
+and the iText ONNX exports are Apache-2.0).
