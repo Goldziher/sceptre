@@ -119,34 +119,31 @@ fn expand_free_quad(corners: &[[f32; 2]; 4], add_margin: f32) -> [[f32; 2]; 4] {
     ]
 }
 
-/// Arithmetic mean of a non-empty slice; returns `0.0` for an empty slice.
-fn mean(values: &[f32]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    values.iter().sum::<f32>() / values.len() as f32
-}
-
 /// Group y-center-sorted boxes into lines by y-center proximity relative to the
-/// running mean height (`ycenter_ths * mean(height)`).
+/// running mean height (`ycenter_ths * mean(height)`). The running sums accumulate
+/// in the same order the per-line vecs were built, so the means are bit-identical
+/// to re-summing the vecs each step.
 fn combine_into_lines(sorted: &[HBox], ycenter_ths: f32) -> Vec<Vec<HBox>> {
     let mut combined: Vec<Vec<HBox>> = Vec::new();
     let mut current: Vec<HBox> = Vec::new();
-    let mut heights: Vec<f32> = Vec::new();
-    let mut ycenters: Vec<f32> = Vec::new();
+    let mut height_sum = 0.0_f32;
+    let mut ycenter_sum = 0.0_f32;
+    let mut count = 0.0_f32;
 
     for &hbox in sorted {
-        let same_line = !current.is_empty() && (mean(&ycenters) - hbox.ycenter).abs() < ycenter_ths * mean(&heights);
+        let same_line =
+            !current.is_empty() && (ycenter_sum / count - hbox.ycenter).abs() < ycenter_ths * (height_sum / count);
         if current.is_empty() || same_line {
-            heights.push(hbox.height);
-            ycenters.push(hbox.ycenter);
-            current.push(hbox);
+            height_sum += hbox.height;
+            ycenter_sum += hbox.ycenter;
+            count += 1.0;
         } else {
             combined.push(std::mem::take(&mut current));
-            heights = vec![hbox.height];
-            ycenters = vec![hbox.ycenter];
-            current.push(hbox);
+            height_sum = hbox.height;
+            ycenter_sum = hbox.ycenter;
+            count = 1.0;
         }
+        current.push(hbox);
     }
     combined.push(current);
     combined
@@ -173,18 +170,21 @@ fn merge_line(line: &[HBox], config: &DetectionConfig) -> Vec<[f32; 4]> {
 fn group_adjacent(sorted: &[HBox], config: &DetectionConfig) -> Vec<Vec<HBox>> {
     let mut groups: Vec<Vec<HBox>> = Vec::new();
     let mut current: Vec<HBox> = Vec::new();
-    let mut heights: Vec<f32> = Vec::new();
+    let mut height_sum = 0.0_f32;
+    let mut count = 0.0_f32;
     let mut running_x_max = 0.0_f32;
 
     for &hbox in sorted {
         let mergeable = !current.is_empty()
-            && (mean(&heights) - hbox.height).abs() < config.height_ths * mean(&heights)
+            && (height_sum / count - hbox.height).abs() < config.height_ths * (height_sum / count)
             && (hbox.x_min - running_x_max) < config.width_ths * (hbox.y_max - hbox.y_min);
         if current.is_empty() || mergeable {
-            heights.push(hbox.height);
+            height_sum += hbox.height;
+            count += 1.0;
         } else {
             groups.push(std::mem::take(&mut current));
-            heights = vec![hbox.height];
+            height_sum = hbox.height;
+            count = 1.0;
         }
         running_x_max = hbox.x_max;
         current.push(hbox);
@@ -287,5 +287,23 @@ mod tests {
         let grouped = group_boxes(&[], &DetectionConfig::default());
         assert!(grouped.horizontal.is_empty());
         assert!(grouped.free.is_empty());
+    }
+
+    #[test]
+    fn should_merge_line_of_three_and_keep_distant_line_separate() {
+        // Exercises the running-mean accumulation: three adjacent same-height boxes
+        // accumulate into one line/group, a fourth far below forms its own line. ~keep
+        let config = config_with(0.0);
+        let a = axis_box(10.0, 50.0, 10.0, 30.0);
+        let b = axis_box(55.0, 95.0, 10.0, 30.0);
+        let c = axis_box(100.0, 140.0, 10.0, 30.0);
+        let d = axis_box(10.0, 50.0, 200.0, 220.0);
+
+        let grouped = group_boxes(&[a, b, c, d], &config);
+
+        assert_eq!(
+            grouped.horizontal,
+            vec![[10.0, 140.0, 10.0, 30.0], [10.0, 50.0, 200.0, 220.0]]
+        );
     }
 }

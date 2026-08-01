@@ -7,8 +7,6 @@
 //! Connected-component labelling, morphological dilation, and minimum-area
 //! rectangle fitting are provided by the `imageproc` crate (see ADR 0013).
 
-use std::collections::BTreeMap;
-
 use image::{GrayImage, ImageBuffer, Luma};
 use imageproc::distance_transform::Norm;
 use imageproc::geometry::min_area_rect;
@@ -122,10 +120,11 @@ pub(super) fn get_det_boxes(
     let stats = compute_label_stats(&labels, region);
 
     let mut boxes = Vec::new();
-    for (&label, stat) in &stats {
+    for (index, stat) in stats.iter().enumerate() {
         if stat.area < MIN_COMPONENT_AREA || stat.max_region < text_threshold {
             continue;
         }
+        let label = index as u32 + 1;
         if let Some(detected) = extract_box(label, &labels, &text_score, &link_score, stat)? {
             boxes.push(detected);
         }
@@ -157,22 +156,55 @@ fn build_comb_image(text_score: &Array2<bool>, link_score: &Array2<bool>) -> Res
         .ok_or_else(|| OcrError::inference("failed to build connected-component input image"))
 }
 
-/// Gather per-label statistics in a single pass. Background (label 0) is skipped,
-/// so only foreground components appear as keys (ascending order via `BTreeMap`).
-fn compute_label_stats(labels: &LabelImage, region: &Array2<f32>) -> BTreeMap<u32, LabelStat> {
-    let mut stats: BTreeMap<u32, LabelStat> = BTreeMap::new();
+/// Gather per-label statistics in a single pass. Background (label 0) is skipped.
+/// `connected_components` emits dense labels `1..=count`, so the result is indexed
+/// by `label - 1` in ascending label order (avoiding per-pixel map lookups).
+fn compute_label_stats(labels: &LabelImage, region: &Array2<f32>) -> Vec<LabelStat> {
+    let mut stats: Vec<Option<LabelStat>> = Vec::new();
     for (x, y, pixel) in labels.enumerate_pixels() {
         let label = pixel[0];
         if label == 0 {
             continue;
         }
+        let index = (label - 1) as usize;
+        if index >= stats.len() {
+            stats.resize(index + 1, None);
+        }
         let region_value = region[[y as usize, x as usize]];
-        stats
-            .entry(label)
-            .and_modify(|stat| stat.update(x, y, region_value))
-            .or_insert_with(|| LabelStat::new(x, y, region_value));
+        match &mut stats[index] {
+            Some(stat) => stat.update(x, y, region_value),
+            slot => *slot = Some(LabelStat::new(x, y, region_value)),
+        }
     }
-    stats
+    stats.into_iter().flatten().collect()
+}
+
+/// Global-coordinate window covering a component's bounding box expanded by the
+/// dilation radius and clamped to the label image, so per-component segmentation,
+/// dilation, and point collection are bounded to O(bbox area) rather than O(H·W).
+/// The radius margin keeps the dilated halo identical to a whole-map build.
+struct Window {
+    x0: u32,
+    y0: u32,
+    width: u32,
+    height: u32,
+}
+
+impl Window {
+    fn new(stat: &LabelStat, dimensions: (u32, u32), radius: u8) -> Self {
+        let (image_width, image_height) = dimensions;
+        let margin = u32::from(radius);
+        let x0 = stat.min_x.saturating_sub(margin);
+        let y0 = stat.min_y.saturating_sub(margin);
+        let x1 = (stat.max_x + margin).min(image_width - 1);
+        let y1 = (stat.max_y + margin).min(image_height - 1);
+        Self {
+            x0,
+            y0,
+            width: x1 - x0 + 1,
+            height: y1 - y0 + 1,
+        }
+    }
 }
 
 /// Build the single-component segmentation map, dilate it, and fit a box.
@@ -183,32 +215,37 @@ fn extract_box(
     link_score: &Array2<bool>,
     stat: &LabelStat,
 ) -> Result<Option<BoxPoints>> {
-    let segmap = build_segmap(label, labels, text_score, link_score)?;
-    let segmap = dilate_segmap(segmap, compute_niter(stat));
-    let points = collect_points(&segmap);
+    let radius = dilation_radius(compute_niter(stat));
+    let window = Window::new(stat, labels.dimensions(), radius);
+    let segmap = build_segmap(label, labels, text_score, link_score, &window)?;
+    let segmap = dilate_segmap(segmap, radius);
+    let points = collect_points(&segmap, &window);
     Ok(fit_box(&points))
 }
 
-/// Segmentation map: 255 where `labels == k`, then cleared where the pixel is
-/// link-only (`link_score && !text_score`) to drop pure affinity area.
+/// Segmentation map over `window`: 255 where `labels == k`, then cleared where the
+/// pixel is link-only (`link_score && !text_score`) to drop pure affinity area.
+/// Pixels outside the component bbox are background, so bounding the scan to the
+/// window reproduces the whole-map result exactly.
 fn build_segmap(
     label: u32,
     labels: &LabelImage,
     text_score: &Array2<bool>,
     link_score: &Array2<bool>,
+    window: &Window,
 ) -> Result<GrayImage> {
-    let (width, height) = labels.dimensions();
-    let mut buffer = vec![0u8; (width * height) as usize];
-    for (x, y, pixel) in labels.enumerate_pixels() {
-        let text = text_score[[y as usize, x as usize]];
-        let link = link_score[[y as usize, x as usize]];
-        let mut value = if pixel[0] == label { SEGMAP_FOREGROUND } else { 0 };
-        if link && !text {
-            value = 0;
+    let mut buffer = vec![0u8; (window.width * window.height) as usize];
+    for local_y in 0..window.height {
+        let y = (window.y0 + local_y) as usize;
+        for local_x in 0..window.width {
+            let x = (window.x0 + local_x) as usize;
+            if labels.get_pixel(x as u32, y as u32)[0] != label || (link_score[[y, x]] && !text_score[[y, x]]) {
+                continue;
+            }
+            buffer[(local_y * window.width + local_x) as usize] = SEGMAP_FOREGROUND;
         }
-        buffer[(y * width + x) as usize] = value;
     }
-    GrayImage::from_raw(width, height, buffer)
+    GrayImage::from_raw(window.width, window.height, buffer)
         .ok_or_else(|| OcrError::inference("failed to build component segmentation image"))
 }
 
@@ -222,22 +259,29 @@ fn compute_niter(stat: &LabelStat) -> u32 {
     value.trunc() as u32
 }
 
-/// Dilate the segmentation map with an `LInf` (square) kernel of radius
-/// `niter / 2`; a zero radius is a no-op and returns the map unchanged.
-fn dilate_segmap(segmap: GrayImage, niter: u32) -> GrayImage {
-    let radius = (niter / DILATION_KERNEL_DIVISOR).min(u8::MAX as u32) as u8;
+/// Dilation kernel radius `niter / 2`, clamped to the `LInf` kernel's `u8` limit.
+fn dilation_radius(niter: u32) -> u8 {
+    (niter / DILATION_KERNEL_DIVISOR).min(u8::MAX as u32) as u8
+}
+
+/// Dilate the segmentation map with an `LInf` (square) kernel of the given radius;
+/// a zero radius is a no-op and returns the map unchanged.
+fn dilate_segmap(segmap: GrayImage, radius: u8) -> GrayImage {
     if radius == 0 {
         return segmap;
     }
     dilate(&segmap, Norm::LInf, radius)
 }
 
-/// Collect the `(x, y)` coordinates of every non-zero segmentation pixel.
-fn collect_points(segmap: &GrayImage) -> Vec<Point<i32>> {
+/// Collect the non-zero segmentation pixels as `(x, y)` in the label image's global
+/// coordinate space, mapping each window-local pixel back through `window`.
+fn collect_points(segmap: &GrayImage, window: &Window) -> Vec<Point<i32>> {
     let mut points = Vec::new();
-    for (x, y, pixel) in segmap.enumerate_pixels() {
+    for (local_x, local_y, pixel) in segmap.enumerate_pixels() {
         if pixel[0] != 0 {
-            points.push(Point::new(x as i32, y as i32));
+            let x = (window.x0 + local_x) as i32;
+            let y = (window.y0 + local_y) as i32;
+            points.push(Point::new(x, y));
         }
     }
     points
@@ -402,5 +446,93 @@ mod tests {
         adjust_coordinates(&mut boxes, 0.5);
 
         assert_eq!(boxes[0], [[2.0, 4.0], [6.0, 8.0], [10.0, 12.0], [14.0, 16.0]]);
+    }
+
+    /// Whole-map reference for one component: the original unbounded build (allocate
+    /// H·W, scan every pixel, dilate the full map, collect global points).
+    fn whole_map_points(
+        label: u32,
+        labels: &LabelImage,
+        text_score: &Array2<bool>,
+        link_score: &Array2<bool>,
+        radius: u8,
+    ) -> Vec<Point<i32>> {
+        let (width, height) = labels.dimensions();
+        let mut buffer = vec![0u8; (width * height) as usize];
+        for (x, y, pixel) in labels.enumerate_pixels() {
+            let text = text_score[[y as usize, x as usize]];
+            let link = link_score[[y as usize, x as usize]];
+            let mut value = if pixel[0] == label { SEGMAP_FOREGROUND } else { 0 };
+            if link && !text {
+                value = 0;
+            }
+            buffer[(y * width + x) as usize] = value;
+        }
+        let mut segmap = GrayImage::from_raw(width, height, buffer).expect("segmap");
+        if radius != 0 {
+            segmap = dilate(&segmap, Norm::LInf, radius);
+        }
+        let mut points = Vec::new();
+        for (x, y, pixel) in segmap.enumerate_pixels() {
+            if pixel[0] != 0 {
+                points.push(Point::new(x as i32, y as i32));
+            }
+        }
+        points
+    }
+
+    #[test]
+    fn should_bound_segmap_to_bbox_matching_whole_map_points() {
+        // Two separated blobs; the bounded per-component build (segmap + dilation +
+        // point collection) must yield identical global points to the whole-map path. ~keep
+        let mut region = Array2::<f32>::zeros((30, 24));
+        for row in 2..8 {
+            for col in 2..9 {
+                region[[row, col]] = 1.0;
+            }
+        }
+        for row in 15..22 {
+            for col in 14..23 {
+                region[[row, col]] = 1.0;
+            }
+        }
+        let link = Array2::<f32>::zeros((30, 24));
+
+        let text_score = region.mapv(|value| value > 0.4);
+        let link_score = link.mapv(|value| value > 0.4);
+        let comb = build_comb_image(&text_score, &link_score).expect("comb");
+        let labels = connected_components(&comb, Connectivity::Four, Luma([0u8]));
+        let stats = compute_label_stats(&labels, &region);
+
+        assert_eq!(stats.len(), 2, "two blobs must yield two components");
+        for (index, stat) in stats.iter().enumerate() {
+            let label = index as u32 + 1;
+            let radius = dilation_radius(compute_niter(stat));
+            let window = Window::new(stat, labels.dimensions(), radius);
+            let segmap = build_segmap(label, &labels, &text_score, &link_score, &window).expect("segmap");
+            let bounded = collect_points(&dilate_segmap(segmap, radius), &window);
+            let reference = whole_map_points(label, &labels, &text_score, &link_score, radius);
+            assert_eq!(bounded, reference, "label {label} points must match whole-map build");
+        }
+    }
+
+    #[test]
+    fn should_detect_two_separate_blobs_as_two_boxes() {
+        let mut region = Array2::<f32>::zeros((30, 24));
+        for row in 2..8 {
+            for col in 2..9 {
+                region[[row, col]] = 1.0;
+            }
+        }
+        for row in 15..22 {
+            for col in 14..23 {
+                region[[row, col]] = 1.0;
+            }
+        }
+        let link = Array2::<f32>::zeros((30, 24));
+
+        let boxes = get_det_boxes(&region, &link, 0.7, 0.4, 0.4).expect("boxes");
+
+        assert_eq!(boxes.len(), 2, "two separated blobs must yield two boxes");
     }
 }
