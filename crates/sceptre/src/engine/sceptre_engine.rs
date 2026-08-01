@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use image::GrayImage;
+use rayon::prelude::*;
 
 use crate::config::{Language, OcrConfig, resolve_thread_budget};
 use crate::detect::{CraftDetector, DetectedRegions, DetectorInput, TextDetector};
@@ -167,15 +168,22 @@ impl OcrEngine for SceptreEngine {
 /// Crop every detected region from `grey`, dropping any region that produces no crop
 /// (a zero-area box after clamping, or a degenerate quad) so one bad region never
 /// aborts the whole run. Dropped regions are logged rather than silently discarded.
+///
+/// Regions crop in parallel over the shared Rayon pool; `crop_region` is pure CPU and
+/// `GrayImage` is `Sync`, so this is safe. `filter_map(...).collect()` preserves the
+/// input order, keeping the output bit-identical to a sequential crop.
 fn crop_regions(grey: &GrayImage, regions: &DetectedRegions) -> Vec<RegionCrop> {
-    let mut crops = Vec::with_capacity(regions.regions.len());
-    for region in &regions.regions {
-        match crop_region(grey, &region.corners, region.axis_aligned) {
-            Ok(crop) => crops.push(crop),
-            Err(error) => tracing::debug!(%error, "skipping a detected region that produced no crop"),
-        }
-    }
-    crops
+    regions
+        .regions
+        .par_iter()
+        .filter_map(|region| match crop_region(grey, &region.corners, region.axis_aligned) {
+            Ok(crop) => Some(crop),
+            Err(error) => {
+                tracing::debug!(%error, "skipping a detected region that produced no crop");
+                None
+            }
+        })
+        .collect()
 }
 
 /// Map recognizer outputs back to public text lines, carrying each crop's source
@@ -312,5 +320,41 @@ mod tests {
         assert_eq!(crops.len(), 1, "the degenerate region is skipped, the valid one kept");
         assert_eq!(crops[0].width, 2);
         assert_eq!(crops[0].height, 2);
+    }
+
+    #[test]
+    fn should_preserve_input_order_when_cropping_regions_in_parallel() {
+        let grey = GrayImage::from_raw(4, 3, (0..12u8).collect()).expect("valid grayscale buffer");
+        let regions = DetectedRegions {
+            regions: vec![
+                // A 1-wide window, identifiable by its width. ~keep
+                DetectedRegion {
+                    corners: [[0.0, 0.0], [1.0, 0.0], [1.0, 2.0], [0.0, 2.0]],
+                    axis_aligned: true,
+                },
+                // A zero-area box between the survivors that must be dropped. ~keep
+                DetectedRegion {
+                    corners: [[2.0, 1.0], [2.0, 1.0], [2.0, 1.0], [2.0, 1.0]],
+                    axis_aligned: true,
+                },
+                // A 2-wide window. ~keep
+                DetectedRegion {
+                    corners: [[1.0, 0.0], [3.0, 0.0], [3.0, 2.0], [1.0, 2.0]],
+                    axis_aligned: true,
+                },
+                // A 3-wide window. ~keep
+                DetectedRegion {
+                    corners: [[0.0, 0.0], [3.0, 0.0], [3.0, 2.0], [0.0, 2.0]],
+                    axis_aligned: true,
+                },
+            ],
+        };
+
+        let crops = crop_regions(&grey, &regions);
+
+        // The degenerate region is dropped; the survivors keep their input order, ~keep
+        // proving parallel cropping does not reorder. ~keep
+        let widths: Vec<u32> = crops.iter().map(|crop| crop.width).collect();
+        assert_eq!(widths, vec![1, 2, 3], "surviving crops keep their input order");
     }
 }
