@@ -4,13 +4,12 @@
 //! Threshold the region/link maps, run connected components, fit min-area
 //! rectangles, then scale coordinates back to input space (`ratio_net = 2`).
 //!
-//! Connected-component labelling, morphological dilation, and minimum-area
-//! rectangle fitting are provided by the `imageproc` crate (see ADR 0013).
+//! Connected-component labelling and minimum-area rectangle fitting are provided
+//! by the `imageproc` crate (see ADR 0013); the CRAFT dilation is a custom
+//! cv2-exact box kernel (see ADR 0018, superseding the imageproc dilation).
 
 use image::{GrayImage, ImageBuffer, Luma};
-use imageproc::distance_transform::Norm;
 use imageproc::geometry::min_area_rect;
-use imageproc::morphology::dilate;
 use imageproc::point::Point;
 use imageproc::region_labelling::{Connectivity, connected_components};
 use ndarray::Array2;
@@ -39,10 +38,9 @@ const SEGMAP_FOREGROUND: u8 = 255;
 /// Multiplier applied inside the dilation-iteration count formula.
 const NITER_SCALE: f32 = 2.0;
 
-/// EasyOCR dilates with a `(1 + niter)` square kernel; `imageproc`'s `LInf`
-/// dilation grows the region by a `(2k + 1)` square, so the closest match is
-/// `k = niter / 2` (documented as an approximation per ADR 0013).
-const DILATION_KERNEL_DIVISOR: u32 = 2;
+/// Kernel-size offset in EasyOCR's dilation: the structuring element is
+/// `(1 + niter)` square (`cv2.getStructuringElement(MORPH_RECT, (1 + niter, ...))`).
+const DILATION_KERNEL_OFFSET: u32 = 1;
 
 /// A detected box: 4 corners `[x, y]`, clockwise from top-left, in heat-map space
 /// until [`adjust_coordinates`] scales them to original-image space.
@@ -180,9 +178,10 @@ fn compute_label_stats(labels: &LabelImage, region: &Array2<f32>) -> Vec<LabelSt
 }
 
 /// Global-coordinate window covering a component's bounding box expanded by the
-/// dilation radius and clamped to the label image, so per-component segmentation,
-/// dilation, and point collection are bounded to O(bbox area) rather than O(H·W).
-/// The radius margin keeps the dilated halo identical to a whole-map build.
+/// `niter` dilation margin and clamped to the label image, so per-component
+/// segmentation, dilation, and point collection are bounded to O(bbox area) rather
+/// than O(H·W). The margin (matching EasyOCR's dilated slice) keeps the dilated
+/// halo identical to a whole-map build.
 struct Window {
     x0: u32,
     y0: u32,
@@ -191,9 +190,8 @@ struct Window {
 }
 
 impl Window {
-    fn new(stat: &LabelStat, dimensions: (u32, u32), radius: u8) -> Self {
+    fn new(stat: &LabelStat, dimensions: (u32, u32), margin: u32) -> Self {
         let (image_width, image_height) = dimensions;
-        let margin = u32::from(radius);
         let x0 = stat.min_x.saturating_sub(margin);
         let y0 = stat.min_y.saturating_sub(margin);
         let x1 = (stat.max_x + margin).min(image_width - 1);
@@ -215,10 +213,10 @@ fn extract_box(
     link_score: &Array2<bool>,
     stat: &LabelStat,
 ) -> Result<Option<BoxPoints>> {
-    let radius = dilation_radius(compute_niter(stat));
-    let window = Window::new(stat, labels.dimensions(), radius);
+    let niter = compute_niter(stat);
+    let window = Window::new(stat, labels.dimensions(), niter);
     let segmap = build_segmap(label, labels, text_score, link_score, &window)?;
-    let segmap = dilate_segmap(segmap, radius);
+    let segmap = dilate_segmap(segmap, niter);
     let points = collect_points(&segmap, &window);
     Ok(fit_box(&points))
 }
@@ -259,18 +257,53 @@ fn compute_niter(stat: &LabelStat) -> u32 {
     value.trunc() as u32
 }
 
-/// Dilation kernel radius `niter / 2`, clamped to the `LInf` kernel's `u8` limit.
-fn dilation_radius(niter: u32) -> u8 {
-    (niter / DILATION_KERNEL_DIVISOR).min(u8::MAX as u32) as u8
-}
-
-/// Dilate the segmentation map with an `LInf` (square) kernel of the given radius;
-/// a zero radius is a no-op and returns the map unchanged.
-fn dilate_segmap(segmap: GrayImage, radius: u8) -> GrayImage {
-    if radius == 0 {
+/// Dilate the 0/255 segmentation map with a `(1 + niter)` square kernel, matching
+/// EasyOCR's `cv2.dilate` over a `cv2.MORPH_RECT` structuring element.
+///
+/// Reproduces OpenCV exactly: `dst(x, y) = max` over kernel offsets `(i, j)` in
+/// `[0, 1 + niter)` of `src(x + i - anchor, y + j - anchor)`, where `anchor` is
+/// OpenCV's default `(1 + niter) / 2` (integer division). The kernel is symmetric
+/// for even `niter` and grows one pixel more on the anchor side for odd `niter`.
+/// Out-of-buffer neighbours are background (`BORDER_CONSTANT`). A zero `niter`
+/// (unit kernel) is a no-op. See ADR 0018.
+fn dilate_segmap(segmap: GrayImage, niter: u32) -> GrayImage {
+    if niter == 0 {
         return segmap;
     }
-    dilate(&segmap, Norm::LInf, radius)
+    let (width, height) = segmap.dimensions();
+    let kernel = (DILATION_KERNEL_OFFSET + niter) as i32;
+    let anchor = kernel / 2;
+    let source = segmap.as_raw();
+    let mut dilated = vec![0u8; source.len()];
+    for y in 0..height as i32 {
+        for x in 0..width as i32 {
+            if kernel_hits_foreground(source, width, height, x, y, kernel, anchor) {
+                dilated[(y as u32 * width + x as u32) as usize] = SEGMAP_FOREGROUND;
+            }
+        }
+    }
+    GrayImage::from_raw(width, height, dilated).expect("dilated segmap keeps the source dimensions")
+}
+
+/// Whether any in-bounds pixel under the `kernel`-square structuring element,
+/// anchored at `anchor`, is foreground — the max over the dilation window.
+fn kernel_hits_foreground(source: &[u8], width: u32, height: u32, x: i32, y: i32, kernel: i32, anchor: i32) -> bool {
+    for j in 0..kernel {
+        let sample_y = y + j - anchor;
+        if sample_y < 0 || sample_y >= height as i32 {
+            continue;
+        }
+        for i in 0..kernel {
+            let sample_x = x + i - anchor;
+            if sample_x < 0 || sample_x >= width as i32 {
+                continue;
+            }
+            if source[(sample_y as u32 * width + sample_x as u32) as usize] != 0 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Collect the non-zero segmentation pixels as `(x, y)` in the label image's global
@@ -455,7 +488,7 @@ mod tests {
         labels: &LabelImage,
         text_score: &Array2<bool>,
         link_score: &Array2<bool>,
-        radius: u8,
+        niter: u32,
     ) -> Vec<Point<i32>> {
         let (width, height) = labels.dimensions();
         let mut buffer = vec![0u8; (width * height) as usize];
@@ -468,10 +501,7 @@ mod tests {
             }
             buffer[(y * width + x) as usize] = value;
         }
-        let mut segmap = GrayImage::from_raw(width, height, buffer).expect("segmap");
-        if radius != 0 {
-            segmap = dilate(&segmap, Norm::LInf, radius);
-        }
+        let segmap = dilate_segmap(GrayImage::from_raw(width, height, buffer).expect("segmap"), niter);
         let mut points = Vec::new();
         for (x, y, pixel) in segmap.enumerate_pixels() {
             if pixel[0] != 0 {
@@ -507,11 +537,11 @@ mod tests {
         assert_eq!(stats.len(), 2, "two blobs must yield two components");
         for (index, stat) in stats.iter().enumerate() {
             let label = index as u32 + 1;
-            let radius = dilation_radius(compute_niter(stat));
-            let window = Window::new(stat, labels.dimensions(), radius);
+            let niter = compute_niter(stat);
+            let window = Window::new(stat, labels.dimensions(), niter);
             let segmap = build_segmap(label, &labels, &text_score, &link_score, &window).expect("segmap");
-            let bounded = collect_points(&dilate_segmap(segmap, radius), &window);
-            let reference = whole_map_points(label, &labels, &text_score, &link_score, radius);
+            let bounded = collect_points(&dilate_segmap(segmap, niter), &window);
+            let reference = whole_map_points(label, &labels, &text_score, &link_score, niter);
             assert_eq!(bounded, reference, "label {label} points must match whole-map build");
         }
     }

@@ -156,17 +156,15 @@ fn parity_korean_png() {
     run_dual_golden_parity("korean.png", "korean", Language::Korean);
 }
 
-/// Known gap: sceptre splits some multi-word lines EasyOCR merges (e.g. `Mairie du`
-/// → `Mairie` + `du`), so a merged reference line's best single-box IoU falls just
-/// under 0.5 (0.471). The line-grouping (`detect::group`) faithfully mirrors
-/// EasyOCR's `group_text_box` with identical thresholds; the divergence is upstream
-/// box geometry — the CRAFT dilation approximation (`detect::postprocess`
-/// `DILATION_KERNEL_DIVISOR`, imageproc symmetric kernel vs `cv2.MORPH_RECT(1+niter)`,
-/// see ADR 0013) yields marginally narrower boxes on odd `niter`. Recognition is at
-/// parity; this tracks that geometry gap.
+/// Known residual gap on this rotated multi-word sign. The cv2-exact CRAFT dilation
+/// (ADR 0018) closed the earlier `Mairie du` split, but another merged reference
+/// line (`[Palais du LOUVRE`) still resolves to a best single-box IoU of 0.427 —
+/// a min-area-rect corner difference on strongly rotated text, not a grouping or
+/// dilation gap (`detect::group` mirrors EasyOCR's `group_text_box` exactly).
+/// Recognition is at parity; the four axis-aligned/clean images pass.
 #[test]
 #[cfg(feature = "ort")]
-#[ignore = "CRAFT dilation approximation yields narrower boxes; french box-IoU 0.471 < 0.5 (see ADR 0013)"]
+#[ignore = "residual box-IoU 0.427 on rotated french sign (min-area-rect corners); recognition at parity"]
 fn parity_french_jpg() {
     run_dual_golden_parity("french.jpg", "french", Language::Latin);
 }
