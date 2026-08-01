@@ -23,6 +23,7 @@ IMAGE_LANGUAGES: dict[str, list[str]] = {
     "chinese.jpg": ["ch_sim", "en"],
     "japanese.jpg": ["ja", "en"],
     "korean.png": ["ko", "en"],
+    "cyrillic.png": ["ru"],
 }
 
 

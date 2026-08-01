@@ -63,6 +63,7 @@ mod snapshot {
         ("chinese.jpg", Language::ChineseSimplified),
         ("japanese.jpg", Language::Japanese),
         ("korean.png", Language::Korean),
+        ("cyrillic.png", Language::Cyrillic),
     ];
 
     /// Run the snapshot generator over every example image.
