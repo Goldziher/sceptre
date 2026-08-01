@@ -58,7 +58,7 @@ pub(super) fn prepare(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result
 
     let padded_h = pad_to_multiple(target_h, ALIGN);
     let padded_w = pad_to_multiple(target_w, ALIGN);
-    let tensor = normalize_into_tensor(&resized, padded_h, padded_w);
+    let tensor = normalize_into_tensor(&resized, padded_h, padded_w)?;
 
     Ok(Prepared {
         tensor,
@@ -92,24 +92,27 @@ fn pad_to_multiple(value: u32, align: u32) -> u32 {
 /// canvas: the resized region carries the real pixels, and each padding pixel takes
 /// the normalized value of a raw zero, `(0 - mean) / std` (matching EasyOCR, which
 /// normalizes the whole zero-padded canvas — see [`prepare`]).
-fn normalize_into_tensor(resized: &RgbImage, padded_h: u32, padded_w: u32) -> Tensor {
+fn normalize_into_tensor(resized: &RgbImage, padded_h: u32, padded_w: u32) -> Result<Tensor> {
     let (target_w, target_h) = resized.dimensions();
+    let plane = (padded_h * padded_w) as usize;
     let mut tensor = Tensor::zeros(IxDyn(&[BATCH, CHANNELS, padded_h as usize, padded_w as usize]));
+    let data = tensor
+        .as_slice_mut()
+        .ok_or_else(|| OcrError::inference("detection tensor is not in contiguous standard layout"))?;
     for channel in 0..CHANNELS {
         let mean = IMAGENET_MEAN[channel] * U8_MAX;
         let std = IMAGENET_STD[channel] * U8_MAX;
-        for y in 0..padded_h {
-            for x in 0..padded_w {
-                let raw = if y < target_h && x < target_w {
-                    f32::from(resized.get_pixel(x, y).0[channel])
-                } else {
-                    0.0
-                };
-                tensor[[0, channel, y as usize, x as usize]] = (raw - mean) / std;
+        let channel_plane = &mut data[channel * plane..(channel + 1) * plane];
+        channel_plane.fill((0.0 - mean) / std);
+        for y in 0..target_h {
+            let row = (y * padded_w) as usize;
+            for x in 0..target_w {
+                let raw = f32::from(resized.get_pixel(x, y).0[channel]);
+                channel_plane[row + x as usize] = (raw - mean) / std;
             }
         }
     }
-    tensor
+    Ok(tensor)
 }
 
 #[cfg(test)]
@@ -224,5 +227,40 @@ mod tests {
     fn should_reject_zero_dimension_image() {
         let image = Image::from_rgb8(0, 0, Vec::new()).expect("empty image is valid");
         assert!(prepare(&image, 64, 1.0).is_err());
+    }
+
+    #[test]
+    fn should_match_per_pixel_formula_in_real_and_padding_regions() {
+        // 3x2 resized image padded to 4x4: assert exact f32 equality against the old
+        // per-pixel formula across the whole tensor, covering real and padding pixels. ~keep
+        let mut resized = RgbImage::new(3, 2);
+        resized.put_pixel(0, 0, image::Rgb([10, 20, 30]));
+        resized.put_pixel(1, 0, image::Rgb([40, 50, 60]));
+        resized.put_pixel(2, 0, image::Rgb([70, 80, 90]));
+        resized.put_pixel(0, 1, image::Rgb([15, 25, 35]));
+        resized.put_pixel(1, 1, image::Rgb([45, 55, 65]));
+        resized.put_pixel(2, 1, image::Rgb([75, 85, 95]));
+        let (padded_h, padded_w) = (4u32, 4u32);
+        let tensor = normalize_into_tensor(&resized, padded_h, padded_w).expect("tensor");
+
+        let expected = |channel: usize, y: u32, x: u32| -> f32 {
+            let mean = IMAGENET_MEAN[channel] * U8_MAX;
+            let std = IMAGENET_STD[channel] * U8_MAX;
+            let raw = if y < 2 && x < 3 {
+                f32::from(resized.get_pixel(x, y).0[channel])
+            } else {
+                0.0
+            };
+            (raw - mean) / std
+        };
+
+        for channel in 0..CHANNELS {
+            for y in 0..padded_h {
+                for x in 0..padded_w {
+                    let actual = tensor[[0, channel, y as usize, x as usize]];
+                    assert_eq!(actual, expected(channel, y, x), "channel {channel} at ({x},{y})");
+                }
+            }
+        }
     }
 }
