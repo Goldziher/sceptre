@@ -2,55 +2,280 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]+.*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v0.1.0)"
+        required: true
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Key on the resolved tag, not github.ref: a tag push (refs/tags/vX) and a manual rerun ~keep
+  # for the SAME tag carry different refs and would otherwise race. Never cancel a release ~keep
+  # mid-flight — asset uploads and the crates.io dry-run should complete deterministically. ~keep
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release_complete: ${{ steps.assets.outputs.release_complete }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      # Install `task` on every runner so the workflow calls task targets, not raw
-      # cargo, per the pipeline-standards task-runner rule (Windows has no task). ~keep
-      - uses: arduino/setup-task@v2
         with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build release CLI
-        run: task release:build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sceptre-${{ matrix.os }}
-          path: |
-            target/release/sceptre
-            target/release/sceptre.exe
-          if-no-files-found: error
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
-  publish-dry-run:
+      - name: Extract version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          version="${tag#v}"
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tag: $tag / version: $version"
+
+      - name: Verify the workspace version matches the tag
+        run: |
+          set -euo pipefail
+          target="${{ steps.version.outputs.version }}"
+          cargo_version="$(grep -E '^version = "' Cargo.toml | head -1 | cut -d'"' -f2)"
+          if [ "$cargo_version" != "$target" ]; then
+            echo "::error::Cargo.toml workspace version ($cargo_version) does not match tag ($target)"
+            exit 1
+          fi
+          echo "Workspace version matches tag: $target"
+
+      - name: Detect a COMPLETE existing release (all archives + checksums)
+        id: assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          version="${{ steps.version.outputs.version }}"
+          release_complete=false
+          # Treat the release as done only when the FULL asset set is present. A partial
+          # draft (a builder failed or was cancelled) reports false so create-release + the
+          # build matrix rerun and heal the gaps on a re-dispatch of the same tag. ~keep
+          required=(
+            "sceptre-x86_64-unknown-linux-gnu.tar.gz"
+            "sceptre-aarch64-unknown-linux-gnu.tar.gz"
+            "sceptre-aarch64-apple-darwin.tar.gz"
+            "sceptre-x86_64-apple-darwin.tar.gz"
+            "sceptre-x86_64-pc-windows-msvc.zip"
+            "sceptre_${version}_checksums.txt"
+          )
+          if gh release view "$tag" --json assets -q '.assets[].name' > /tmp/have.txt 2>/dev/null; then
+            missing=0
+            for asset in "${required[@]}"; do
+              grep -qx "$asset" /tmp/have.txt || { echo "  missing: $asset"; missing=$((missing + 1)); }
+            done
+            [ "$missing" -eq 0 ] && release_complete=true
+          fi
+          echo "release_complete=$release_complete" >> "$GITHUB_OUTPUT"
+          echo "Complete release already present? $release_complete"
+
+  create-release:
+    name: Create draft release
+    needs: meta
+    if: needs.meta.outputs.release_complete != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+      - name: Ensure a draft release exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists."
+          else
+            prerelease=""
+            case "$tag" in
+              *-rc.* | *-beta* | *-alpha*) prerelease="--prerelease" ;;
+            esac
+            # Create as a DRAFT: the build matrix uploads binaries to it, but it stays hidden
+            # until finalize promotes it — and finalize only runs once checksums (which requires
+            # all platform binaries) succeeds. A failed platform build leaves a hidden draft, not
+            # a live release with missing binaries. ~keep
+            gh release create "$tag" --title "$tag" --notes "Release $tag" --verify-tag --draft $prerelease
+          fi
+
+  build:
+    name: Build ${{ matrix.triple }}
+    needs: [meta, create-release]
+    if: needs.meta.outputs.release_complete != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - triple: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - triple: aarch64-apple-darwin
+            os: macos-latest
+          - triple: x86_64-apple-darwin
+            os: macos-15-intel
+          - triple: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.triple }}
+      # Install `task` so the workflow calls task targets, not raw cargo, per the
+      # pipeline-standards task-runner rule. ~keep
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and package
+        shell: bash
+        run: task release:package TRIPLE=${{ matrix.triple }}
+
+      - name: Smoke-test the packaged binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$(mktemp -d)"
+          if [ "${{ matrix.triple }}" = "x86_64-pc-windows-msvc" ]; then
+            archive="sceptre-${{ matrix.triple }}.zip"
+            powershell -Command "Expand-Archive -Path '$archive' -DestinationPath '$dir' -Force"
+            "$dir/sceptre.exe" --version
+          else
+            archive="sceptre-${{ matrix.triple }}.tar.gz"
+            tar xzf "$archive" -C "$dir"
+            "$dir/sceptre" --version
+          fi
+
+      - name: Upload archive to the release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+          if [ "${{ matrix.triple }}" = "x86_64-pc-windows-msvc" ]; then
+            archive="sceptre-${{ matrix.triple }}.zip"
+          else
+            archive="sceptre-${{ matrix.triple }}.tar.gz"
+          fi
+          [ -f "$archive" ] || { echo "::error::Archive not found: $archive"; exit 1; }
+          gh release upload "$tag" "$archive" --clobber
+
+  checksums:
+    name: Generate checksums
+    needs: [meta, build]
+    if: needs.meta.outputs.release_complete != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+      - name: Verify all platform archives are present, then checksum
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+          version="${{ needs.meta.outputs.version }}"
+          expected=(
+            "sceptre-x86_64-unknown-linux-gnu.tar.gz"
+            "sceptre-aarch64-unknown-linux-gnu.tar.gz"
+            "sceptre-aarch64-apple-darwin.tar.gz"
+            "sceptre-x86_64-apple-darwin.tar.gz"
+            "sceptre-x86_64-pc-windows-msvc.zip"
+          )
+          gh release view "$tag" --json assets -q '.assets[].name' > /tmp/have.txt || true
+          missing=0
+          for asset in "${expected[@]}"; do
+            grep -qx "$asset" /tmp/have.txt || { echo "::error::missing $asset"; missing=$((missing + 1)); }
+          done
+          [ "$missing" -eq 0 ] || { echo "::error::release incomplete ($missing archives missing)"; exit 1; }
+
+          for asset in "${expected[@]}"; do
+            gh release download "$tag" -p "$asset" -O "$asset"
+          done
+          sha256sum sceptre-*.tar.gz sceptre-*.zip | sort > "sceptre_${version}_checksums.txt"
+          cat "sceptre_${version}_checksums.txt"
+          gh release upload "$tag" "sceptre_${version}_checksums.txt" --clobber
+
+  finalize:
+    name: Publish GitHub release
+    needs: [meta, checksums]
+    if: always() && needs.meta.result == 'success' && needs.meta.outputs.release_complete != 'true' && needs.checksums.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote the draft once every asset is present
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+          version="${{ needs.meta.outputs.version }}"
+          required=(
+            "sceptre-x86_64-unknown-linux-gnu.tar.gz"
+            "sceptre-aarch64-unknown-linux-gnu.tar.gz"
+            "sceptre-aarch64-apple-darwin.tar.gz"
+            "sceptre-x86_64-apple-darwin.tar.gz"
+            "sceptre-x86_64-pc-windows-msvc.zip"
+            "sceptre_${version}_checksums.txt"
+          )
+          gh release view "$tag" --json assets -q '.assets[].name' > /tmp/assets.txt || true
+          missing=0
+          for asset in "${required[@]}"; do
+            grep -qx "$asset" /tmp/assets.txt || { echo "::error::missing $asset"; missing=$((missing + 1)); }
+          done
+          [ "$missing" -eq 0 ] || { echo "::error::release $tag incomplete; leaving it as a draft"; exit 1; }
+          gh release edit "$tag" --draft=false
+          echo "Promoted $tag to a published release"
+
+  publish-dry-run:
+    name: Validate crates.io packaging (dry run)
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: arduino/setup-task@v2
         with:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      # Dry-run only: validates that both crates package and publish cleanly WITHOUT
-      # pushing to crates.io. A real `cargo publish` is intentionally omitted pending
-      # the release decision recorded in ADR 0020; flipping it on is a one-line change. ~keep
-      - name: Validate crates.io packaging (dry run)
+      # Dry-run only: validates the library packages cleanly for crates.io WITHOUT publishing.
+      # A real `cargo publish` is intentionally omitted pending the release decision in ADR 0020;
+      # flipping it on is a one-line change (drop --dry-run, add token auth). ~keep
+      - name: cargo publish --dry-run (library)
         run: task release:dry-run

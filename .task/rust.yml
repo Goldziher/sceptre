@@ -38,6 +38,15 @@ tasks:
     cmds:
       - cargo build --release -p sceptre-cli --no-default-features --features ort-bundled,download
 
+  release:package:
+    desc: Build and archive the self-contained release CLI binary for TRIPLE (e.g. TRIPLE=x86_64-unknown-linux-gnu)
+    requires:
+      vars: [TRIPLE]
+    cmds:
+      # ort-bundled links ONNX Runtime statically, so the archive is a self-contained binary. ~keep
+      - cargo build --release -p sceptre-cli --no-default-features --features ort-bundled,download --target {{.TRIPLE}}
+      - bash scripts/package-release.sh {{.TRIPLE}}
+
   release:dry-run:
     desc: Validate that the library packages cleanly for crates.io, without publishing
     cmds:

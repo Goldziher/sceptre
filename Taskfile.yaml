@@ -68,6 +68,13 @@ tasks:
     cmds:
       - task: rust:release:build
 
+  release:package:
+    desc: Build and archive the self-contained release CLI binary for TRIPLE (e.g. TRIPLE=x86_64-apple-darwin)
+    cmds:
+      - task: rust:release:package
+        vars:
+          TRIPLE: "{{.TRIPLE}}"
+
   release:dry-run:
     desc: Validate that the sceptre library packages cleanly for crates.io, without publishing
     cmds:
