@@ -4,8 +4,8 @@
 //! RGB is normalized with ImageNet mean/std (each scaled by 255) and laid out as
 //! an NCHW tensor before the CRAFT forward pass.
 
-use image::RgbImage;
 use image::imageops::{FilterType, resize};
+use image::{ImageBuffer, Rgb, RgbImage};
 use ndarray::IxDyn;
 
 use crate::error::{OcrError, Result};
@@ -52,8 +52,8 @@ pub(super) fn prepare(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result
     }
 
     let (ratio, target_h, target_w) = resize_dimensions(height, width, canvas_size, mag_ratio);
-    let source = RgbImage::from_raw(width, height, image.as_rgb8().to_vec())
-        .ok_or_else(|| OcrError::image("failed to build RgbImage from raw RGB8 buffer"))?;
+    let source = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, image.as_rgb8())
+        .ok_or_else(|| OcrError::image("failed to build RGB image view from raw RGB8 buffer"))?;
     let resized = resize(&source, target_w, target_h, FilterType::Triangle);
 
     let padded_h = pad_to_multiple(target_h, ALIGN);
@@ -79,8 +79,8 @@ pub(super) fn prepare_reference(image: &Image, canvas_size: u32, mag_ratio: f32)
     }
 
     let (ratio, target_h, target_w) = resize_dimensions(height, width, canvas_size, mag_ratio);
-    let source = RgbImage::from_raw(width, height, image.as_rgb8().to_vec())
-        .ok_or_else(|| OcrError::image("failed to build RgbImage from raw RGB8 buffer"))?;
+    let source = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, image.as_rgb8())
+        .ok_or_else(|| OcrError::image("failed to build RGB image view from raw RGB8 buffer"))?;
     let resized = resize(&source, target_w, target_h, FilterType::Triangle);
 
     let padded_h = pad_to_multiple(target_h, ALIGN);

@@ -26,30 +26,51 @@ const CUSTOM_MEAN_EXPONENT_NUMERATOR: f32 = 2.0;
 /// pass per timestep ([`decode_row`]), dropping the full `Array2` probability
 /// buffer and the redundant full-width renorm-division loop while producing the
 /// same `(class, probability)` as the [`decode_greedy_reference`] path (see ADR 0019).
+#[cfg(any(test, feature = "bench"))]
 pub(crate) fn decode_greedy(logits: ArrayView2<f32>, charset: &Charset, ignore: &[usize]) -> RecognizedText {
-    let ignore_mask = build_ignore_mask(logits.ncols(), ignore);
+    let ignore_mask = IgnoreMask::new(logits.ncols(), ignore);
+    decode_greedy_with_mask(logits, charset, &ignore_mask)
+}
+
+/// Greedy-decode with a prebuilt ignore mask, allowing a reused recognizer to avoid
+/// rebuilding the same class state for every crop.
+pub(super) fn decode_greedy_with_mask(
+    logits: ArrayView2<f32>,
+    charset: &Charset,
+    ignore_mask: &IgnoreMask,
+) -> RecognizedText {
     let mut weights: Vec<f32> = Vec::with_capacity(logits.ncols());
     let per_timestep: Vec<(usize, f32)> = logits
         .rows()
         .into_iter()
-        .map(|row| decode_row(row, &ignore_mask, &mut weights))
+        .map(|row| decode_row(row, ignore_mask, &mut weights))
         .collect();
     let confidence = custom_mean(&collect_max_probs(&per_timestep));
     let text = collapse(&per_timestep, charset);
     RecognizedText { text, confidence }
 }
 
-/// A per-class boolean allowlist mask of length `num_classes`; `ignore` indices in
-/// range mark `true`. Out-of-range `ignore` indices are dropped, matching the
-/// reference's `get_mut(class)` guard.
-fn build_ignore_mask(num_classes: usize, ignore: &[usize]) -> Vec<bool> {
-    let mut mask = vec![false; num_classes];
-    for &class in ignore {
-        if let Some(slot) = mask.get_mut(class) {
-            *slot = true;
+/// A reusable per-class mask; `true` classes are suppressed during CTC decoding.
+pub(super) struct IgnoreMask {
+    classes: Vec<bool>,
+}
+
+impl IgnoreMask {
+    /// Build a mask of length `num_classes`, dropping out-of-range indices to match
+    /// the reference decoder's guarded class lookup.
+    pub(super) fn new(num_classes: usize, ignore: &[usize]) -> Self {
+        let mut classes = vec![false; num_classes];
+        for &class in ignore {
+            if let Some(slot) = classes.get_mut(class) {
+                *slot = true;
+            }
         }
+        Self { classes }
     }
-    mask
+
+    fn contains(&self, class: usize) -> bool {
+        self.classes.get(class).copied().unwrap_or(false)
+    }
 }
 
 /// Fused softmax + `ignore` suppression + renormalization + argmax for one timestep
@@ -65,7 +86,7 @@ fn build_ignore_mask(num_classes: usize, ignore: &[usize]) -> Vec<bool> {
 /// reported probability is the same `(weight / sum) / renorm` the reference stores.
 /// `weights` is a caller-owned scratch buffer reused across timesteps so a single
 /// exp is computed per cell and no `Array2` is allocated.
-fn decode_row(input: ArrayView1<f32>, ignore_mask: &[bool], weights: &mut Vec<f32>) -> (usize, f32) {
+fn decode_row(input: ArrayView1<f32>, ignore_mask: &IgnoreMask, weights: &mut Vec<f32>) -> (usize, f32) {
     let max = input.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     weights.clear();
     let mut sum = 0.0f32;
@@ -75,7 +96,7 @@ fn decode_row(input: ArrayView1<f32>, ignore_mask: &[bool], weights: &mut Vec<f3
         let weight = (value - max).exp();
         weights.push(weight);
         sum += weight;
-        if !ignore_mask[class] && weight > best_weight {
+        if !ignore_mask.contains(class) && weight > best_weight {
             best_weight = weight;
             best_class = class;
         }
@@ -83,7 +104,7 @@ fn decode_row(input: ArrayView1<f32>, ignore_mask: &[bool], weights: &mut Vec<f3
 
     let mut renorm = 0.0f32;
     for (class, &weight) in weights.iter().enumerate() {
-        if !ignore_mask[class] {
+        if !ignore_mask.contains(class) {
             renorm += weight / sum;
         }
     }
@@ -257,6 +278,23 @@ mod tests {
         assert_eq!(without_ignore.text, "0");
         let with_ignore = decode_greedy(logits.view(), &english(), &[1]);
         assert_eq!(with_ignore.text, "1");
+    }
+
+    #[test]
+    fn prebuilt_ignore_mask_matches_index_decoder_bitwise() {
+        let charset = english();
+        let logits = arr2(&[
+            [(0.1f32).ln(), (0.6f32).ln(), (0.3f32).ln()],
+            [(0.1f32).ln(), (0.2f32).ln(), (0.7f32).ln()],
+        ]);
+        let ignored = [1usize];
+        let expected = decode_greedy(logits.view(), &charset, &ignored);
+        let mask = IgnoreMask::new(charset.num_classes(), &ignored);
+
+        let actual = decode_greedy_with_mask(logits.view(), &charset, &mask);
+
+        assert_eq!(actual.text, expected.text);
+        assert_eq!(actual.confidence.to_bits(), expected.confidence.to_bits());
     }
 
     /// Deterministic pseudo-random logits in `[-8, 8]` (an LCG), shaped `[timesteps,

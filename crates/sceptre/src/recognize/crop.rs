@@ -58,10 +58,12 @@ fn crop_axis_aligned(gray: &GrayImage, corners: &[[f32; 2]; QUAD_CORNERS]) -> Re
     let crop_width = x1 - x0;
     let crop_height = y1 - y0;
     let mut pixels = Vec::with_capacity((crop_width * crop_height) as usize);
+    let source_width = gray.width() as usize;
+    let raw = gray.as_raw();
     for row in y0..y1 {
-        for col in x0..x1 {
-            pixels.push(gray.get_pixel(col, row)[0]);
-        }
+        let start = row as usize * source_width + x0 as usize;
+        let end = start + crop_width as usize;
+        pixels.extend_from_slice(&raw[start..end]);
     }
 
     Ok(RegionCrop {
@@ -178,6 +180,23 @@ mod tests {
         assert_eq!(crop.height, 2);
         // Rows 1..3, cols 2..4: (12,13) then (22,23). ~keep
         assert_eq!(crop.gray, vec![12, 13, 22, 23]);
+    }
+
+    #[test]
+    fn should_copy_exact_pixels_from_nontrivial_axis_aligned_offset() {
+        let width = 6u32;
+        let height = 5u32;
+        let pixels = (0..width * height).map(|value| value as u8).collect();
+        let image = GrayImage::from_raw(width, height, pixels).expect("valid raw buffer");
+        // Columns 2..5 and rows 2..4 exercise both a horizontal and vertical offset. ~keep
+        let corners = [[2.0, 2.0], [5.0, 2.0], [5.0, 4.0], [2.0, 4.0]];
+
+        let crop = crop_region(&image, &corners, true).expect("crop succeeds");
+
+        assert_eq!(crop.width, 3);
+        assert_eq!(crop.height, 2);
+        assert_eq!(crop.gray, vec![14, 15, 16, 20, 21, 22]);
+        assert_eq!(crop.corners, corners);
     }
 
     #[test]

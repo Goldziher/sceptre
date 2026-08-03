@@ -5,7 +5,7 @@
 //! right-padded (edge-replicated) to the batch's maximum width, forming a
 //! `[B, 1, 64, W]` tensor.
 
-use image::{GrayImage, imageops};
+use image::{GrayImage, ImageBuffer, Luma, imageops};
 use ndarray::IxDyn;
 
 use super::recognizer::RegionCrop;
@@ -42,7 +42,7 @@ fn resize_crop(crop: &RegionCrop) -> Result<GrayImage> {
     if crop.width == 0 || crop.height == 0 {
         return Err(OcrError::image("crop has a zero width or height"));
     }
-    let image = GrayImage::from_raw(crop.width, crop.height, crop.gray.clone())
+    let image = ImageBuffer::<Luma<u8>, _>::from_raw(crop.width, crop.height, crop.gray.as_slice())
         .ok_or_else(|| OcrError::image("crop grayscale buffer does not match its dimensions"))?;
     let ratio = crop.width as f32 / crop.height as f32;
     let resized_w = ((IMG_H as f32 * ratio).ceil() as u32).max(MIN_WIDTH);

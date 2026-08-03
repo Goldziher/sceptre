@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Detection and recognition preprocessing now borrow their source pixels, copy axis-aligned crops
+  by row, reuse immutable recognizer/CTC state, and bypass parallel dispatch for singleton batches,
+  reducing warm-path allocations and scheduling overhead without changing OCR output.
 - Each `Reader` now owns its configured Rayon worker pool instead of attempting to initialize the
   process-global pool, so readers with different thread budgets remain isolated and embedding
   Sceptre cannot override an application's Rayon configuration.

@@ -25,16 +25,16 @@ const STAGE_RECOGNIZE: &str = "recognize";
 /// The default engine: CRAFT detection followed by CRNN + CTC recognition.
 ///
 /// Holds the injectable seams and configuration consumed by the detect → crop →
-/// recognize pipeline. The detector and recognizer backends are built lazily on the
+/// recognize pipeline. The detector backend and recognizer are built lazily on the
 /// first [`recognize`](SceptreEngine::recognize) call — loading a model is fallible
 /// I/O that cannot happen in an infallible constructor — then cached, so a reused
-/// [`Reader`](crate::Reader) initializes each ONNX session once, not per call.
+/// [`Reader`](crate::Reader) initializes each ONNX session and charset once.
 pub(crate) struct SceptreEngine {
     config: OcrConfig,
     models: Arc<dyn ModelProvider>,
     progress: Arc<dyn ProgressSink>,
     detector_cache: OnceLock<Arc<dyn ModelBackend>>,
-    recognizer_cache: OnceLock<Arc<dyn ModelBackend>>,
+    recognizer_cache: OnceLock<Arc<CrnnRecognizer>>,
 }
 
 impl SceptreEngine {
@@ -83,14 +83,21 @@ impl SceptreEngine {
         Ok(backend)
     }
 
-    /// The recognizer backend for `language`, loaded once and cached for later calls.
-    fn recognizer_backend(&self, language: Language) -> Result<Arc<dyn ModelBackend>> {
-        if let Some(backend) = self.recognizer_cache.get() {
-            return Ok(backend.clone());
+    /// The recognizer for the configured language set, loaded once and cached for later calls.
+    fn recognizer(&self) -> Result<Arc<CrnnRecognizer>> {
+        if let Some(recognizer) = self.recognizer_cache.get() {
+            return Ok(recognizer.clone());
         }
-        let backend = self.load(self.models.recognizer(language)?)?;
-        let _ = self.recognizer_cache.set(backend.clone());
-        Ok(backend)
+        let language = self.language()?;
+        let recognizer = Arc::new(CrnnRecognizer::new(
+            self.load(self.models.recognizer(language)?)?,
+            Charset::for_language(language),
+            self.config.recognition.clone(),
+        ));
+        // A concurrent first call may build a second valid recognizer; the winner is ~keep
+        // cached and the loser finishes its current call with its own instance. ~keep
+        let _ = self.recognizer_cache.set(recognizer.clone());
+        Ok(recognizer)
     }
 
     /// Detect candidate text regions with the CRAFT detector.
@@ -101,13 +108,7 @@ impl SceptreEngine {
 
     /// Recognize the cropped regions with the CRNN + CTC recognizer.
     fn recognize_crops(&self, crops: &[RegionCrop]) -> Result<Vec<RecognizedText>> {
-        let language = self.language()?;
-        let recognizer = CrnnRecognizer::new(
-            self.recognizer_backend(language)?,
-            Charset::for_language(language),
-            self.config.recognition.clone(),
-        );
-        recognizer.recognize(crops)
+        self.recognizer()?.recognize(crops)
     }
 }
 

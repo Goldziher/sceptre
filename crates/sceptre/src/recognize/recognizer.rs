@@ -51,15 +51,19 @@ pub(crate) struct CrnnRecognizer {
     backend: Arc<dyn ModelBackend>,
     charset: Charset,
     config: RecognitionConfig,
+    ignore_mask: super::ctc::IgnoreMask,
 }
 
 impl CrnnRecognizer {
     /// Construct a CRNN recognizer from a loaded backend, charset, and config.
     pub(crate) fn new(backend: Arc<dyn ModelBackend>, charset: Charset, config: RecognitionConfig) -> Self {
+        let ignore = build_ignore(&charset, &config);
+        let ignore_mask = super::ctc::IgnoreMask::new(charset.num_classes(), &ignore);
         Self {
             backend,
             charset,
             config,
+            ignore_mask,
         }
     }
 
@@ -67,17 +71,31 @@ impl CrnnRecognizer {
     ///
     /// Chunks `crops` by `batch_size` (min 1), preprocesses each chunk into a
     /// recognizer tensor, runs the CRNN, then CTC-decodes each row.
-    fn run_pass(&self, crops: &[RegionCrop], ignore: &[usize]) -> Result<Vec<RecognizedText>> {
+    fn run_pass(&self, crops: &[RegionCrop]) -> Result<Vec<RecognizedText>> {
         let batch_size = self.config.batch_size.max(1);
         let mut results = Vec::with_capacity(crops.len());
         for chunk in crops.chunks(batch_size) {
             let tensor = super::preprocess::prepare_batch(chunk)?;
             let logits = super::crnn::run_crnn(self.backend.as_ref(), tensor)?;
+            if chunk.len() == 1 {
+                results.push(super::ctc::decode_greedy_with_mask(
+                    logits.index_axis(Axis(0), 0),
+                    &self.charset,
+                    &self.ignore_mask,
+                ));
+                continue;
+            }
             // Decode each region on the shared Rayon pool; indexed mapping keeps the ~keep
             // output in input order and each row borrows a view, avoiding a per-row copy. ~keep
             let decoded: Vec<RecognizedText> = (0..chunk.len())
                 .into_par_iter()
-                .map(|row| super::ctc::decode_greedy(logits.index_axis(Axis(0), row), &self.charset, ignore))
+                .map(|row| {
+                    super::ctc::decode_greedy_with_mask(
+                        logits.index_axis(Axis(0), row),
+                        &self.charset,
+                        &self.ignore_mask,
+                    )
+                })
                 .collect();
             results.extend(decoded);
         }
@@ -86,7 +104,7 @@ impl CrnnRecognizer {
 
     /// Re-run the low-confidence crops with contrast adjustment, replacing a result
     /// only when the adjusted pass scores strictly higher.
-    fn apply_second_pass(&self, crops: &[RegionCrop], ignore: &[usize], results: &mut [RecognizedText]) -> Result<()> {
+    fn apply_second_pass(&self, crops: &[RegionCrop], results: &mut [RecognizedText]) -> Result<()> {
         let indices: Vec<usize> = results
             .iter()
             .enumerate()
@@ -97,7 +115,7 @@ impl CrnnRecognizer {
             return Ok(());
         }
         let adjusted: Vec<RegionCrop> = indices.iter().map(|&index| self.adjust_crop(&crops[index])).collect();
-        let second = self.run_pass(&adjusted, ignore)?;
+        let second = self.run_pass(&adjusted)?;
         for (candidate, &index) in second.into_iter().zip(indices.iter()) {
             // Ties go to the second (contrast-adjusted) pass, matching EasyOCR's ~keep
             // `if pred1 > pred2 { pred1 } else { pred2 }`. ~keep
@@ -146,9 +164,8 @@ impl TextRecognizer for CrnnRecognizer {
                 "only greedy CTC decoding is implemented; set decoder = \"greedy\"",
             ));
         }
-        let ignore = build_ignore(&self.charset, &self.config);
-        let mut results = self.run_pass(crops, &ignore)?;
-        self.apply_second_pass(crops, &ignore, &mut results)?;
+        let mut results = self.run_pass(crops)?;
+        self.apply_second_pass(crops, &mut results)?;
         Ok(results)
     }
 }
@@ -329,6 +346,24 @@ mod tests {
         // Allowlist wins: classes 1 ('0') and 2 ('1') stay allowed despite the blocklist. ~keep
         assert!(!ignore.contains(&1));
         assert!(!ignore.contains(&2));
+    }
+
+    #[test]
+    fn should_apply_precomputed_allowlist_during_recognition() {
+        // Class 1 ('0') wins the raw logits, but the cached allowlist mask suppresses ~keep
+        // it and leaves class 2 ('1') as the decoded output. ~keep
+        let backend = Arc::new(ScriptedBackend::new(vec![logits([0.0, 5.0, 4.0])]));
+        let config = RecognitionConfig {
+            allowlist: "1".to_string(),
+            contrast_ths: 0.0,
+            ..RecognitionConfig::default()
+        };
+        let recognizer = english_recognizer(backend, config);
+
+        let results = recognizer.recognize(&[sample_crop()]).expect("recognition succeeds");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].text, "1");
     }
 
     #[test]
