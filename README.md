@@ -33,7 +33,7 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 |---|---|---|
 | **Parity accuracy** | Validated against real EasyOCR output across all six gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic — matching text (word/char-F1) and boxes (IoU). | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
 | **Substantially faster** | ~2–3× higher throughput than EasyOCR on the same corpus — even a cold, one-shot CLI run beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
-| **A fraction of the memory** | Peak RSS around **20× lower** than the Python + torch process. | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
+| **A fraction of the memory** | Peak RSS around **4× lower** than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
 | **One binary, no Python** | A single static executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
 | **Three surfaces** | The same engine as a Rust **library**, a **CLI** (`sceptre`), and an **MCP server** for agents. | Drop it into a service, a shell pipeline, or an AI tool without re-plumbing. |
 | **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM / Android — behind one seam. | Portability when you need it, native performance when you don't. |
@@ -86,17 +86,23 @@ sceptre mcp --lang english
 
 ## Benchmarks
 
-Measured against upstream EasyOCR over a mixed 25-image corpus (documents, tables, rotated scans,
-five scripts), on CPU. Numbers vary with hardware and load; the **ratios** are the point.
+Measured against upstream EasyOCR over a mixed corpus (documents, tables, rotated scans, scene text,
+receipts, five scripts), on CPU. Both engines are measured **identically** — each a fresh subprocess
+per language group under `/usr/bin/time`, at its native multi-threaded default — so peak RSS is a
+like-for-like whole-process figure (EasyOCR's legitimately includes the torch runtime). Numbers vary
+with hardware and load; the **ratios** are the point.
 
-| | EasyOCR (warm) | **sceptre** |
+| | EasyOCR (warm/batch) | **sceptre** |
 |---|---|---|
-| Throughput | 1× | **~2–3× faster** |
-| Peak memory | 1× | **~20× lower** |
-| Accuracy (CER / word-F1) | baseline | **at parity** |
+| Throughput | 1× | **~4× faster** |
+| Peak memory | 1× | **~4× lower** |
+| Accuracy (CER / token-F1) | baseline | **at parity or better** |
 
-`cargo bench` covers the internal hot paths; the head-to-head harness (`task py:benchmark`) reproduces
-the table above. Parity fixtures live under
+`cargo bench` covers the internal hot paths; the head-to-head harness (`task python:benchmark`)
+reproduces the table above and writes `benchmark-results/comparison.{json,md}`. Use
+`--group labeled --limit 3 --repeats 1` for a fast inner-loop run, `--baseline <prior.json>` to see
+per-image deltas, and `--assert` for the regression gate (see
+[ADR 0021](adrs/0021-benchmark-methodology-and-gate.md)). Parity fixtures live under
 [`crates/sceptre/tests/data/golden/`](crates/sceptre/tests/data/golden/).
 
 ## How it works
