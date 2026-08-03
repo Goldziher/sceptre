@@ -79,24 +79,36 @@ pub fn ensure(
 /// When `override_dir` is `Some`, it is returned verbatim (the config override).
 /// Otherwise the root is resolved from the environment in HF's documented order:
 /// `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` →
-/// `$HOME/.cache/huggingface/hub`. Empty environment values are ignored. Errors
-/// with [`OcrError::Model`] when `$HOME` cannot be resolved and no earlier source
-/// applied. Dependency-free so it works without the `download` feature.
+/// `~/.cache/huggingface/hub`, where the home directory is `$HOME` on Unix and
+/// `%USERPROFILE%` on Windows (mirroring how `huggingface_hub` expands `~`). Empty
+/// environment values are ignored. Errors with [`OcrError::Model`] when the home
+/// directory cannot be resolved and no earlier source applied. Dependency-free so
+/// it works without the `download` feature.
 pub(crate) fn hf_cache_root(override_dir: Option<&Path>) -> Result<PathBuf> {
     if let Some(dir) = override_dir {
         return Ok(dir.to_path_buf());
     }
-    if let Some(dir) = non_empty_env("HF_HUB_CACHE") {
+    hf_cache_root_from_env(non_empty_env)
+}
+
+/// Resolve the hub cache root from an environment lookup, in HF's documented order.
+///
+/// Split out from [`hf_cache_root`] so the resolution order — including the
+/// `$HOME` → `%USERPROFILE%` home fallback — is unit-testable without mutating the
+/// shared process environment.
+fn hf_cache_root_from_env(env: impl Fn(&str) -> Option<String>) -> Result<PathBuf> {
+    if let Some(dir) = env("HF_HUB_CACHE") {
         return Ok(PathBuf::from(dir));
     }
-    if let Some(dir) = non_empty_env("HUGGINGFACE_HUB_CACHE") {
+    if let Some(dir) = env("HUGGINGFACE_HUB_CACHE") {
         return Ok(PathBuf::from(dir));
     }
-    if let Some(home) = non_empty_env("HF_HOME") {
+    if let Some(home) = env("HF_HOME") {
         return Ok(PathBuf::from(home).join("hub"));
     }
-    let home = non_empty_env("HOME")
-        .ok_or_else(|| OcrError::model("could not determine the Hugging Face cache root: $HOME is unset"))?;
+    let home = env("HOME").or_else(|| env("USERPROFILE")).ok_or_else(|| {
+        OcrError::model("could not determine the Hugging Face cache root: neither $HOME nor %USERPROFILE% is set")
+    })?;
     Ok(PathBuf::from(home).join(".cache").join("huggingface").join("hub"))
 }
 
@@ -261,6 +273,62 @@ mod tests {
     fn hf_cache_root_returns_the_override_verbatim() {
         let override_dir = Path::new("/custom/hub/cache");
         assert_eq!(hf_cache_root(Some(override_dir)).unwrap(), override_dir);
+    }
+
+    /// Build an env lookup from a fixed `(key, value)` table for the resolver tests,
+    /// so resolution order is exercised without touching the shared process env.
+    fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: std::collections::HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |key: &str| map.get(key).cloned()
+    }
+
+    #[test]
+    fn hf_cache_root_prefers_explicit_hub_cache_over_every_home() {
+        let root = hf_cache_root_from_env(env_from(&[
+            ("HF_HUB_CACHE", "/explicit/hub"),
+            ("HF_HOME", "/hf/home"),
+            ("HOME", "/home/user"),
+        ]))
+        .unwrap();
+        assert_eq!(root, PathBuf::from("/explicit/hub"));
+    }
+
+    #[test]
+    fn hf_cache_root_derives_the_hub_subdir_from_hf_home() {
+        let root = hf_cache_root_from_env(env_from(&[("HF_HOME", "/hf/home"), ("HOME", "/home/user")])).unwrap();
+        assert_eq!(root, PathBuf::from("/hf/home").join("hub"));
+    }
+
+    #[test]
+    fn hf_cache_root_falls_back_to_the_home_cache_layout() {
+        let root = hf_cache_root_from_env(env_from(&[("HOME", "/home/user")])).unwrap();
+        assert_eq!(
+            root,
+            PathBuf::from("/home/user")
+                .join(".cache")
+                .join("huggingface")
+                .join("hub")
+        );
+    }
+
+    #[test]
+    fn hf_cache_root_uses_userprofile_when_home_is_unset_on_windows() {
+        let root = hf_cache_root_from_env(env_from(&[("USERPROFILE", "C:/Users/dev")])).unwrap();
+        assert_eq!(
+            root,
+            PathBuf::from("C:/Users/dev")
+                .join(".cache")
+                .join("huggingface")
+                .join("hub")
+        );
+    }
+
+    #[test]
+    fn hf_cache_root_errors_when_no_home_source_is_available() {
+        assert!(hf_cache_root_from_env(env_from(&[])).is_err());
     }
 
     #[test]
