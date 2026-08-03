@@ -257,6 +257,9 @@ jobs:
       - name: Promote the draft once every asset is present
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This job has no checkout, so gh cannot infer the repo from a git remote; name it
+          # explicitly or gh fails with "not a git repository" and sees zero assets. ~keep
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="${{ needs.meta.outputs.tag }}"
