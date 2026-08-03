@@ -22,12 +22,10 @@ tasks:
       - uv run pytest python/tests -q
 
   export:
-    # Assumes the Python package import name is sceptre_rs_tools; confirm this once
-    # pyproject.toml and python/ land. ~keep
     desc: >-
-      FALLBACK model-export path: runs the (currently stubbed) exporter that converts
-      upstream EasyOCR checkpoints to ONNX; requires the opt-in export/torch dependency
-      group
+      Primary model-export path (ADR 0025): converts EasyOCR CRAFT + gen2 CRNN checkpoints
+      to the ONNX artifacts hosted on the sceptre-ocr HF org, and (re)writes the charset
+      assets; requires the opt-in export/torch dependency group
     cmds:
       - uv run python -m sceptre_rs_tools.export
 

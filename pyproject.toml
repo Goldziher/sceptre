@@ -16,9 +16,10 @@ packages = ["python/sceptre_rs_tools"]
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pytest>=8"]
-# Heavy, opt-in export path: torch + easyocr drive the fallback .pth->ONNX/safetensors
-# export and the golden-fixture generation. Not installed by default. ~keep
-export = ["torch", "easyocr", "onnx", "numpy"]
+# Heavy, opt-in export path: torch + easyocr drive the .pth->ONNX export and the
+# golden-fixture generation; onnxruntime validates each export against torch. Not
+# installed by default. ~keep
+export = ["torch", "easyocr", "onnx", "onnxruntime", "numpy"]
 
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }]

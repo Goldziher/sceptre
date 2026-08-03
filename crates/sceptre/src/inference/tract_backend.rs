@@ -189,9 +189,11 @@ mod tests {
     /// End-to-end load-and-run over a real ONNX model.
     ///
     /// Ignored by default: it needs a model file on disk. Point
-    /// `EASYOCR_TEST_ONNX` at a CRAFT detector (`craft_mlt_25k`) — the input
-    /// below is a `[1, 3, 64, 64]` batch, which the detector maps to a rank-4
-    /// `[1, 2, 32, 32]` heat-map.
+    /// `EASYOCR_TEST_ONNX` at an ONNX model and optionally set `EASYOCR_TEST_SHAPE`
+    /// to a comma-separated input shape. The default `[1, 3, 64, 64]` suits a CRAFT
+    /// detector; for a gen2 recognizer use `EASYOCR_TEST_SHAPE=1,1,64,200`. This is
+    /// the quickest way to check a fresh first-party export loads under tract's
+    /// `into_optimized()` (see ADR 0025).
     #[test]
     #[ignore = "requires a model file on disk (set EASYOCR_TEST_ONNX)"]
     fn load_and_run_over_real_model() {
@@ -200,7 +202,16 @@ mod tests {
         let backend = TractBackend::load(&model_bytes).expect("load the ONNX model");
         assert_eq!(backend.name(), "tract");
 
-        let input = ArrayD::from_elem(IxDyn(&[1, 3, 64, 64]), 1.0_f32);
+        let dims: Vec<usize> = std::env::var("EASYOCR_TEST_SHAPE")
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|part| part.trim().parse().expect("usize dim"))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![1, 3, 64, 64]);
+        let input = ArrayD::from_elem(IxDyn(&dims), 1.0_f32);
         let output = backend.run(input).expect("run inference");
 
         assert!(output.ndim() >= 2, "expected a multi-dimensional output");
