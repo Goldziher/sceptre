@@ -1,0 +1,139 @@
+---
+title: CLI reference
+description: >-
+  Every sceptre subcommand and flag — run, detect, recognize, models, completions, and mcp — plus
+  output formats and exit behavior.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```sh
+sceptre <COMMAND>
+```
+
+## Global options
+
+| Flag | Description |
+|---|---|
+| `--log-level <LEVEL>` | `error`, `warn`, `info`, `debug`, or `trace`. Default `warn`. Also settable via the `EASYOCR_LOG` environment variable. Logs go to stderr. |
+
+## `sceptre run`
+
+Run the full OCR pipeline over one or more images. A single `Reader` is built once and reused
+across every image passed.
+
+```sh
+sceptre run <IMAGES>... [OPTIONS]
+```
+
+| Flag | Description |
+|---|---|
+| `<IMAGES>...` | One or more image paths (required). |
+| `--format <text\|json>` | Output format. Default `text`. |
+| `--no-detail` | Emit only the recognized text, omitting confidence and box detail. |
+| `--timings` | Print a per-stage (load/detect/recognize) timing breakdown to stderr. |
+
+Plus the [shared overrides](#shared-overrides) below.
+
+A single image keeps the historical single-result output. Two or more images switch to batch
+rendering: a per-image failure is recorded in the output (and logged to stderr) and the run
+continues over the remaining images, exiting non-zero if any image failed.
+
+## `sceptre detect`
+
+Detect text regions only, without recognition. Prints each region's quadrilateral.
+
+```sh
+sceptre detect <IMAGE> [OPTIONS]
+```
+
+| Flag | Description |
+|---|---|
+| `<IMAGE>` | Path to the input image (required). |
+| `--format <text\|json>` | Output format. Default `text`. |
+
+Plus the [shared overrides](#shared-overrides).
+
+## `sceptre recognize`
+
+Recognize text in a single, pre-cropped line image, skipping detection.
+
+```sh
+sceptre recognize <IMAGE> [OPTIONS]
+```
+
+| Flag | Description |
+|---|---|
+| `<IMAGE>` | Path to the cropped line image (required). |
+| `--format <text\|json>` | Output format. Default `text`. |
+
+Plus the [shared overrides](#shared-overrides).
+
+## `sceptre models`
+
+List or download the models required by the current configuration.
+
+```sh
+sceptre models list [OPTIONS]
+sceptre models download [OPTIONS]
+```
+
+| Flag | Description |
+|---|---|
+| `--format <text\|json>` | Output format. Default `text`. |
+
+Plus the [shared overrides](#shared-overrides) (notably `--lang`, to select which recognizers are
+listed or fetched).
+
+`list` inspects the cache without touching the network. `download` fetches any missing model
+(requires the `download` feature) and reports the resulting manifest.
+
+## `sceptre completions`
+
+Print shell completions to stdout.
+
+```sh
+sceptre completions <SHELL>
+```
+
+`<SHELL>` is any shell supported by `clap_complete` (e.g. `bash`, `zsh`, `fish`, `powershell`).
+
+## `sceptre mcp`
+
+Run the MCP stdio server (requires the CLI built with the `mcp` feature).
+
+```sh
+sceptre mcp [OPTIONS]
+```
+
+Takes only the [shared overrides](#shared-overrides) — there is no `--format` (the MCP transport
+shapes its own responses). See the [MCP server guide](/guides/mcp-server/).
+
+## Shared overrides
+
+These flags are available on every subcommand above and layer on top of the loaded `OcrConfig` (see
+[Configuration](/guides/configuration/) for precedence):
+
+| Flag | Description |
+|---|---|
+| `--lang <LANG>` | Recognition language, repeatable (e.g. `--lang english --lang korean`). One of `english`, `latin`, `chinese-simplified`, `japanese`, `korean`, `cyrillic`. |
+| `--threads <N>` | Maximum worker threads. |
+| `--backend <BACKEND>` | Inference backend: `ort`, `tract`, or `candle`. |
+| `--text-threshold <FLOAT>` | Detection text-confidence threshold, `0.0`–`1.0`. |
+| `--link-threshold <FLOAT>` | Detection link-confidence threshold, `0.0`–`1.0`. |
+| `--canvas-size <PX>` | Detection canvas size (longest side, in px). Lower cuts peak memory and detection time on large pages at some accuracy cost; the default (`2560`) matches EasyOCR. |
+
+`--text-threshold` and `--link-threshold` are validated at parse time — out-of-range or non-numeric
+values fail immediately with a clear error, rather than reaching the engine.
+
+## Exit behavior
+
+- Success: exit code `0`.
+- A single-image `run`, `detect`, or `recognize` failure: non-zero exit, error printed to stderr.
+- A batch `run` (2+ images): the run continues past per-image failures; exit is non-zero if any
+  image failed, with each failure recorded in the structured output as well as logged to stderr.
+
+<Aside type="tip">
+  For the exact set of flags on your installed build, `sceptre <subcommand> --help` is always
+  authoritative.
+</Aside>

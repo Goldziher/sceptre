@@ -1,0 +1,95 @@
+---
+title: sceptre
+description: >-
+  EasyOCR's accuracy, Rust's speed and footprint. A from-scratch Rust reimplementation of the EasyOCR
+  pipeline — CRAFT detection then gen2 CRNN recognition over ONNX — as a library, CLI, and MCP server.
+template: splash
+hero:
+  tagline: EasyOCR's accuracy. Rust's speed and footprint.
+  image:
+    file: ../../assets/mark.svg
+    alt: sceptre
+  actions:
+    - text: Quickstart
+      link: /sceptre/start/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/Goldziher/sceptre
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/components';
+
+sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
+pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX. It
+matches EasyOCR's output on every script it supports, runs **faster on a fraction of the memory**, and
+ships as one self-contained binary with **no Python runtime**. Use it as a **library**, a **CLI**, or
+an **MCP server**.
+
+## Why sceptre
+
+<CardGrid>
+  <Card title="Parity accuracy" icon="approve-check">
+    Validated against real EasyOCR output across all six gen2 scripts — English, Latin, Chinese,
+    Japanese, Korean, Cyrillic — matching text and boxes. A faithful reimplementation, not an
+    approximation.
+  </Card>
+  <Card title="Substantially faster" icon="rocket">
+    ~2.8× higher throughput than EasyOCR warm on the same corpus — and a cold, one-shot CLI run
+    (~4.4×) still beats EasyOCR's already-loaded reader.
+  </Card>
+  <Card title="A fraction of the memory" icon="laptop">
+    Peak RSS around 3× lower than the Python + torch process, measured like-for-like. Runs where
+    EasyOCR won't — small containers, edge boxes, many workers.
+  </Card>
+  <Card title="One binary, no Python" icon="seti:rust">
+    A single static executable. Models download once, cache locally, and run offline thereafter.
+    `cargo install` and go — nothing to `pip install`.
+  </Card>
+  <Card title="Three surfaces" icon="puzzle">
+    The same engine as a Rust library, a CLI (`sceptre`), and an MCP server for agents — drop it into
+    a service, a shell pipeline, or an AI tool.
+  </Card>
+  <Card title="Native or pure-Rust" icon="setting">
+    ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM / Android —
+    behind one backend seam.
+  </Card>
+</CardGrid>
+
+## Install
+
+<Tabs syncKey="surface">
+  <TabItem label="CLI">
+    ```sh
+    cargo install sceptre-cli
+    sceptre run receipt.png --lang english --format json
+    ```
+  </TabItem>
+  <TabItem label="Library">
+    ```toml
+    # Cargo.toml — the library ships no default features; enable a backend + model download.
+    sceptre = { version = "0.1", features = ["ort-bundled", "download"] }
+    ```
+  </TabItem>
+  <TabItem label="MCP server">
+    ```sh
+    sceptre mcp --lang english
+    ```
+  </TabItem>
+</Tabs>
+
+Models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached under the
+standard HF cache, and sha256-verified. Every run after that is offline.
+
+## Explore
+
+<CardGrid>
+  <LinkCard title="Introduction" href={`${import.meta.env.BASE_URL}start/introduction/`} description="What sceptre is and why it exists." />
+  <LinkCard title="Quickstart" href={`${import.meta.env.BASE_URL}start/quickstart/`} description="Run your first OCR from the CLI or the library." />
+  <LinkCard title="How it works" href={`${import.meta.env.BASE_URL}concepts/how-it-works/`} description="Detect → Recognize → Inference, mirroring EasyOCR's pipeline." />
+  <LinkCard title="CLI guide" href={`${import.meta.env.BASE_URL}guides/cli/`} description="Every subcommand and flag." />
+  <LinkCard title="Benchmarks" href={`${import.meta.env.BASE_URL}reference/benchmarks/`} description="The head-to-head numbers vs EasyOCR." />
+  <LinkCard title="Configuration" href={`${import.meta.env.BASE_URL}guides/configuration/`} description="OcrConfig, defaults, and precedence." />
+</CardGrid>

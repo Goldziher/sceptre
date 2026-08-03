@@ -1,0 +1,38 @@
+---
+title: Feature flags
+description: >-
+  Every cargo feature the sceptre library and CLI expose, what each enables, and when to pick it.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The `sceptre` library ships `default = []` — nothing is enabled by default, so every consumer picks
+its backend and capabilities explicitly.
+
+| Feature | Enables | Pick it when |
+|---|---|---|
+| `ort` | The native ONNX Runtime backend, provisioning-agnostic. | You're linking `libonnxruntime` yourself and don't need either provisioning helper below. |
+| `ort-bundled` | `ort` plus a prebuilt ONNX Runtime fetched at build time (`download-binaries`, `tls-rustls`). | You want a zero-config native binary for a target with a prebuilt runtime available. |
+| `ort-dynamic` | `ort` plus `dlopen`-based loading of `libonnxruntime` at runtime via `ORT_DYLIB_PATH`. | You want no build-time download — e.g. shipping a dylib next to the release binary — or you're on a target with no prebuilt (such as macOS x86_64). |
+| `tract` | The pure-Rust ONNX backend. | You're targeting WASM or Android, or want no native library dependency at all. |
+| `candle` | Reserved for a future pure-Rust native-tensor backend. | Not yet implemented — do not select `Backend::Candle` in production. |
+| `download` | Runtime model download, caching, and SHA-256 verification from Hugging Face. | You want the library to fetch missing models itself rather than requiring them pre-provisioned. |
+| `mcp` | The MCP (`rmcp`) server surface. | You're running `sceptre mcp` or embedding the MCP server in your own binary. |
+
+## `ort` vs. `tract`: which backend
+
+See [Backends](/concepts/backends/) for the full tradeoff; in short, `ort` for native CPU
+performance on desktop/server, `tract` for a pure-Rust WASM/Android build.
+
+## CLI defaults
+
+The `sceptre-cli` binary's own `default` feature set is `["ort-dynamic", "download"]` — runnable out
+of the box once a compatible `libonnxruntime` is present, with model download enabled. Building
+with `--features ort-bundled` instead trades that runtime dependency for a build-time download,
+producing a fully self-contained binary. The CLI's `mcp` feature (off by default) forwards to
+`sceptre/mcp` and adds the `sceptre mcp` subcommand.
+
+<Aside type="tip">
+  `ort-bundled` and `ort-dynamic` are two provisioning strategies for the same `ort` backend — pick
+  one per target rather than enabling both.
+</Aside>

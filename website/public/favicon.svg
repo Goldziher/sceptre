@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="sceptre">
+<title>sceptre</title>
+<defs><clipPath id="c"><rect width="256" height="256" rx="40"/></clipPath></defs>
+<g clip-path="url(#c)">
+<rect width="256" height="256" fill="#08070a"/>
+<g shape-rendering="crispEdges" fill="#f5b301">
+<rect x="52" y="40" width="52" height="20"/>
+<rect x="52" y="40" width="20" height="52"/>
+<rect x="152" y="40" width="52" height="20"/>
+<rect x="184" y="40" width="20" height="52"/>
+<rect x="52" y="132" width="52" height="20"/>
+<rect x="52" y="100" width="20" height="52"/>
+<rect x="152" y="132" width="52" height="20"/>
+<rect x="184" y="100" width="20" height="52"/>
+<rect x="104" y="80" width="48" height="32"/>
+<rect x="114" y="152" width="28" height="52"/>
+<rect x="86" y="204" width="84" height="18"/>
+</g>
+</g>
+</svg>

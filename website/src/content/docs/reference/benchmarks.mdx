@@ -1,0 +1,69 @@
+---
+title: Benchmarks
+description: >-
+  Measured throughput, memory, and quality of sceptre against upstream EasyOCR, and the methodology
+  behind the numbers.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Headline
+
+Measured against upstream EasyOCR over a 43-image mixed corpus (documents, tables, rotated scans,
+scene text, receipts) spanning five scripts, on CPU, both engines at their native multi-threaded
+default:
+
+| Engine | Throughput (img/s) | Peak RSS (MB) | Mean CER | Mean token-F1 |
+|---|---|---|---|---|
+| EasyOCR (warm/batch) | 0.14 | 22,626.2 | 0.554 | 0.348 |
+| **sceptre (warm/batch)** | **0.39** (~2.8× faster) | **6,624.1** (~3× lower) | 0.568 | 0.356 |
+| **sceptre (cold CLI run)** | **0.60** (~4.4× faster) | 6,624.1 | 0.568 | 0.356 |
+
+"Warm/batch" is a fresh subprocess per language group that loads its model/`Reader` once and
+processes every image in that group — the fairest like-for-like comparison. "Cold CLI run" is
+sceptre's per-invocation cost: a fresh process per image, paying model load every time, which still
+beats EasyOCR's warm, already-loaded reader.
+
+Quality (CER, WER, token-F1) is averaged over the labeled subset of the corpus only, scored against
+ground truth. sceptre matches EasyOCR's accuracy at these numbers — not a regression, a genuine
+reimplementation.
+
+## Methodology
+
+Both engines are measured **identically**: each runs as a fresh subprocess per language group under
+`/usr/bin/time`, so peak RSS is a like-for-like whole-process figure. EasyOCR's figure legitimately
+includes the Python + torch runtime — that is its real cost, not an artifact of measurement.
+Timings use `--repeats 2` (median wall time, max peak RSS observed).
+
+Three images in the corpus (`alpha`, `test`, `Hadley_Crater`) are capability gaps — formats sceptre
+cannot decode that EasyOCR can — reported separately and excluded from the speed/quality aggregates
+so a fast-failing decode never inflates sceptre's numbers. See
+[Image formats](/reference/image-formats/).
+
+Full methodology, including the RSS-measurement rationale, threading choice, and the quality
+signal, is recorded in
+[ADR 0021](https://github.com/Goldziher/sceptre/blob/main/adrs/0021-benchmark-methodology-and-gate.md).
+
+## Reproducing the numbers
+
+```sh
+task python:benchmark
+```
+
+reproduces the table above and writes `benchmark-results/comparison.{json,md}`. Useful flags:
+
+| Flag | Purpose |
+|---|---|
+| `--group labeled --limit 3 --repeats 1` | A fast inner-loop run over a small subset. |
+| `--baseline <prior.json>` | See per-image deltas against a previous run. |
+| `--assert` | Enforce the regression gate (see below). |
+
+`cargo bench` covers internal hot paths (criterion microbenchmarks); the head-to-head harness above
+measures end-to-end OCR against EasyOCR. Parity fixtures backing the quality signal live under
+[`crates/sceptre/tests/data/golden/`](https://github.com/Goldziher/sceptre/tree/main/crates/sceptre/tests/data/golden).
+
+<Aside type="note">
+  The regression gate (`--assert`) enforces three floors — warm speedup ≥ 2.0×, peak-RSS ratio ≥ 3×,
+  and labeled token-F1 within 0.05 of EasyOCR — run via `workflow_dispatch` and a weekly schedule in
+  CI, not on every PR (the reference run needs torch, easyocr, and the full model set).
+</Aside>

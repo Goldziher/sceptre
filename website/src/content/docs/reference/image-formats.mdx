@@ -1,0 +1,39 @@
+---
+title: Image formats
+description: >-
+  Which raster formats sceptre decodes, which are out of scope, and why.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+sceptre decodes input images through the `image` crate — pure-Rust decoders only, no C image
+libraries.
+
+## Supported
+
+| Format |
+|---|
+| PNG |
+| JPEG |
+| BMP |
+| GIF |
+| TIFF |
+| WebP |
+| NetPBM (PNM) |
+
+## Out of scope
+
+HEIF, AVIF, and the JPEG 2000 family (`jp2`/`j2k`/`jpx`/`jpm`/`mj2`/`j2c`) are not supported. Their
+only mature decoders are C libraries (`libheif`, `dav1d`, `openjpeg`), which would pull a C toolchain
+dependency into the build and break the pure-Rust `tract` WASM/Android path.
+
+<Aside type="note">
+  This is a deliberate tradeoff, not an oversight: keeping every decoder pure-Rust preserves the
+  WASM/Android backend story (see [Backends](/concepts/backends/)) and keeps the dependency/audit
+  surface modest. If demand warrants, HEIF/AVIF/JP2 support could be added later behind an optional,
+  native-only feature that WASM/Android builds omit — see
+  [ADR 0022](https://github.com/Goldziher/sceptre/blob/main/adrs/0022-input-image-format-coverage.md).
+</Aside>
+
+These formats show up as a distinct `capability` group in the [benchmark](/reference/benchmarks/) —
+reported as gaps rather than silently skipped, so the coverage limit stays visible.

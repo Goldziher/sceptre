@@ -1,0 +1,56 @@
+---
+title: Introduction
+description: >-
+  sceptre is a from-scratch Rust reimplementation of EasyOCR's OCR pipeline — CRAFT detection plus
+  gen2 CRNN recognition over ONNX — shipped as a library, a CLI, and an MCP server.
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+**EasyOCR's accuracy. Rust's speed and footprint.**
+
+[EasyOCR](https://github.com/JaidedAI/EasyOCR) is an accurate, widely used OCR toolkit — but it's a
+PyTorch stack: a Python interpreter, a multi-gigabyte runtime, and a heavy process to keep warm.
+sceptre reimplements EasyOCR's pipeline from scratch in Rust — **CRAFT** text detection followed by
+**gen2 CRNN** recognition with CTC decoding, run over ONNX — and drops the Python/torch dependency
+entirely, while matching EasyOCR's output on every script it supports.
+
+## Why it exists
+
+| | What you get |
+|---|---|
+| **Parity accuracy** | Validated against real EasyOCR output across all six gen2 scripts — text (word/char-F1) and boxes (IoU). |
+| **Substantially faster, less memory** | Higher throughput and a fraction of the peak RSS of the Python + torch process, measured like-for-like. See [Benchmarks](/reference/benchmarks/). |
+| **One binary, no Python** | A single executable. Models download once from Hugging Face, cache locally, and run offline thereafter. |
+| **Three surfaces** | The same engine as a Rust library, a CLI (`sceptre`), and an MCP server for agents. |
+| **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM/Android, behind one seam. |
+
+## Three surfaces
+
+- **Library** — add `sceptre` as a dependency and call `Reader::builder().build()` from your own
+  Rust code. See [Library guide](/guides/library/).
+- **CLI** — install the `sceptre` binary and run OCR from the command line or a shell pipeline. See
+  [CLI guide](/guides/cli/).
+- **MCP server** — run `sceptre mcp` to expose a `readtext` tool to any MCP-capable agent. See
+  [MCP server guide](/guides/mcp-server/).
+
+## Scope
+
+sceptre targets EasyOCR's current, actively maintained path:
+
+- **Detection**: the CRAFT model only.
+- **Recognition**: the six **gen2** (`*_g2`) recognizers — English, Latin, Chinese (simplified),
+  Japanese, Korean, Cyrillic.
+- **Decoding**: greedy CTC decoding.
+
+Legacy gen1 recognizer models, DBNet detection, and beam-search decoding are out of scope. Model
+ONNX artifacts come from the [`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch)
+repos on Hugging Face (Apache-2.0). See [Models & parity](/concepts/models-and-parity/) and
+[ADR 0002](https://github.com/Goldziher/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md)
+for the full rationale.
+
+<CardGrid>
+  <LinkCard title="Installation" href={`${import.meta.env.BASE_URL}start/installation/`} description="Install the CLI, add the library, or run the MCP server." />
+  <LinkCard title="Quickstart" href={`${import.meta.env.BASE_URL}start/quickstart/`} description="Run your first OCR job in each surface." />
+  <LinkCard title="How it works" href={`${import.meta.env.BASE_URL}concepts/how-it-works/`} description="The detect / recognize / inference pipeline in depth." />
+</CardGrid>

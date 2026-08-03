@@ -1,0 +1,105 @@
+---
+title: Configuration
+description: >-
+  OcrConfig and its per-stage structs, their defaults, layered precedence, and how feature flags
+  interact with configuration.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`OcrConfig` aggregates four per-stage structs. Every struct is `#[serde(default,
+deny_unknown_fields)]`, so it loads from partial TOML/JSON and rejects unknown fields (a typo fails
+loudly rather than silently doing nothing), and is entirely backend-agnostic.
+
+```rust
+pub struct OcrConfig {
+    pub detection: DetectionConfig,
+    pub recognition: RecognitionConfig,
+    pub concurrency: ConcurrencyConfig,
+    pub model: ModelConfig,
+}
+```
+
+## Precedence
+
+`OcrConfig`'s designed layering is:
+
+```text
+defaults < config file < environment < CLI flags
+```
+
+Each layer only overrides the fields it sets; anything unset falls through to the layer below.
+Today the CLI implements the `defaults < flags` ends of that chain: it starts from
+`OcrConfig::default()` and applies the [shared overrides](/guides/cli/#shared-overrides) (`--lang`,
+`--threads`, `--backend`, `--text-threshold`, `--link-threshold`, `--canvas-size`) on top. The
+config-file and environment layers are not yet wired into the CLI.
+From library code, build the same layering yourself by starting from `OcrConfig::default()` and
+overriding fields (see [Library](/guides/library/)).
+
+## `DetectionConfig`
+
+CRAFT detection and box-grouping parameters. Defaults mirror EasyOCR's `readtext` detection
+parameters.
+
+| Field | Default | Description |
+|---|---|---|
+| `text_threshold` | `0.7` | Text confidence threshold (region score). |
+| `link_threshold` | `0.4` | Link confidence threshold (affinity score). |
+| `low_text` | `0.4` | Low-bound text score for region growth. |
+| `canvas_size` | `2560` | Maximum image dimension before down-scaling. |
+| `mag_ratio` | `1.0` | Magnification ratio applied before detection. |
+| `min_size` | `20` | Minimum box size (px) to keep. |
+| `slope_ths` | `0.1` | Slope threshold for splitting horizontal vs. free boxes. |
+| `ycenter_ths` | `0.5` | Vertical-center threshold for line merging. |
+| `height_ths` | `0.5` | Height threshold for line merging. |
+| `width_ths` | `0.5` | Width threshold for line merging. |
+| `add_margin` | `0.1` | Fractional margin added around each box. |
+
+## `RecognitionConfig`
+
+CRNN recognition and CTC decoding parameters.
+
+| Field | Default | Description |
+|---|---|---|
+| `decoder` | `Decoder::Greedy` | CTC decoding strategy: `Greedy`, `BeamSearch`, or `WordBeamSearch`. |
+| `beam_width` | `5` | Beam width for beam-search decoders. |
+| `batch_size` | `1` | Recognition batch size. |
+| `allowlist` | `""` (empty) | Only these characters may be produced; empty uses the model's full charset. |
+| `blocklist` | `""` (empty) | These characters are never produced. |
+| `contrast_ths` | `0.1` | Contrast below which a low-confidence second pass runs. |
+| `adjust_contrast` | `0.5` | Target contrast for the adjustment pass. |
+| `filter_ths` | `0.003` | Accepted for EasyOCR parity; upstream never applies it, so — matching upstream — it currently has no effect on output. |
+
+The recognizer's fixed input height (`imgH`, `64`) is an internal constant, not a config field.
+
+## `ConcurrencyConfig`
+
+| Field | Default | Description |
+|---|---|---|
+| `max_threads` | `None` (auto: `num_cpus`, capped at `8`) | Maximum threads for every internal pool — Rayon and, once wired, the backend's intra-op threads. |
+
+See [Backends](/concepts/backends/) for why this is a single shared budget.
+
+## `ModelConfig`
+
+| Field | Default | Description |
+|---|---|---|
+| `languages` | `[Language::English]` | Recognition languages to load. Repeatable — one recognizer per entry, duplicates preserved. |
+| `backend` | `Backend::Ort` | Inference backend: `Ort`, `Tract`, or `Candle`. |
+| `cache_dir` | `None` | Override for the Hugging Face hub cache root. `None` resolves from `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` → `~/.cache/huggingface/hub`. |
+| `registry_owner` | `None` | Override for the Hugging Face registry owner. `None` uses the upstream `itextresearch` org; only the owner segment of each model repo id changes. |
+
+## Feature-flag interaction
+
+Selecting `Backend::Tract` requires the crate built with the `tract` feature; `Backend::Ort`
+requires `ort` (via `ort-bundled` or `ort-dynamic`). `cache_dir`/`registry_owner` and model
+provisioning (`model_manifest`, `download_models`) only fetch missing artifacts when the `download`
+feature is enabled — without it, `download_models` returns an `OcrError::Model` describing the
+missing feature, while `model_manifest`'s offline cache inspection works either way. See
+[Feature flags](/reference/feature-flags/).
+
+<Aside type="tip">
+  `OcrConfig::default()` plus targeted field overrides (as in the [Library guide](/guides/library/))
+  is the idiomatic way to configure a `Reader` from code — the same struct the CLI builds from
+  defaults and flags.
+</Aside>

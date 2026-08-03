@@ -1,0 +1,94 @@
+:root {
+  /* Amber accent ramp (brand #f5b301 on near-black surfaces). */
+  --sl-color-accent-low: #3a2a05;
+  --sl-color-accent: #f5b301;
+  --sl-color-accent-high: #ffe6a3;
+
+  --sl-color-white: #fbf7ee;
+  --sl-color-gray-1: #efe7d6;
+  --sl-color-gray-2: #cabfa8;
+  --sl-color-gray-3: #8c8271;
+  --sl-color-gray-4: #565040;
+  --sl-color-gray-5: #322d22;
+  --sl-color-gray-6: #1a160f;
+  --sl-color-black: #08070a;
+
+  --sc-amber: #f5b301;
+  --sc-amber-deep: #8a5a12;
+  --sc-highlight: #ffe6a3;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ffedc2;
+  --sl-color-accent: #9a6b00;
+  --sl-color-accent-high: #4a3400;
+
+  --sl-color-white: #17130a;
+  --sl-color-gray-1: #29241a;
+  --sl-color-gray-2: #423c2e;
+  --sl-color-gray-3: #6a6250;
+  --sl-color-gray-4: #97907e;
+  --sl-color-gray-5: #d6cfbc;
+  --sl-color-gray-6: #efe9da;
+  --sl-color-gray-7: #f8f4ea;
+  --sl-color-black: #fffdf7;
+}
+
+/* Warm amber wash behind the splash hero, echoing the banner's light beam. */
+[data-has-hero] .page {
+  background:
+    radial-gradient(60ch 40ch at 12% -12%, color-mix(in oklch, var(--sc-amber) 15%, transparent), transparent 70%),
+    radial-gradient(46ch 30ch at 92% -8%, color-mix(in oklch, var(--sc-amber-deep) 22%, transparent), transparent 72%);
+}
+
+.hero h1,
+.hero .tagline {
+  font-feature-settings: "ss01";
+}
+
+.hero .stack a[data-variant="primary"] {
+  background: linear-gradient(120deg, var(--sc-amber), var(--sc-amber-deep));
+  border: none;
+  color: #08070a;
+  font-weight: 700;
+  box-shadow: 0 8px 30px -12px color-mix(in oklch, var(--sc-amber) 80%, transparent);
+}
+
+.hero .stack a[data-variant="primary"]:hover {
+  filter: brightness(1.08);
+}
+
+/* Pixel crown hero mark: crisp edges, warm glow — never blurred by scaling. */
+.hero > img,
+.hero .hero-html {
+  max-width: 220px;
+  margin-inline: auto;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 12px 32px color-mix(in oklch, var(--sc-amber) 30%, transparent));
+}
+
+.site-title img {
+  height: 1.6rem;
+  width: auto;
+}
+
+.card {
+  background: color-mix(in oklch, var(--sl-color-gray-6) 60%, transparent);
+  border: 1px solid var(--sl-color-gray-5);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.card:hover {
+  border-color: color-mix(in oklch, var(--sc-amber) 55%, var(--sl-color-gray-5));
+  transform: translateY(-2px);
+}
+.card .icon {
+  color: var(--sc-amber);
+  background: color-mix(in oklch, var(--sc-amber) 12%, transparent);
+}
+
+.sl-markdown-content table {
+  font-size: var(--sl-text-sm);
+}
+.sl-markdown-content th {
+  color: var(--sl-color-white);
+}

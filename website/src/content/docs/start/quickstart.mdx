@@ -1,0 +1,57 @@
+---
+title: Quickstart
+description: >-
+  Run your first OCR job from the CLI, the library, and the MCP server.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## CLI
+
+One image, or many in a single warm process — a single `Reader` is reused across every image passed
+to `sceptre run`:
+
+```sh
+sceptre run receipt.png --lang english --format json
+sceptre run page1.png page2.png page3.png            # batch: models load once
+sceptre run sign.jpg --lang english --lang korean    # multi-language
+sceptre run page.png --lang english --timings        # per-stage load/detect/recognize breakdown
+sceptre run huge-scan.png --canvas-size 1600          # trade some accuracy for lower peak memory
+```
+
+`--format` accepts `text` (the default, tab-separated) or `json`. `--no-detail` emits only the
+recognized text, omitting confidence and box detail. See the full [CLI reference](/guides/cli/) for
+every flag and subcommand.
+
+Decodes PNG, JPEG, BMP, GIF, TIFF, WebP, and NetPBM — all pure-Rust decoders. See
+[Image formats](/reference/image-formats/) for what's out of scope.
+
+## Library
+
+```rust
+use sceptre::{Reader, ReadOptions};
+
+let reader = Reader::builder().build()?;
+for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.lines {
+    println!("{} ({:.2})", line.text, line.confidence);
+}
+# Ok::<(), sceptre::OcrError>(())
+```
+
+This requires a backend feature and `download` enabled in `Cargo.toml` — see
+[Installation](/start/installation/). Full walkthrough in the [Library guide](/guides/library/).
+
+## MCP server
+
+```sh
+sceptre mcp --lang english
+```
+
+Starts the stdio MCP server (requires the CLI's `mcp` feature) with a `readtext` tool that runs OCR
+over an image file and returns recognized lines with their bounding boxes and confidences. See the
+[MCP server guide](/guides/mcp-server/) for the tool schema and an example invocation.
+
+<Aside type="tip">
+  Every surface shares the same `OcrConfig` and model cache — a model downloaded once through the
+  CLI is immediately available to the library and the MCP server on the same machine.
+</Aside>

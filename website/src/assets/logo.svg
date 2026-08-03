@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="70 34 116 200" width="116" height="200" role="img" aria-label="sceptre">
+<title>sceptre</title>
+<g shape-rendering="crispEdges" fill="#f5b301">
+<rect x="80" y="44" width="34" height="13"/>
+<rect x="80" y="44" width="13" height="34"/>
+<rect x="142" y="44" width="34" height="13"/>
+<rect x="163" y="44" width="13" height="34"/>
+<rect x="80" y="112" width="34" height="13"/>
+<rect x="80" y="91" width="13" height="34"/>
+<rect x="142" y="112" width="34" height="13"/>
+<rect x="163" y="91" width="13" height="34"/>
+<rect x="114" y="74" width="28" height="20"/>
+<rect x="120" y="125" width="16" height="72"/>
+<rect x="104" y="197" width="48" height="14"/>
+<rect x="92" y="211" width="72" height="12"/>
+</g>
+</svg>

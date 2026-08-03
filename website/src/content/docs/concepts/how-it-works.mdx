@@ -1,0 +1,53 @@
+---
+title: How it works
+description: >-
+  The three-stage pipeline behind the Reader handle — Detect, Recognize, and Inference — mirroring
+  EasyOCR's latest (gen2 + CRAFT) path.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Every OCR run goes through three stages behind a single `Reader` handle, mirroring EasyOCR's latest
+pipeline:
+
+<Steps>
+
+1. **Load** (`imaging`) — decode the input into an owned RGB8 buffer (`Image`), the shared DTO the
+   rest of the pipeline works from.
+
+2. **Detect** (`detect`) — the CRAFT model produces region and link heat-maps at half the input
+   resolution. These are aspect-ratio resized and ImageNet mean/variance normalized before
+   inference, then thresholded, run through connected components, and turned into boxes. Boxes are
+   grouped into lines, distinguishing horizontal text from rotated text.
+
+3. **Recognize** (`recognize`) — each detected line is cropped (a perspective transform handles
+   rotated quads), resized to a fixed height, and normalized. Crops are batched and run through a
+   gen2 CRNN recognizer; the resulting CTC logits (`[batch, time, num_classes]`) are greedy-decoded
+   (blank = class index 0) into text, with a confidence score computed from the decode path.
+
+4. **Inference backend** (`inference`) — every model call — CRAFT and every recognizer — goes
+   through one `ModelBackend` trait seam. The default is `ort` (native ONNX Runtime); `tract`
+   (pure-Rust) is the WASM/Android alternative. Detection, recognition, and engine code never call a
+   backend API directly. See [Backends](/concepts/backends/).
+
+</Steps>
+
+## Key tunables (EasyOCR defaults)
+
+| Stage | Parameter | Default |
+|---|---|---|
+| Detection | `text_threshold` | `0.7` |
+| Detection | `link_threshold` | `0.4` |
+| Detection | `low_text` | `0.4` |
+| Detection | `canvas_size` | `2560` |
+| Detection | `mag_ratio` | `1.0` |
+| Recognition | decoder | greedy CTC |
+| Recognition | `imgH` (recognizer input height) | `64` |
+
+Full config surface and precedence rules in [Configuration](/guides/configuration/).
+
+## What's shared vs. backend-specific
+
+`config`, `types`, and the detection/recognition geometry code are entirely backend-agnostic —
+they never reference `ort`, `tract`, or `candle` types. Only the `inference` module and its
+`ModelBackend` implementations know about a specific runtime.

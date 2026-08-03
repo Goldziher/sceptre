@@ -1,0 +1,68 @@
+---
+title: Models & parity
+description: >-
+  The gen2 model table, where the ONNX artifacts come from, how they're verified and cached, and
+  how sceptre validates its output against EasyOCR.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The gen2 models
+
+sceptre uses one CRAFT detector shared across languages, plus one gen2 CRNN recognizer per
+language group:
+
+| Language | Model | Config value |
+|---|---|---|
+| — (detector) | `craft_mlt_25k` | — |
+| English | `english_g2` | `english` |
+| Latin-script | `latin_g2` | `latin` |
+| Chinese (simplified) | `zh_sim_g2` | `chinese_simplified` |
+| Japanese | `japanese_g2` | `japanese` |
+| Korean | `korean_g2` | `korean` |
+| Cyrillic-script | `cyrillic_g2` | `cyrillic` |
+
+Only the gen2 (`*_g2`) recognizer family is supported — see
+[ADR 0002](https://github.com/Goldziher/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md).
+
+## Source, verification, and caching
+
+Every ONNX artifact comes from the
+[`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch) repos on Hugging Face
+(Apache-2.0, dynamic-width — no letterbox distortion). Each model's SHA-256 is pinned in the
+registry and verified against the downloaded bytes.
+
+Downloads land in Hugging Face's standard hub cache
+(`<root>/models--<owner>--<name>/snapshots/<rev>/<file>`), so the library, the CLI, and any other
+Hugging Face tooling on the machine share one store. The cache root resolves, in order:
+`HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` → `~/.cache/huggingface/hub`, or the
+`ModelConfig::cache_dir` override.
+
+<Aside type="note">
+  Cache lookups are offline-first: once an artifact resolves in the hub cache it is used directly,
+  without re-verifying its hash or revalidating the revision against the Hub on every run. A pin
+  bump in the registry only takes effect once the stale cached snapshot is cleared and
+  re-downloaded.
+</Aside>
+
+The registry owner (`itextresearch` by default) can be overridden per config
+(`ModelConfig::registry_owner`) to point at a mirror without any code change — the owner is
+validated to a safe form before it reaches the cache path.
+
+## How parity is validated
+
+sceptre's test suite compares its output against two goldens for every image in the parity corpus:
+
+- **EasyOCR reference (fuzzy)** — the authoritative Python EasyOCR output, compared with bag-of-words
+  F1 (word/char) plus per-line box-IoU (≥ 0.5). This is the actual parity claim: what EasyOCR reads,
+  sceptre reads.
+- **sceptre self-snapshot (exact)** — a previously committed sceptre run, compared for byte-exact
+  text equality, catching regressions in sceptre's own output between changes.
+
+Real-model parity tests are opt-in, gated on `SCEPTRE_REQUIRE_MODELS`: unset (or the models absent)
+skips the test; set and the models are missing, the test panics so CI surfaces a misconfigured
+cache rather than silently passing. See
+[ADR 0016](https://github.com/Goldziher/sceptre/blob/main/adrs/0016-parity-harness-and-test-corpus.md).
+
+The same corpus and parity signal (char/word-F1, box-IoU) back the head-to-head performance
+benchmark — see [Benchmarks](/reference/benchmarks/).

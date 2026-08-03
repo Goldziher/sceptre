@@ -1,0 +1,70 @@
+---
+title: MCP server
+description: >-
+  Running sceptre as a stdio MCP server and the readtext tool it exposes.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+sceptre can run as a Model Context Protocol (MCP) stdio server, exposing OCR to any MCP-capable
+agent as a tool call instead of a subprocess invocation.
+
+## Running the server
+
+```sh
+sceptre mcp --lang english
+```
+
+Requires the CLI built with the `mcp` feature (see [Installation](/start/installation/)). `sceptre
+mcp` accepts the same [shared overrides](/guides/cli/#shared-overrides) as the other subcommands —
+`--lang`, `--threads`, `--backend`, `--text-threshold`, `--link-threshold`, `--canvas-size` — used to
+build the `Reader` the server holds for the lifetime of the process. Configure the languages you
+need up front; there is no per-call language override.
+
+The server communicates over stdio, so an agent host spawns it as a subprocess and talks JSON-RPC
+over its stdin/stdout. It is designed for a local, trusted client — the tool reads whatever path the
+client sends with the server process's own filesystem privileges.
+
+## The `readtext` tool
+
+| Parameter | Type | Description |
+|---|---|---|
+| `image_path` | `string` (required) | Filesystem path to the image to run OCR over. |
+| `detail` | `boolean` (optional, default `true`) | When `false`, the response contains only recognized text (no box or confidence). |
+
+With `detail: true` (or omitted), the tool returns the full `OcrResult` as structured JSON — an
+array of lines, each with `quad`, `text`, and `confidence`. With `detail: false`, it returns
+`{ "lines": ["...", "..."] }` — just the recognized text, for callers that only want the words.
+
+On an OCR failure, the tool returns an MCP tool error containing `OCR failed: <message>` rather than
+throwing a protocol-level error.
+
+## Example invocation
+
+An MCP client calling the tool sends parameters like:
+
+```json
+{
+  "name": "readtext",
+  "arguments": {
+    "image_path": "/data/receipts/receipt-001.png",
+    "detail": true
+  }
+}
+```
+
+and receives a structured result equivalent to:
+
+```json
+{
+  "lines": [
+    { "quad": { "points": [...] }, "text": "TOTAL", "confidence": 0.98 },
+    { "quad": { "points": [...] }, "text": "$42.10", "confidence": 0.95 }
+  ]
+}
+```
+
+<Aside type="note">
+  Tool bodies are thin wrappers that build `ReadOptions` and call `Reader::readtext` — no OCR logic
+  lives in the MCP layer itself. See [Library](/guides/library/) for what the underlying call does.
+</Aside>

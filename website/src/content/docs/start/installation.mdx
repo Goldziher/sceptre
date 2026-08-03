@@ -1,0 +1,76 @@
+---
+title: Installation
+description: >-
+  Install the sceptre CLI, add the library to a Rust project, or run the MCP server — and how model
+  download and caching works the first time you run OCR.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+<Tabs>
+  <TabItem label="CLI">
+
+    ```sh
+    cargo install sceptre-cli
+    ```
+
+    This is the CLI's default build: ONNX Runtime is loaded at runtime via `ORT_DYLIB_PATH`
+    (`ort-dynamic`) plus model download/caching (`download`) — runnable out of the box once a
+    compatible `libonnxruntime` is available.
+
+    For a zero-config native binary that bundles a prebuilt ONNX Runtime at build time instead:
+
+    ```sh
+    cargo install sceptre-cli --features ort-bundled
+    ```
+
+    To also expose the MCP server subcommand, add the `mcp` feature:
+
+    ```sh
+    cargo install sceptre-cli --features "ort-bundled,mcp"
+    ```
+
+  </TabItem>
+  <TabItem label="Library">
+
+    The library ships `default = []` — no backend and no download support are enabled by default.
+    Enable a backend feature and, typically, `download`:
+
+    ```toml
+    [dependencies]
+    sceptre = { version = "0.1", features = ["ort-bundled", "download"] }
+    ```
+
+    See [Feature flags](/reference/feature-flags/) for every flag and when to pick it, and
+    [Backends](/concepts/backends/) for the `ort` vs. `tract` tradeoff.
+
+  </TabItem>
+  <TabItem label="MCP server">
+
+    The MCP surface is behind the `mcp` cargo feature, exposed as the `sceptre mcp` subcommand.
+    Install the CLI with `mcp` enabled (see the CLI tab), or depend on the library with `mcp` plus a
+    backend and `download`:
+
+    ```toml
+    [dependencies]
+    sceptre = { version = "0.1", features = ["ort-bundled", "download", "mcp"] }
+    ```
+
+  </TabItem>
+</Tabs>
+
+## Model download and caching
+
+The CRAFT detector and the gen2 recognizers are ONNX artifacts fetched from Hugging Face
+(`itextresearch/itext-EasyOCR-*`) on first use. Each download is verified against a pinned SHA-256
+before use.
+
+Models are cached in the standard Hugging Face hub cache — `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE`
+→ `$HF_HOME/hub` → `~/.cache/huggingface/hub` — so the library, the CLI, and any other Hugging Face
+tooling on the machine share one cache store. Every run after the first reads the cached models with
+no network access.
+
+<Aside type="tip">
+  Run `sceptre models download --lang english` (see [CLI guide](/guides/cli/)) to prefetch models
+  ahead of time — useful for building an offline image or warming a CI cache.
+</Aside>

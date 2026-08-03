@@ -1,0 +1,50 @@
+---
+title: Backends
+description: >-
+  The ModelBackend seam that abstracts every model call, the ort / tract (and reserved candle)
+  implementations, and the single concurrency budget shared across the pipeline.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The `ModelBackend` seam
+
+All model execution — the CRAFT detector and every gen2 recognizer — goes through one trait:
+`inference::ModelBackend`. The detection, recognition, and engine code call this trait only; they
+never call `ort`, `tract`, or `candle` APIs directly. `config`, `types`, and the geometry code stay
+entirely backend-agnostic, so a config or result type is never conditionally compiled per backend.
+
+This keeps the backend choice non-load-bearing: a new backend implements the trait and slots in
+without touching the pipeline. See
+[ADR 0004](https://github.com/Goldziher/sceptre/blob/main/adrs/0004-inference-backend-seam.md).
+
+## `ort` vs. `tract`
+
+| Backend | Feature | Target | Notes |
+|---|---|---|---|
+| `ort` | `ort`, `ort-bundled`, `ort-dynamic` | Desktop / server | Native ONNX Runtime. `ort-bundled` fetches a prebuilt runtime at build time (zero-config); `ort-dynamic` `dlopen`s `libonnxruntime` at runtime via `ORT_DYLIB_PATH`. |
+| `tract` | `tract` | WASM / Android | Pure-Rust ONNX interpreter — no native library to ship or load. |
+| `candle` | `candle` | Reserved | A pure-Rust native-tensor backend, deferred as a fallback if `tract`'s recurrent-layer (BiLSTM) support proves insufficient for the recognizer. Not yet implemented. |
+
+Pick `ort` (native) for CPU/RSS-optimized execution on desktop or server; pick `tract` when you need
+a pure-Rust build with no native dependency, notably WASM and Android. See
+[ADR 0012](https://github.com/Goldziher/sceptre/blob/main/adrs/0012-ort-runtime-provisioning.md) for
+the `ort-bundled`/`ort-dynamic` provisioning tradeoff, and
+[ADR 0009](https://github.com/Goldziher/sceptre/blob/main/adrs/0009-candle-evaluation-ort-primary.md)
+for why `candle` is off the critical path.
+
+The active backend is selected through `ModelConfig::backend` (`Backend::Ort` / `Backend::Tract` /
+`Backend::Candle`), or `--backend` on the CLI.
+
+<Aside type="caution">
+  `candle` is a reserved cargo feature with no implementation yet. Selecting `Backend::Candle`
+  before it lands is not a supported configuration.
+</Aside>
+
+## One concurrency budget
+
+Parallelism flows through a single `ConcurrencyConfig::max_threads` budget. Rayon's thread pool and
+the backend's own intra-op threads (once wired) draw from the same budget, so nested parallelism —
+Rayon fanning out across images while the backend also parallelizes inside a single model call —
+cannot oversubscribe the CPU. `max_threads` defaults to `num_cpus`, capped at 8. See
+[Configuration](/guides/configuration/).

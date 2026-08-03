@@ -1,0 +1,126 @@
+---
+title: Library
+description: >-
+  Using the sceptre crate directly — building a Reader, running OCR, and handling errors.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Dependency
+
+The library ships `default = []`. Enable a backend feature and, typically, `download`:
+
+```toml
+[dependencies]
+sceptre = { version = "0.1", features = ["ort-bundled", "download"] }
+```
+
+See [Feature flags](/reference/feature-flags/) for the full list. The crate version is available at
+runtime as `sceptre::VERSION`.
+
+## Building a `Reader`
+
+`Reader` is a cheap, cloneable handle over an OCR engine and a resolved `OcrConfig`, built through
+`ReaderBuilder`:
+
+```rust
+use sceptre::Reader;
+
+let reader = Reader::builder().build()?;
+# Ok::<(), sceptre::OcrError>(())
+```
+
+Pass a custom `OcrConfig` to override defaults (see [Configuration](/guides/configuration/)):
+
+```rust
+use sceptre::{OcrConfig, Reader};
+
+let mut config = OcrConfig::default();
+config.model.languages = vec![sceptre::Language::English, sceptre::Language::Korean];
+config.detection.canvas_size = 1600;
+
+let reader = Reader::builder().config(config).build()?;
+# Ok::<(), sceptre::OcrError>(())
+```
+
+`ReaderBuilder` also accepts injected extension points — a custom `OcrEngine`, `ModelProvider`, or
+`ProgressSink` — each defaulting to an in-crate implementation when not supplied.
+
+## Running OCR
+
+```rust
+use sceptre::{Reader, ReadOptions};
+
+let reader = Reader::builder().build()?;
+let result = reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?;
+for line in &result.lines {
+    println!("{} ({:.2})", line.text, line.confidence);
+}
+# Ok::<(), sceptre::OcrError>(())
+```
+
+`Reader` exposes four entry points:
+
+| Method | Signature | Behavior |
+|---|---|---|
+| `readtext` | `(image: &Path, options: &ReadOptions) -> Result<OcrResult>` | Decodes the file at `image` and runs the full pipeline. |
+| `recognize` | `(image: &Image, options: &ReadOptions) -> Result<OcrResult>` | Runs the full pipeline on an already-decoded `Image`. |
+| `detect` | `(image: &Image, options: &ReadOptions) -> Result<Vec<Quad>>` | Detects text regions only, returning their quads without recognition. |
+| `recognize_line` | `(image: &Image, options: &ReadOptions) -> Result<TextLine>` | Recognizes a single, already-cropped line image, skipping detection. |
+
+`ReadOptions { detail: bool }` (default `true`) is a presentation hint for callers formatting
+output; the engine always computes full detail regardless of its value.
+
+## Types
+
+| Type | Fields |
+|---|---|
+| `Image` | An owned, decoded RGB8 buffer. Build with `Image::from_path`, `Image::from_bytes`, or `Image::from_rgb8`. |
+| `OcrResult` | `lines: Vec<TextLine>` — recognized lines in reading order where determinable. |
+| `TextLine` | `quad: Quad`, `text: String`, `confidence: f32` (`0.0..=1.0`). |
+| `Quad` | `points: [Point; 4]` — four corners, clockwise from top-left. |
+| `BBox` | `x_min`, `y_min`, `x_max`, `y_max` — an axis-aligned bounding box. |
+| `Point` | `x: f32`, `y: f32`. |
+
+All of these implement `serde::Serialize`/`Deserialize`.
+
+## Errors
+
+Every fallible call returns `sceptre::Result<T>` (`= std::result::Result<T, OcrError>`). `OcrError`
+is a `thiserror` enum:
+
+```rust
+pub enum OcrError {
+    Io(std::io::Error),        // bubbles up unchanged via `#[from]`
+    Model { message: String, source: Option<..> },
+    Inference { message: String, source: Option<..> },
+    Image { message: String, source: Option<..> },
+    Config { message: String, source: Option<..> },
+    Other(String),
+}
+```
+
+`Model`, `Inference`, `Image`, and `Config` carry a `message` plus an optional `#[source]`
+preserving the underlying error chain.
+
+## Model provisioning
+
+Outside of a `Reader` run, two functions inspect or fetch the models a config requires:
+
+```rust
+use sceptre::{OcrConfig, model_manifest, download_models};
+
+let config = OcrConfig::default();
+let manifest = model_manifest(&config)?;      // inspect cache status, no network
+let manifest = download_models(&config)?;     // fetch anything missing (needs `download`)
+# Ok::<(), sceptre::OcrError>(())
+```
+
+Each returns `Vec<ModelInfo>` (`name`, `repo`, `role: ModelRole`, `cached: bool`,
+`path: Option<PathBuf>`). See [Models & parity](/concepts/models-and-parity/).
+
+<Aside type="note">
+  `readtext`/`recognize`/`detect`/`recognize_line` install the reader's private Rayon pool for the
+  duration of the call, so internal parallelism stays within the reader's configured
+  `ConcurrencyConfig` budget even if the caller's own code also uses Rayon.
+</Aside>
