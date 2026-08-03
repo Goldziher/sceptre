@@ -55,14 +55,18 @@ fn resize_crop(crop: &RegionCrop) -> Result<GrayImage> {
 }
 
 /// Resize each crop to height 64 (width = `ceil(64 * w/h)`, bicubic), normalize
-/// to `[-1, 1]` via `(x/255 - 0.5)/0.5`, and right-pad every crop to the batch's
-/// max width by edge-replicating the last real column. Returns `[B, 1, 64, maxW]`.
+/// to `[-1, 1]` via `(x/255 - 0.5)/0.5`, and right-pad every crop by edge-replicating
+/// the last real column. Returns `[B, 1, 64, W]` where `W = max(batch max width, 64)`.
 ///
-/// The padding width is the max over *this* batch, whereas EasyOCR pads to one max
-/// width computed across every crop of the whole image. With the default
-/// `batch_size` of 1 each crop is its own batch (no padding at all), so the two
-/// agree; they can differ only for `batch_size > 1`, where edge-replicated padding
-/// over dynamic width keeps the effect negligible.
+/// The pad width floors at [`IMG_H`]: EasyOCR always pads to a global `max_width`
+/// that is `ceil(max_ratio) * imgH >= 64` (`utils.py:get_image_list`), so a crop is
+/// never fed to the CRNN narrower than the height. The floor is required for
+/// correctness, not just parity — the recognizer's `VGG_FeatureExtractor` halves the
+/// width twice and then applies a 2-wide convolution, so an input narrower than 8px
+/// collapses that layer to a zero/one-column tensor and ONNX Runtime aborts the run
+/// (the `{4,1}` `FusedConv` failure on tall vertical crops). Flooring at 64 clears
+/// that with margin and stays lean (unlike EasyOCR's `ceil(max_ratio) * 64`, which
+/// balloons every crop to the widest crop's ratio).
 ///
 /// An empty `crops` slice is an error: the runner never passes one.
 pub(crate) fn prepare_batch(crops: &[RegionCrop]) -> Result<Tensor> {
@@ -71,7 +75,12 @@ pub(crate) fn prepare_batch(crops: &[RegionCrop]) -> Result<Tensor> {
     }
 
     let resized: Vec<GrayImage> = crops.iter().map(resize_crop).collect::<Result<_>>()?;
-    let max_w = resized.iter().map(GrayImage::width).max().unwrap_or(MIN_WIDTH);
+    let max_w = resized
+        .iter()
+        .map(GrayImage::width)
+        .max()
+        .unwrap_or(MIN_WIDTH)
+        .max(IMG_H);
 
     let plane_width = max_w as usize;
     let mut tensor = Tensor::zeros(IxDyn(&[resized.len(), CHANNELS, IMG_H as usize, plane_width]));
@@ -98,7 +107,12 @@ pub(crate) fn prepare_batch_reference(crops: &[RegionCrop]) -> Result<Tensor> {
     }
 
     let resized: Vec<GrayImage> = crops.iter().map(resize_crop).collect::<Result<_>>()?;
-    let max_w = resized.iter().map(GrayImage::width).max().unwrap_or(MIN_WIDTH);
+    let max_w = resized
+        .iter()
+        .map(GrayImage::width)
+        .max()
+        .unwrap_or(MIN_WIDTH)
+        .max(IMG_H);
 
     let plane_width = max_w as usize;
     let mut tensor = Tensor::zeros(IxDyn(&[resized.len(), CHANNELS, IMG_H as usize, plane_width]));
@@ -188,19 +202,44 @@ mod tests {
     }
 
     #[test]
-    fn portrait_crop_resizes_to_narrow_strip_matching_align_collate() {
-        // w=10, h=40 (w < h): AlignCollate fixes height to 64 and width to ~keep
-        // ceil(64 * 10/40) = 16 — a narrow strip, matching EasyOCR's final output ~keep
-        // (get_image_list's intermediate resize does not change these dimensions). ~keep
+    fn portrait_crop_resizes_to_narrow_strip_then_pads_to_floor() {
+        // w=10, h=40 (w < h): the resize fixes height to 64 and width to ~keep
+        // ceil(64 * 10/40) = 16 — a narrow strip, not a rotated tall image. The batch ~keep
+        // tensor then edge-pads that strip up to the IMG_H pad-width floor (64). ~keep
         let crop = make_crop(10, 40, 128);
+        assert_eq!(resize_crop(&make_crop(10, 40, 128)).expect("resize").width(), 16);
         let tensor = prepare_batch(&[crop]).expect("portrait crop should preprocess");
-        assert_eq!(tensor.shape(), &[1, 1, IMG_H as usize, 16]);
+        assert_eq!(tensor.shape(), &[1, 1, IMG_H as usize, IMG_H as usize]);
     }
 
     #[test]
     fn zero_dimension_crop_is_rejected() {
         let crop = make_crop(0, 0, 0);
         assert!(prepare_batch(&[crop]).is_err(), "a zero-dimension crop must error");
+    }
+
+    #[test]
+    fn extremely_narrow_crop_pads_to_at_least_conv_floor() {
+        // A very tall/narrow crop (vertical text) resizes to width 1; the CRNN ConvNet
+        // needs input width >= 8 (two /2 width-pools then a 2-wide conv), so the pad width
+        // must floor at IMG_H (matching EasyOCR's always->=64 pad) or the model crashes. ~keep
+        let crop = make_crop(1, 200, 128);
+        let tensor = prepare_batch(&[crop]).expect("narrow crop should preprocess");
+        assert_eq!(
+            tensor.shape(),
+            &[1, 1, IMG_H as usize, IMG_H as usize],
+            "a width-1 crop must pad up to the IMG_H pad-width floor"
+        );
+    }
+
+    #[test]
+    fn wide_batch_pad_width_is_unchanged_by_the_floor() {
+        // When the batch max already exceeds IMG_H the floor is a no-op, so normal
+        // (wide, horizontal) crops keep their exact pad width and decoded output. ~keep
+        let crop = make_crop(400, 50, 128);
+        let tensor = prepare_batch(&[crop]).expect("wide crop should preprocess");
+        let expected_w = ((IMG_H as f32 * (400.0 / 50.0)).ceil() as u32).max(IMG_H) as usize;
+        assert_eq!(tensor.shape(), &[1, 1, IMG_H as usize, expected_w]);
     }
 
     #[test]
