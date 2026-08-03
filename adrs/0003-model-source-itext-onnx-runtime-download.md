@@ -1,10 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-31
 deciders: Na'aman Hirschfeld
 ---
 
 # Model source: iText ONNX, runtime download
+
+> **Superseded by [ADR 0025](0025-first-party-onnx-exports.md)**, which replaces the third-party
+> `itextresearch` source with first-party `.pth → ONNX` exports hosted on the `sceptre-ocr` org and
+> promotes the export pipeline from fallback to primary. The runtime-download, sha256-verification,
+> and HF-cache mechanics (and ADR 0017) are unchanged; only the source and export ownership change.
 
 ## Context and Problem Statement
 

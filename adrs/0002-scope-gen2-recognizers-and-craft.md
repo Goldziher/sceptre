@@ -1,10 +1,14 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-31
 deciders: Na'aman Hirschfeld
 ---
 
 # Scope to gen2 recognizers + CRAFT
+
+> **Superseded by [ADR 0026](0026-extend-gen2-scope-telugu-kannada.md)**, which extends the
+> enumerated gen2 recognizer list from six to eight (adds Telugu and Kannada). The
+> gen1-out-of-scope decision below is carried forward unchanged.
 
 ## Context and Problem Statement
 

@@ -35,3 +35,11 @@ Chosen option: **scaffold both paths now, defer the logic**.
 - Good: `default-members` keeps `sceptre-tools` out of the normal build/test loop.
 - Bad: two parallel toolchains (cargo + uv) to keep current.
 - Bad: the export/golden logic is deferred; the scaffolding does nothing useful yet.
+
+## Status update (2026-08-03)
+
+[ADR 0025](0025-first-party-onnx-exports.md) lands the export pipeline in the **Python**
+`sceptre_rs_tools` package (torch-based), inverting this ADR's "Rust/candle preferred" ordering for
+export: since [ADR 0009](0009-candle-evaluation-ort-primary.md) found candle cannot load these
+models, the torch path is primary and the Rust `tools/` export path stays deferred. The
+preferred/fallback split for the *golden generator* and the two-toolchain layout are unchanged.

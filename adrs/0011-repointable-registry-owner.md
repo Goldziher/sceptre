@@ -60,3 +60,12 @@ is unchanged.
   scheme or a non-HF backend would need a broader mechanism (revisit if that host is chosen).
 - Neutral: artifacts served under a different owner cache to a distinct path; identical
   content still satisfies the same sha256 pin once pins are populated.
+
+## Status update (2026-08-03)
+
+[ADR 0025](0025-first-party-onnx-exports.md) moves the models to first-party repos named
+`sceptre-ocr/<model>` — a different repo-name scheme, not just a different owner — which is exactly
+the "revisit if that host is chosen" limitation flagged above. The baked `hf_repo` ids in the
+registry are therefore edited directly rather than via this owner-only override. The
+`registry_owner` mechanism itself is retained unchanged for downstream mirroring/re-pointing of the
+new `sceptre-ocr` ids.
