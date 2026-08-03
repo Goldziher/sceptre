@@ -21,6 +21,10 @@ pub enum Language {
     Korean,
     /// Cyrillic-script languages (`cyrillic_g2`).
     Cyrillic,
+    /// Telugu (`telugu_g2`).
+    Telugu,
+    /// Kannada (`kannada_g2`).
+    Kannada,
 }
 
 /// Which inference backend to use.
@@ -54,10 +58,10 @@ pub struct ModelConfig {
     pub cache_dir: Option<PathBuf>,
     /// Override for the Hugging Face registry owner hosting the ONNX exports.
     ///
-    /// `None` (the default) uses the upstream `itextresearch` org. Setting it
+    /// `None` (the default) uses the first-party `sceptre-ocr` org. Setting it
     /// swaps only the owner segment of every model repo id, so identical exports
     /// can be served from a mirror or private account without any code change
-    /// (the `itext-EasyOCR-<model>` repo name is preserved). See ADR 0011; the
+    /// (the `<model>` repo name is preserved). See ADR 0011 and ADR 0025; the
     /// value is validated to a safe owner form before it reaches cache paths.
     pub registry_owner: Option<String>,
 }

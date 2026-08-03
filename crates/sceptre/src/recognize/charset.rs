@@ -17,6 +17,8 @@ const ZH_SIM_G2: &str = include_str!("../../assets/character/zh_sim_g2.txt");
 const JAPANESE_G2: &str = include_str!("../../assets/character/japanese_g2.txt");
 const KOREAN_G2: &str = include_str!("../../assets/character/korean_g2.txt");
 const CYRILLIC_G2: &str = include_str!("../../assets/character/cyrillic_g2.txt");
+const TELUGU_G2: &str = include_str!("../../assets/character/telugu_g2.txt");
+const KANNADA_G2: &str = include_str!("../../assets/character/kannada_g2.txt");
 
 /// An ordered gen2 alphabet plus the derived blank-prefixed CTC class mapping.
 ///
@@ -36,6 +38,8 @@ impl Charset {
             Language::Japanese => JAPANESE_G2,
             Language::Korean => KOREAN_G2,
             Language::Cyrillic => CYRILLIC_G2,
+            Language::Telugu => TELUGU_G2,
+            Language::Kannada => KANNADA_G2,
         };
         // Guard against a stray trailing newline (LF or CRLF) from asset tooling; ~keep
         // the gen2 charset itself never contains a newline or carriage return. ~keep
@@ -115,6 +119,8 @@ mod tests {
             (Language::Japanese, 2215),
             (Language::Korean, 1009),
             (Language::Cyrillic, 208),
+            (Language::Telugu, 166),
+            (Language::Kannada, 168),
         ];
         for (language, classes) in expected {
             assert_eq!(Charset::for_language(language).num_classes(), classes, "{language:?}");

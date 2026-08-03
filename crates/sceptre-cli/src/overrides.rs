@@ -65,6 +65,10 @@ pub enum LanguageArg {
     Korean,
     /// Cyrillic-script (`cyrillic_g2`).
     Cyrillic,
+    /// Telugu (`telugu_g2`).
+    Telugu,
+    /// Kannada (`kannada_g2`).
+    Kannada,
 }
 
 /// Backend choices exposed on the command line.
@@ -88,6 +92,8 @@ impl From<LanguageArg> for sceptre::Language {
             LanguageArg::Japanese => Language::Japanese,
             LanguageArg::Korean => Language::Korean,
             LanguageArg::Cyrillic => Language::Cyrillic,
+            LanguageArg::Telugu => Language::Telugu,
+            LanguageArg::Kannada => Language::Kannada,
         }
     }
 }

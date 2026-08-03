@@ -1,8 +1,9 @@
 //! The gen2 model registry.
 //!
-//! Source: the `itextresearch/itext-EasyOCR-*` ONNX repos on Hugging Face
-//! (Apache-2.0, dynamic-width). Each `sha256` is pinned to the current upstream
-//! artifact and verified on download (see [`crate::models::download`]).
+//! Source: the first-party `sceptre-ocr/*` ONNX repos on Hugging Face (Apache-2.0,
+//! dynamic-width), exported by the `sceptre_rs_tools` pipeline from EasyOCR's gen2
+//! weights (see ADR 0025). Each `sha256` is pinned to our exported artifact and
+//! verified on download (see [`crate::models::download`]).
 
 use crate::config::Language;
 use crate::error::{OcrError, Result};
@@ -26,21 +27,21 @@ pub struct ModelEntry {
 pub const fn craft_entry() -> ModelEntry {
     ModelEntry {
         name: "craft_mlt_25k",
-        hf_repo: "itextresearch/itext-EasyOCR-craft_mlt_25k",
-        file: "itext-EasyOCR-craft_mlt_25k.onnx",
-        sha256: "f441eb402f3625d2a4490b3861efd614711bc20c516b4cf05f498c8673a2d255",
+        hf_repo: "sceptre-ocr/craft_mlt_25k",
+        file: "craft_mlt_25k.onnx",
+        sha256: "159f5ffecde90d567f54da3e449fb0eba54a1da791c429c3509984dcfd7f684e",
     }
 }
 
 /// Resolve the effective Hugging Face repo id for `entry`.
 ///
 /// With `registry_owner` `None`, the entry's own [`ModelEntry::hf_repo`] is
-/// returned verbatim — the default `itextresearch/itext-EasyOCR-*` ids from the
-/// mirror decision in ADR 0011. With `Some(owner)`, only the owner segment is
-/// swapped, so identical exports can be hosted under a different account or
-/// mirror without any code change; the repo-name segment (`itext-EasyOCR-<model>`)
-/// is kept. A `hf_repo` without a `/` separator (short-form id) is treated as a
-/// bare repo name and prefixed with `owner`.
+/// returned verbatim — the default first-party `sceptre-ocr/*` ids (ADR 0025).
+/// With `Some(owner)`, only the owner segment is swapped, so identical exports can
+/// be hosted under a different account or mirror without any code change; the
+/// repo-name segment (`<model>`) is kept (ADR 0011). A `hf_repo` without a `/`
+/// separator (short-form id) is treated as a bare repo name and prefixed with
+/// `owner`.
 ///
 /// The override is validated ([`owner_is_safe`]) before it reaches the cache-path
 /// construction in [`crate::models::download`], so it cannot inject a path
@@ -74,39 +75,51 @@ pub const fn recognizer_entry(language: Language) -> ModelEntry {
     match language {
         Language::English => ModelEntry {
             name: "english_g2",
-            hf_repo: "itextresearch/itext-EasyOCR-english_g2",
-            file: "itext-EasyOCR-english_g2.onnx",
-            sha256: "cd944f5c1da6fca788ad393e219ec6e560dc5329d25662956162202cab282f80",
+            hf_repo: "sceptre-ocr/english_g2",
+            file: "english_g2.onnx",
+            sha256: "29ef336a7ad835d3e16eb70f23973d0fefd7a81fe6070845850954fe1cece0db",
         },
         Language::Latin => ModelEntry {
             name: "latin_g2",
-            hf_repo: "itextresearch/itext-EasyOCR-latin_g2",
-            file: "itext-EasyOCR-latin_g2.onnx",
-            sha256: "8c0a97f31cb8f0acf4216fa274772e85d80cd5fd37ce996deecb764a40216334",
+            hf_repo: "sceptre-ocr/latin_g2",
+            file: "latin_g2.onnx",
+            sha256: "69ff1f543bb2b733708d4ab9e25d7dd3a9a25033da163698236211e36df4c787",
         },
         Language::ChineseSimplified => ModelEntry {
             name: "zh_sim_g2",
-            hf_repo: "itextresearch/itext-EasyOCR-zh_sim_g2",
-            file: "itext-EasyOCR-zh_sim_g2.onnx",
-            sha256: "976a960784b3cf57d7de8ab039daf83f6c0999eb745745965c4ec611b74acdca",
+            hf_repo: "sceptre-ocr/zh_sim_g2",
+            file: "zh_sim_g2.onnx",
+            sha256: "4ce0cde647eb9305ec2ed9dfd79bd27ab573750424be2fe46daf91093dd0464f",
         },
         Language::Japanese => ModelEntry {
             name: "japanese_g2",
-            hf_repo: "itextresearch/itext-EasyOCR-japanese_g2",
-            file: "itext-EasyOCR-japanese_g2.onnx",
-            sha256: "e520e4a4939019b84dc817d6a1eab59edce560e0ba5a17b336f499265237af67",
+            hf_repo: "sceptre-ocr/japanese_g2",
+            file: "japanese_g2.onnx",
+            sha256: "daa18f93ff2cb5d3666fa3e0f14909d520e17c90bb49d2aa1ad633d8c4f8bd45",
         },
         Language::Korean => ModelEntry {
             name: "korean_g2",
-            hf_repo: "itextresearch/itext-EasyOCR-korean_g2",
-            file: "itext-EasyOCR-korean_g2.onnx",
-            sha256: "fa1028e57feff4a95777b190c496ddf351223f107b1e075449705c0e94661cbd",
+            hf_repo: "sceptre-ocr/korean_g2",
+            file: "korean_g2.onnx",
+            sha256: "ccfd19e313c112999f6faa72d9e5bc4d67e11fedc96169a8de9e72c8110b3de8",
         },
         Language::Cyrillic => ModelEntry {
             name: "cyrillic_g2",
-            hf_repo: "itextresearch/itext-EasyOCR-cyrillic_g2",
-            file: "itext-EasyOCR-cyrillic_g2.onnx",
-            sha256: "f873b0a8f73e2948c9ecdf028d04f576a9d95fe8a2c6ae913aa9bbb74897825d",
+            hf_repo: "sceptre-ocr/cyrillic_g2",
+            file: "cyrillic_g2.onnx",
+            sha256: "71fb248ecb7fd5e47333ea5269fd1abdb82934b01ae877bbdad95e9ce2e2ea9b",
+        },
+        Language::Telugu => ModelEntry {
+            name: "telugu_g2",
+            hf_repo: "sceptre-ocr/telugu_g2",
+            file: "telugu_g2.onnx",
+            sha256: "d9bd97bc07c48504722c8a0e69ac5e1394e069d79fd51a17fd40d51192ac2ef4",
+        },
+        Language::Kannada => ModelEntry {
+            name: "kannada_g2",
+            hf_repo: "sceptre-ocr/kannada_g2",
+            file: "kannada_g2.onnx",
+            sha256: "86b925fd3eef9557792b017206c01b3fcf6824099472a3be54748042ffe21334",
         },
     }
 }
@@ -116,14 +129,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn effective_repo_without_override_yields_default_itextresearch_id() {
+    fn effective_repo_without_override_yields_default_sceptre_ocr_id() {
         assert_eq!(
             effective_repo(&craft_entry(), None).unwrap(),
-            "itextresearch/itext-EasyOCR-craft_mlt_25k"
+            "sceptre-ocr/craft_mlt_25k"
         );
         assert_eq!(
             effective_repo(&recognizer_entry(Language::English), None).unwrap(),
-            "itextresearch/itext-EasyOCR-english_g2"
+            "sceptre-ocr/english_g2"
+        );
+        assert_eq!(
+            effective_repo(&recognizer_entry(Language::Telugu), None).unwrap(),
+            "sceptre-ocr/telugu_g2"
         );
     }
 
@@ -131,11 +148,11 @@ mod tests {
     fn effective_repo_with_override_swaps_only_the_owner_segment() {
         assert_eq!(
             effective_repo(&craft_entry(), Some("my-mirror")).unwrap(),
-            "my-mirror/itext-EasyOCR-craft_mlt_25k"
+            "my-mirror/craft_mlt_25k"
         );
         assert_eq!(
             effective_repo(&recognizer_entry(Language::Cyrillic), Some("acme-org")).unwrap(),
-            "acme-org/itext-EasyOCR-cyrillic_g2"
+            "acme-org/cyrillic_g2"
         );
     }
 

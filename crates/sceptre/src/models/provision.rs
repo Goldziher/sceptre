@@ -102,8 +102,8 @@ mod tests {
     use super::*;
     use crate::config::OcrConfig;
 
-    const CRAFT_REPO: &str = "itextresearch/itext-EasyOCR-craft_mlt_25k";
-    const ENGLISH_REPO: &str = "itextresearch/itext-EasyOCR-english_g2";
+    const CRAFT_REPO: &str = "sceptre-ocr/craft_mlt_25k";
+    const ENGLISH_REPO: &str = "sceptre-ocr/english_g2";
 
     /// A config pointed at a fresh, empty temp cache dir so nothing reads cached.
     fn config_with_empty_cache(languages: Vec<Language>) -> OcrConfig {

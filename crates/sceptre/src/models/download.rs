@@ -119,8 +119,8 @@ fn non_empty_env(key: &str) -> Option<String> {
 
 /// The on-disk cache directory name for a `owner/name` repo id.
 ///
-/// Mirrors Hugging Face's layout: `itextresearch/itext-EasyOCR-english_g2`
-/// becomes `models--itextresearch--itext-EasyOCR-english_g2`.
+/// Mirrors Hugging Face's layout: `sceptre-ocr/english_g2`
+/// becomes `models--sceptre-ocr--english_g2`.
 pub(crate) fn repo_cache_dir_name(repo_id: &str) -> String {
     format!("models--{}", repo_id.replace('/', "--"))
 }
@@ -264,8 +264,8 @@ mod tests {
     #[test]
     fn repo_cache_dir_name_mirrors_the_hugging_face_layout() {
         assert_eq!(
-            repo_cache_dir_name("itextresearch/itext-EasyOCR-english_g2"),
-            "models--itextresearch--itext-EasyOCR-english_g2"
+            repo_cache_dir_name("sceptre-ocr/english_g2"),
+            "models--sceptre-ocr--english_g2"
         );
     }
 
@@ -334,8 +334,8 @@ mod tests {
     #[test]
     fn resolve_cached_finds_a_file_planted_in_a_snapshot() {
         let root = std::env::temp_dir().join(format!("sceptre-resolve-{}", std::process::id()));
-        let repo = "itextresearch/itext-EasyOCR-english_g2";
-        let file = "itext-EasyOCR-english_g2.onnx";
+        let repo = "sceptre-ocr/english_g2";
+        let file = "english_g2.onnx";
         let snapshot = root.join(repo_cache_dir_name(repo)).join("snapshots").join("deadbeef");
         std::fs::create_dir_all(&snapshot).unwrap();
         let planted = snapshot.join(file);
@@ -351,14 +351,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("sceptre-resolve-empty-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
 
-        assert_eq!(
-            resolve_cached(
-                &root,
-                "itextresearch/itext-EasyOCR-english_g2",
-                "itext-EasyOCR-english_g2.onnx"
-            ),
-            None
-        );
+        assert_eq!(resolve_cached(&root, "sceptre-ocr/english_g2", "english_g2.onnx"), None);
 
         std::fs::remove_dir_all(&root).ok();
     }
