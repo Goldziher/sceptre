@@ -2,6 +2,8 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -9,6 +11,7 @@ use sceptre::{OcrConfig, ReadOptions, Reader};
 
 use crate::output::{self, OutputFormat};
 use crate::overrides::OcrOverrides;
+use crate::timing::StageTimer;
 
 /// CRAFT + gen2 CRNN optical character recognition over ONNX.
 #[derive(Parser)]
@@ -58,6 +61,9 @@ enum Commands {
         /// Emit only the recognized text, omitting confidence and box detail.
         #[arg(long)]
         no_detail: bool,
+        /// Print a per-stage timing breakdown (load/detect/recognize) to stderr.
+        #[arg(long)]
+        timings: bool,
     },
     /// Detect text regions only, without recognition.
     Detect {
@@ -112,6 +118,15 @@ fn build_reader(overrides: &OcrOverrides) -> Result<Reader> {
         .context("building the OCR reader")
 }
 
+/// Build a `Reader` wired to a stage timer for the `--timings` breakdown.
+fn build_reader_timed(overrides: &OcrOverrides, timer: Arc<StageTimer>) -> Result<Reader> {
+    Reader::builder()
+        .config(config_from(overrides))
+        .progress(timer)
+        .build()
+        .context("building the OCR reader")
+}
+
 /// A color-aware stdout writer that strips escapes on non-TTY / `NO_COLOR`.
 fn stdout() -> anstream::Stdout {
     anstream::stdout()
@@ -127,15 +142,27 @@ fn stderr() -> anstream::Stderr {
 /// A single image keeps the historical single-result output; two or more images
 /// switch to batch rendering where a per-image failure is recorded and the run
 /// continues, exiting non-zero if any image failed.
-fn run_ocr(images: Vec<PathBuf>, overrides: OcrOverrides, format: OutputFormat, no_detail: bool) -> Result<()> {
-    let reader = build_reader(&overrides)?;
+fn run_ocr(
+    images: Vec<PathBuf>,
+    overrides: OcrOverrides,
+    format: OutputFormat,
+    no_detail: bool,
+    timings: bool,
+) -> Result<()> {
+    let timer = timings.then(|| Arc::new(StageTimer::new()));
+    let reader = match &timer {
+        Some(timer) => build_reader_timed(&overrides, timer.clone())?,
+        None => build_reader(&overrides)?,
+    };
     let options = ReadOptions { detail: !no_detail };
     let detail = !no_detail;
+    let started = Instant::now();
 
     if let [image] = images.as_slice() {
         let result = reader
             .readtext(image, &options)
             .with_context(|| format!("running OCR over {image:?}"))?;
+        report_timings(&timer, started);
         output::render_result(&result, format, detail, &mut stdout()).context("writing OCR results")?;
         return Ok(());
     }
@@ -154,11 +181,20 @@ fn run_ocr(images: Vec<PathBuf>, overrides: OcrOverrides, format: OutputFormat, 
             }
         }
     }
+    report_timings(&timer, started);
     output::render_batch(&outcomes, format, detail, &mut stdout()).context("writing OCR results")?;
     if failures > 0 {
         anyhow::bail!("{failures} of {} image(s) failed", images.len());
     }
     Ok(())
+}
+
+/// Print the stage-timing breakdown to stderr when `--timings` installed a timer.
+fn report_timings(timer: &Option<Arc<StageTimer>>, started: Instant) {
+    if let Some(timer) = timer {
+        let breakdown = timer.breakdown(started, Instant::now());
+        let _ = writeln!(stderr(), "{}", crate::timing::render(&breakdown));
+    }
 }
 
 /// Detect text regions and render their quads.
@@ -219,7 +255,8 @@ impl Cli {
                 overrides,
                 format,
                 no_detail,
-            } => run_ocr(images, overrides, format, no_detail),
+                timings,
+            } => run_ocr(images, overrides, format, no_detail, timings),
             Commands::Detect {
                 image,
                 overrides,

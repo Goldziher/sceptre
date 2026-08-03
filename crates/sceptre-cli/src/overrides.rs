@@ -43,6 +43,11 @@ pub struct OcrOverrides {
     /// Link confidence threshold for detection.
     #[arg(long, value_parser = parse_probability)]
     link_threshold: Option<f32>,
+
+    /// Detection canvas size (longest side, px). Lower cuts peak memory and detection
+    /// time on large pages at some accuracy cost; the default (2560) matches EasyOCR.
+    #[arg(long)]
+    canvas_size: Option<u32>,
 }
 
 /// Language choices exposed on the command line.
@@ -115,6 +120,9 @@ impl OcrOverrides {
         }
         if let Some(link_threshold) = self.link_threshold {
             config.detection.link_threshold = link_threshold;
+        }
+        if let Some(canvas_size) = self.canvas_size {
+            config.detection.canvas_size = canvas_size;
         }
     }
 }
