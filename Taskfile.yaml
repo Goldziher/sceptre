@@ -7,6 +7,8 @@ includes:
     taskfile: ./.task/python.yml
   tools:
     taskfile: ./.task/tools.yml
+  docs:
+    taskfile: ./.task/docs.yml
 
 tasks:
   setup:

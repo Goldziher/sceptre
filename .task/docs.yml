@@ -1,0 +1,25 @@
+version: "3"
+
+dir: website
+
+tasks:
+  dev:
+    desc: Run the docs site in dev mode
+    cmds:
+      - npm run dev
+
+  build:
+    desc: Install dependencies and build the docs site
+    cmds:
+      - npm ci
+      - npm run build
+
+  preview:
+    desc: Preview the built docs site
+    cmds:
+      - npm run preview
+
+  assets:
+    desc: Render docs site assets
+    cmds:
+      - npm run assets
