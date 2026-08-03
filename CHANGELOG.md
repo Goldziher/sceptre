@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Exposed the crate version as `sceptre::VERSION` for adapters and diagnostics.
+
+### Fixed
+
+- Each `Reader` now owns its configured Rayon worker pool instead of attempting to initialize the
+  process-global pool, so readers with different thread budgets remain isolated and embedding
+  Sceptre cannot override an application's Rayon configuration.
+
 ## [0.1.0] - 2026-08-01
 
 ### Added
