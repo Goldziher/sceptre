@@ -20,6 +20,9 @@
 //! [`config`].
 #![doc(html_root_url = "https://docs.rs/sceptre")]
 
+/// The sceptre crate version.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub(crate) mod config;
 pub(crate) mod detect;
 pub(crate) mod engine;
@@ -45,3 +48,11 @@ pub use engine::{FallbackEngine, OcrEngine, ReadOptions, Reader, ReaderBuilder};
 pub use error::{OcrError, Result};
 pub use models::provision::{ModelInfo, ModelRole, download_models, model_manifest};
 pub use types::{BBox, Image, OcrResult, Point, Quad, TextLine};
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn version_matches_package_version() {
+        assert_eq!(super::VERSION, env!("CARGO_PKG_VERSION"));
+    }
+}
