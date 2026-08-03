@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{OcrError, Result};
+
 /// CTC decoding strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -33,10 +35,23 @@ pub struct RecognitionConfig {
     pub contrast_ths: f32,
     /// Target contrast for the adjustment pass. Default `0.5`.
     pub adjust_contrast: f32,
-    /// Accepted for EasyOCR parity. Default `0.003`. Upstream threads this through
-    /// `get_text` but never applies it, so like upstream it currently has no effect
-    /// on the output (every recognized region is emitted regardless of confidence).
+    /// Minimum confidence required for a recognized region to be emitted.
+    /// Default `0.1`, chosen to suppress low-confidence noise without discarding
+    /// the useful recognition results in the quality corpus.
     pub filter_ths: f32,
+}
+
+impl RecognitionConfig {
+    /// Validate recognition settings consumed by the engine.
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !(0.0..=1.0).contains(&self.filter_ths) {
+            return Err(OcrError::config(format!(
+                "recognition.filter_ths must be finite and within [0, 1], got {}",
+                self.filter_ths
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Default for RecognitionConfig {
@@ -49,7 +64,44 @@ impl Default for RecognitionConfig {
             blocklist: String::new(),
             contrast_ths: 0.1,
             adjust_contrast: 0.5,
-            filter_ths: 0.003,
+            filter_ths: 0.1,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_accept_filter_threshold_bounds() {
+        for filter_ths in [0.0, 1.0] {
+            let config = RecognitionConfig {
+                filter_ths,
+                ..RecognitionConfig::default()
+            };
+
+            config
+                .validate()
+                .expect("inclusive filter threshold bound should be valid");
+        }
+    }
+
+    #[test]
+    fn should_default_to_quality_corpus_filter_threshold() {
+        assert_eq!(RecognitionConfig::default().filter_ths, 0.1);
+    }
+
+    #[test]
+    fn should_reject_invalid_filter_thresholds() {
+        for filter_ths in [-0.1, 1.1, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let config = RecognitionConfig {
+                filter_ths,
+                ..RecognitionConfig::default()
+            };
+
+            let error = config.validate().expect_err("invalid filter threshold should fail");
+            assert!(matches!(error, OcrError::Config { .. }));
         }
     }
 }

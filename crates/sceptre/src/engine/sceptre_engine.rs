@@ -113,6 +113,7 @@ impl SceptreEngine {
 
 impl OcrEngine for SceptreEngine {
     fn recognize(&self, image: &Image, _options: &ReadOptions) -> Result<OcrResult> {
+        self.config.recognition.validate()?;
         self.progress.on_stage(STAGE_DETECT);
         let regions = self.detect_regions(image)?;
         if regions.regions.is_empty() {
@@ -127,7 +128,7 @@ impl OcrEngine for SceptreEngine {
 
         self.progress.on_stage(STAGE_RECOGNIZE);
         let texts = self.recognize_crops(&crops)?;
-        Ok(build_result(&crops, texts))
+        Ok(build_result(&crops, texts, self.config.recognition.filter_ths))
     }
 
     fn detect(&self, image: &Image, _options: &ReadOptions) -> Result<Vec<Quad>> {
@@ -141,6 +142,7 @@ impl OcrEngine for SceptreEngine {
     }
 
     fn recognize_line(&self, image: &Image, _options: &ReadOptions) -> Result<TextLine> {
+        self.config.recognition.validate()?;
         self.progress.on_stage(STAGE_RECOGNIZE);
         let grey = to_grayscale(image)?;
         let corners = full_image_corners(grey.width(), grey.height());
@@ -213,10 +215,9 @@ fn crop_regions(grey: &GrayImage, regions: &DetectedRegions) -> Vec<RegionCrop> 
         .collect()
 }
 
-/// Map recognizer outputs back to public text lines, carrying each crop's source
-/// quad. Every crop yields a line, matching EasyOCR, which emits one result per
-/// detected region without any confidence filtering (`filter_ths` is inert upstream).
-fn build_result(crops: &[RegionCrop], texts: Vec<RecognizedText>) -> OcrResult {
+/// Map recognizer outputs above the configured confidence threshold back to public
+/// text lines, carrying each surviving crop's source quad.
+fn build_result(crops: &[RegionCrop], texts: Vec<RecognizedText>, filter_ths: f32) -> OcrResult {
     debug_assert_eq!(
         crops.len(),
         texts.len(),
@@ -225,6 +226,8 @@ fn build_result(crops: &[RegionCrop], texts: Vec<RecognizedText>) -> OcrResult {
     let lines = crops
         .iter()
         .zip(texts)
+        // The threshold is inclusive so a caller can retain an exact boundary score. ~keep
+        .filter(|(_, text)| text.confidence >= filter_ths)
         .map(|(crop, text)| TextLine {
             quad: corners_to_quad(&crop.corners),
             text: text.text,
@@ -251,6 +254,7 @@ fn full_image_corners(width: u32, height: u32) -> [[f32; 2]; QUAD_CORNERS] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::RecognitionConfig;
     use crate::detect::DetectedRegion;
 
     #[test]
@@ -340,7 +344,7 @@ mod tests {
         ];
         let texts = vec![text("hello", 0.9), text("world", 0.8)];
 
-        let result = build_result(&crops, texts);
+        let result = build_result(&crops, texts, RecognitionConfig::default().filter_ths);
 
         assert_eq!(result.lines.len(), 2);
         assert_eq!(result.lines[0].text, "hello");
@@ -350,32 +354,35 @@ mod tests {
     }
 
     #[test]
-    fn should_emit_every_line_including_low_confidence_matching_upstream() {
-        // EasyOCR applies no confidence filter, so even a very low-confidence line is ~keep
-        // emitted; sceptre must not silently drop it. ~keep
-        let crops = vec![
-            crop_with_corners([[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]]),
-            crop_with_corners([[5.0, 0.0], [9.0, 0.0], [9.0, 3.0], [5.0, 3.0]]),
-        ];
-        let texts = vec![text("confident", 0.9), text("faint", 0.0001)];
+    fn should_drop_line_below_filter_threshold() {
+        let crops = vec![crop_with_corners([[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]])];
+        let texts = vec![text("below", 0.49)];
 
-        let result = build_result(&crops, texts);
+        let result = build_result(&crops, texts, 0.5);
 
-        assert_eq!(result.lines.len(), 2, "no line is dropped for low confidence");
-        assert_eq!(result.lines[1].text, "faint");
+        assert_eq!(result.lines, Vec::<TextLine>::new());
     }
 
     #[test]
-    fn should_emit_empty_all_blank_line_matching_upstream() {
-        // An all-blank CTC decode yields empty text at confidence 0.0. EasyOCR still ~keep
-        // appends it, so sceptre must too (parity over cleanliness). ~keep
+    fn should_keep_line_equal_to_filter_threshold() {
         let crops = vec![crop_with_corners([[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]])];
-        let texts = vec![text("", 0.0)];
+        let texts = vec![text("equal", 0.5)];
 
-        let result = build_result(&crops, texts);
+        let result = build_result(&crops, texts, 0.5);
 
-        assert_eq!(result.lines.len(), 1, "the empty region is emitted, not filtered");
-        assert_eq!(result.lines[0].text, "");
+        assert_eq!(result.lines.len(), 1);
+        assert_eq!(result.lines[0].text, "equal");
+    }
+
+    #[test]
+    fn should_keep_line_above_filter_threshold() {
+        let crops = vec![crop_with_corners([[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]])];
+        let texts = vec![text("above", 0.51)];
+
+        let result = build_result(&crops, texts, 0.5);
+
+        assert_eq!(result.lines.len(), 1);
+        assert_eq!(result.lines[0].text, "above");
     }
 
     #[test]

@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Each `Reader` now owns its configured Rayon worker pool instead of attempting to initialize the
   process-global pool, so readers with different thread budgets remain isolated and embedding
   Sceptre cannot override an application's Rayon configuration.
+- `recognition.filter_ths` now validates its range and removes recognition results below the
+  configured confidence threshold instead of being accepted without affecting output; its default
+  is now `0.1`, which improves the measured DocLayNet and TextOCR quality without regressing the
+  receipt and scanned-PDF fixtures.
 
 ## [0.1.0] - 2026-08-01
 

@@ -134,6 +134,7 @@ impl ReaderBuilder {
     /// [`SceptreEngine`] is constructed from the config and the resolved model
     /// provider and progress sink.
     pub fn build(self) -> Result<Reader> {
+        self.config.recognition.validate()?;
         let budget = resolve_thread_budget(Some(&self.config.concurrency));
         let thread_pool = build_thread_pool(budget)?;
 
@@ -214,5 +215,22 @@ mod tests {
 
         assert_entry_points_use_budget(&first, &first_count, 1);
         assert_entry_points_use_budget(&second, &second_count, 3);
+    }
+
+    #[test]
+    fn should_reject_invalid_recognition_config_before_initialization() {
+        let mut config = OcrConfig::default();
+        config.recognition.filter_ths = f32::NAN;
+
+        let error = Reader::builder()
+            .config(config)
+            .engine(Arc::new(ThreadCountEngine {
+                observed_threads: Arc::new(AtomicUsize::new(0)),
+            }))
+            .build()
+            .err()
+            .expect("invalid recognition config must fail before reader initialization");
+
+        assert!(error.to_string().contains("recognition.filter_ths"));
     }
 }
