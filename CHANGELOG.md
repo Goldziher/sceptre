@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-03
+
+### Added
+
+- Telugu (`telugu_g2`) and Kannada (`kannada_g2`) gen2 recognizers, completing EasyOCR's full
+  eight-model gen2 recognizer family. Select them with `--lang telugu` / `--lang kannada`.
+- A first-party `.pth -> ONNX` model export pipeline (`sceptre_rs_tools.export`) that converts
+  EasyOCR's CRAFT and gen2 CRNN weights to the ONNX artifacts the library loads.
+- Full pure-Rust `tract` pipeline: the recognizers run under `tract` (the export replaces gen2's
+  `AdaptiveAvgPool` with an equivalent `ReduceMean`, which upstream exports lack), and CRAFT runs on a
+  fixed square canvas under `tract`, with a cross-backend test asserting `tract` recognizes the same
+  words as `ort`.
+
+### Changed
+
+- Model source is now first-party: the registry points at the [`sceptre-ocr`](https://huggingface.co/sceptre-ocr)
+  Hugging Face org instead of `itextresearch`, with fresh sha256 pins for our own exports.
+
 ## [0.1.1] - 2026-08-03
 
 ### Added
@@ -46,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Offline-first model provisioning: models download from Hugging Face on first use, cache locally,
   and are sha256-verified on download — every run thereafter reads the cache with no network.
 
-[Unreleased]: https://github.com/Goldziher/sceptre/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Goldziher/sceptre/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Goldziher/sceptre/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Goldziher/sceptre/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Goldziher/sceptre/releases/tag/v0.1.0

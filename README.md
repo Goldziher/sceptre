@@ -32,7 +32,7 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 
 | | What you get | Why it matters |
 |---|---|---|
-| **Parity accuracy** | Validated against real EasyOCR output across all six gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic — matching text (word/char-F1) and boxes (IoU). | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
+| **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic, plus Telugu and Kannada — matching text (word/char-F1) and boxes (IoU). | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
 | **Substantially faster** | ~2.8× higher throughput than EasyOCR warm on the same corpus — and even a cold, one-shot CLI run (~4.4×) beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
 | **A fraction of the memory** | Peak RSS around **3× lower** than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
 | **One binary, no Python** | A single static executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
@@ -131,10 +131,13 @@ Design decisions live as [MADR records under `adrs/`](adrs/); conventions live i
 
 ## Scope
 
-Targets EasyOCR's current models — the **CRAFT** detector and the six **gen2** (`*_g2`) recognizers.
+Targets EasyOCR's current models — the **CRAFT** detector and all eight **gen2** (`*_g2`) recognizers
+(English, Latin, Simplified Chinese, Japanese, Korean, Cyrillic, Telugu, Kannada).
 Legacy gen1 models, DBNet, and beam-search decoding are out of scope
-(see [`adrs/0002`](adrs/0002-scope-gen2-recognizers-and-craft.md)). ONNX artifacts come from the
-[`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch) repos (Apache-2.0).
+(see [`adrs/0002`](adrs/0002-scope-gen2-recognizers-and-craft.md) and
+[`adrs/0026`](adrs/0026-extend-gen2-scope-telugu-kannada.md)). ONNX artifacts are first-party exports,
+built from EasyOCR's weights and hosted on the [`sceptre-ocr`](https://huggingface.co/sceptre-ocr)
+Hugging Face org (Apache-2.0; see [`adrs/0025`](adrs/0025-first-party-onnx-exports.md)).
 
 ## Feature flags
 
