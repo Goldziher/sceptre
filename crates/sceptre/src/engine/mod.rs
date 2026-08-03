@@ -15,7 +15,9 @@ mod sceptre_engine;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::config::{OcrConfig, init_thread_pools, resolve_thread_budget};
+use rayon::ThreadPool;
+
+use crate::config::{OcrConfig, build_thread_pool, resolve_thread_budget};
 use crate::error::Result;
 use crate::types::{Image, OcrResult, Quad, TextLine};
 
@@ -50,6 +52,7 @@ pub struct Reader {
 struct Inner {
     config: OcrConfig,
     engine: Arc<dyn OcrEngine>,
+    thread_pool: ThreadPool,
 }
 
 impl Reader {
@@ -71,17 +74,23 @@ impl Reader {
 
     /// Run the engine directly on an already-decoded image.
     pub fn recognize(&self, image: &Image, options: &ReadOptions) -> Result<OcrResult> {
-        self.inner.engine.recognize(image, options)
+        self.inner
+            .thread_pool
+            .install(|| self.inner.engine.recognize(image, options))
     }
 
     /// Detect text regions in an already-decoded image, returning their quads.
     pub fn detect(&self, image: &Image, options: &ReadOptions) -> Result<Vec<Quad>> {
-        self.inner.engine.detect(image, options)
+        self.inner
+            .thread_pool
+            .install(|| self.inner.engine.detect(image, options))
     }
 
     /// Recognize an already-decoded, pre-cropped single line image.
     pub fn recognize_line(&self, image: &Image, options: &ReadOptions) -> Result<TextLine> {
-        self.inner.engine.recognize_line(image, options)
+        self.inner
+            .thread_pool
+            .install(|| self.inner.engine.recognize_line(image, options))
     }
 }
 
@@ -119,14 +128,14 @@ impl ReaderBuilder {
         self
     }
 
-    /// Finalize the reader, initializing the shared thread budget.
+    /// Finalize the reader, initializing its private worker pool.
     ///
     /// If an engine was injected it is used as-is; otherwise the default
     /// [`SceptreEngine`] is constructed from the config and the resolved model
     /// provider and progress sink.
     pub fn build(self) -> Result<Reader> {
         let budget = resolve_thread_budget(Some(&self.config.concurrency));
-        init_thread_pools(budget);
+        let thread_pool = build_thread_pool(budget)?;
 
         let engine: Arc<dyn OcrEngine> = match self.engine {
             Some(engine) => engine,
@@ -144,7 +153,66 @@ impl ReaderBuilder {
             inner: Arc::new(Inner {
                 config: self.config,
                 engine,
+                thread_pool,
             }),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct ThreadCountEngine {
+        observed_threads: Arc<AtomicUsize>,
+    }
+
+    impl OcrEngine for ThreadCountEngine {
+        fn recognize(&self, _image: &Image, _options: &ReadOptions) -> Result<OcrResult> {
+            self.observed_threads
+                .store(rayon::current_num_threads(), Ordering::SeqCst);
+            Ok(OcrResult::default())
+        }
+    }
+
+    fn reader_with_threads(max_threads: usize, observed_threads: Arc<AtomicUsize>) -> Reader {
+        let mut config = OcrConfig::default();
+        config.concurrency.max_threads = Some(max_threads);
+        Reader::builder()
+            .config(config)
+            .engine(Arc::new(ThreadCountEngine { observed_threads }))
+            .build()
+            .expect("the reader should build")
+    }
+
+    fn assert_entry_points_use_budget(reader: &Reader, observed_threads: &AtomicUsize, expected: usize) {
+        let image = Image::from_rgb8(1, 1, vec![0, 0, 0]).expect("the image should be valid");
+        let options = ReadOptions::default();
+
+        reader.recognize(&image, &options).expect("recognize should succeed");
+        assert_eq!(observed_threads.load(Ordering::SeqCst), expected);
+
+        observed_threads.store(0, Ordering::SeqCst);
+        reader.detect(&image, &options).expect("detect should succeed");
+        assert_eq!(observed_threads.load(Ordering::SeqCst), expected);
+
+        observed_threads.store(0, Ordering::SeqCst);
+        reader
+            .recognize_line(&image, &options)
+            .expect("recognize_line should succeed");
+        assert_eq!(observed_threads.load(Ordering::SeqCst), expected);
+    }
+
+    #[test]
+    fn should_isolate_rayon_thread_budgets_between_readers() {
+        let first_count = Arc::new(AtomicUsize::new(0));
+        let second_count = Arc::new(AtomicUsize::new(0));
+        let first = reader_with_threads(1, first_count.clone());
+        let second = reader_with_threads(3, second_count.clone());
+
+        assert_entry_points_use_budget(&first, &first_count, 1);
+        assert_entry_points_use_budget(&second, &second_count, 3);
     }
 }

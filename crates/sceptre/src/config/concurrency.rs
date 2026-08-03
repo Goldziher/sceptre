@@ -1,22 +1,21 @@
 //! Concurrency / thread-budget configuration.
 //!
-//! A single `max_threads` value caps every internal pool (Rayon, and the ONNX
-//! Runtime intra-op threads once the backend is wired) so nested parallelism
-//! cannot oversubscribe the CPU.
+//! Each reader resolves one `max_threads` budget for its private Rayon pool and
+//! the inference backend's intra-op threads, preventing nested parallelism from
+//! oversubscribing the CPU within that reader.
 
-use std::sync::Once;
-
+use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
 
-/// Caps all internal thread pools to a single budget.
+use crate::error::{OcrError, Result};
+
+/// Caps the worker and inference thread pools within each reader.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ConcurrencyConfig {
     /// Maximum threads for all internal pools. `None` = auto (`num_cpus`, capped at 8).
     pub max_threads: Option<usize>,
 }
-
-static POOL_INIT: Once = Once::new();
 
 /// Resolve the effective thread budget: user value, else `num_cpus` capped at 8.
 pub(crate) fn resolve_thread_budget(config: Option<&ConcurrencyConfig>) -> usize {
@@ -26,13 +25,15 @@ pub(crate) fn resolve_thread_budget(config: Option<&ConcurrencyConfig>) -> usize
     num_cpus::get().min(8)
 }
 
-/// Initialize the global Rayon pool with `budget` threads. Idempotent.
-pub(crate) fn init_thread_pools(budget: usize) {
-    POOL_INIT.call_once(|| {
-        if let Err(_err) = rayon::ThreadPoolBuilder::new().num_threads(budget).build_global() {
-            tracing::debug!(budget, "global rayon pool already initialized; reusing existing pool");
-        }
-    });
+/// Build an isolated Rayon pool for one reader.
+pub(crate) fn build_thread_pool(budget: usize) -> Result<ThreadPool> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(budget)
+        .build()
+        .map_err(|source| OcrError::Config {
+            message: format!("failed to initialize the OCR worker pool with {budget} threads"),
+            source: Some(Box::new(source)),
+        })
 }
 
 #[cfg(test)]
@@ -55,5 +56,11 @@ mod tests {
     fn budget_clamps_to_one() {
         let cfg = ConcurrencyConfig { max_threads: Some(0) };
         assert_eq!(resolve_thread_budget(Some(&cfg)), 1);
+    }
+
+    #[test]
+    fn private_pool_uses_resolved_budget() {
+        let pool = build_thread_pool(2).expect("the private pool should build");
+        assert_eq!(pool.current_num_threads(), 2);
     }
 }

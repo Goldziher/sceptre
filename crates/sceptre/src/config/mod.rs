@@ -15,7 +15,7 @@ pub use detection::DetectionConfig;
 pub use model::{Backend, Language, ModelConfig};
 pub use recognition::{Decoder, RecognitionConfig};
 
-pub(crate) use concurrency::{init_thread_pools, resolve_thread_budget};
+pub(crate) use concurrency::{build_thread_pool, resolve_thread_budget};
 
 use serde::{Deserialize, Serialize};
 
