@@ -1,8 +1,13 @@
 """Corpus manifest for the sceptre-vs-EasyOCR comparative benchmark.
 
 Declares the image corpus and, for each entry, the abstract language names that are
-mapped to both engines' language codes. Labeled entries carry a ground-truth path so
-absolute CER/WER can be scored; breadth entries only support cross-engine agreement.
+mapped to both engines' language codes. Entries fall into three groups:
+
+  * ``labeled`` — carry a ground-truth transcript, so absolute CER/WER/token-F1 are scored.
+  * ``breadth`` — no ground truth; support cross-engine agreement and speed only.
+  * ``capability`` — a format sceptre cannot yet decode (BMP/HEIF/AVIF/JP2); the benchmark
+    expects sceptre to report an unsupported-format gap while EasyOCR decodes it. These
+    probe input-format coverage and are excluded from timing/quality aggregates.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ SCEPTRE_LANGS: dict[str, str] = {
 }
 
 # Image extensions both engines can decode, tried in order when resolving a stem.
-IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".bmp")
+IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff")
 
 # Base directories, keyed by a short manifest tag, relative to the repo root.
 IMAGE_BASES: dict[str, Path] = {
@@ -38,18 +43,31 @@ IMAGE_BASES: dict[str, Path] = {
     "examples": Path("crates/sceptre/tests/data/images"),
 }
 
-GROUND_TRUTH_BASE = Path("test_documents/ground_truth/images")
+# Ground truth is organized under `ground_truth/` by the source image's extension; search
+# each candidate base for a matching transcript stem.
+GROUND_TRUTH_BASES: tuple[Path, ...] = (
+    Path("test_documents/ground_truth/images"),
+    Path("test_documents/ground_truth/jpg"),
+    Path("test_documents/ground_truth/jpeg"),
+    Path("test_documents/ground_truth/png"),
+)
 GROUND_TRUTH_EXTENSIONS: tuple[str, ...] = (".md", ".txt")
 
 
 @dataclass(frozen=True)
 class ManifestRecord:
-    """One planned benchmark unit before path resolution."""
+    """One planned benchmark unit before path resolution.
+
+    ``extension`` pins an exact image extension (used for capability probes whose stem is
+    ambiguous or whose format is not in ``IMAGE_EXTENSIONS``); when ``None`` the resolver
+    tries ``IMAGE_EXTENSIONS`` in order.
+    """
 
     stem: str
     base: str
     languages: tuple[str, ...]
-    group: str  # "labeled" or "breadth"
+    group: str  # "labeled", "breadth", or "capability"
+    extension: str | None = None
 
 
 @dataclass(frozen=True)
@@ -73,7 +91,7 @@ class CorpusEntry:
         return _dedupe(SCEPTRE_LANGS[name] for name in self.languages)
 
 
-# Labeled corpus: images with committed ground truth under test_documents/ground_truth.
+# Labeled corpus: images with a committed ground-truth transcript.
 _LABELED: tuple[ManifestRecord, ...] = (
     ManifestRecord("balance_sheet_1", "documents", ("english",), "labeled"),
     ManifestRecord("financial_table_1", "documents", ("english",), "labeled"),
@@ -88,6 +106,22 @@ _LABELED: tuple[ManifestRecord, ...] = (
     ManifestRecord("ocr_test_rotated_270", "documents", ("english",), "labeled"),
     ManifestRecord("layout_parser_paper_with_table", "documents", ("english",), "labeled"),
     ManifestRecord("english_and_korean", "documents", ("english", "korean"), "labeled"),
+    # Scene text and dense documents with authoritative ground truth (ground_truth/jpg).
+    ManifestRecord("textocr_scene_01", "documents", ("english",), "labeled"),
+    ManifestRecord("textocr_scene_02", "documents", ("english",), "labeled"),
+    ManifestRecord("textocr_scene_03", "documents", ("english",), "labeled"),
+    ManifestRecord("doclaynet_page_01", "documents", ("english",), "labeled"),
+    ManifestRecord("doclaynet_page_02", "documents", ("english",), "labeled"),
+    ManifestRecord("cord_receipt_01", "documents", ("english",), "labeled"),
+    ManifestRecord("cord_receipt_02", "documents", ("english",), "labeled"),
+    ManifestRecord("cord_receipt_03", "documents", ("english",), "labeled"),
+    ManifestRecord("cord_receipt_04", "documents", ("english",), "labeled"),
+    # Vertical Japanese: dense, and a known-hard case for both engines.
+    ManifestRecord("ndl_meiji_vertical_01", "documents", ("japanese",), "labeled"),
+    ManifestRecord("ndl_meiji_vertical_02", "documents", ("japanese",), "labeled"),
+    ManifestRecord("ndl_meiji_vertical_03", "documents", ("japanese",), "labeled"),
+    ManifestRecord("ndl_meiji_vertical_04", "documents", ("japanese",), "labeled"),
+    ManifestRecord("ndl_meiji_vertical_05", "documents", ("japanese",), "labeled"),
 )
 
 # Breadth corpus: no ground truth, used for cross-engine agreement and speed only.
@@ -96,7 +130,6 @@ _BREADTH: tuple[ManifestRecord, ...] = (
     ManifestRecord("jpn_vert", "documents", ("japanese",), "breadth"),
     ManifestRecord("ocr_image", "documents", ("english",), "breadth"),
     ManifestRecord("layout_parser_ocr", "documents", ("english",), "breadth"),
-    ManifestRecord("sample_text", "documents", ("english",), "breadth"),
     ManifestRecord("test_hello_world", "documents", ("english",), "breadth"),
     ManifestRecord("sample", "documents", ("english",), "breadth"),
     ManifestRecord("simple_table", "documents", ("english",), "breadth"),
@@ -107,7 +140,16 @@ _BREADTH: tuple[ManifestRecord, ...] = (
     ManifestRecord("korean", "examples", ("korean",), "breadth"),
 )
 
-MANIFEST: tuple[ManifestRecord, ...] = _LABELED + _BREADTH
+# Capability probes: formats sceptre cannot decode yet (see Cargo.toml image features).
+# EasyOCR decodes them; the benchmark reports each as an unsupported-format gap.
+_CAPABILITY: tuple[ManifestRecord, ...] = (
+    ManifestRecord("sample_text", "documents", ("english",), "capability", ".bmp"),
+    ManifestRecord("alpha", "documents", ("english",), "capability", ".heif"),
+    ManifestRecord("test", "documents", ("english",), "capability", ".avif"),
+    ManifestRecord("Hadley_Crater", "documents", ("english",), "capability", ".jp2"),
+)
+
+MANIFEST: tuple[ManifestRecord, ...] = _LABELED + _BREADTH + _CAPABILITY
 
 
 def _dedupe(values) -> list[str]:
@@ -120,9 +162,14 @@ def _dedupe(values) -> list[str]:
 
 
 def _resolve_image(root: Path, record: ManifestRecord) -> Path | None:
-    """Find the on-disk image for a manifest record, trying known extensions."""
+    """Find the on-disk image for a manifest record.
+
+    A pinned ``extension`` resolves exactly; otherwise the known decodable extensions are
+    tried in order.
+    """
     base = root / IMAGE_BASES[record.base]
-    for extension in IMAGE_EXTENSIONS:
+    extensions = (record.extension,) if record.extension else IMAGE_EXTENSIONS
+    for extension in extensions:
         candidate = base / f"{record.stem}{extension}"
         if candidate.exists():
             return candidate
@@ -130,27 +177,27 @@ def _resolve_image(root: Path, record: ManifestRecord) -> Path | None:
 
 
 def _resolve_ground_truth(root: Path, record: ManifestRecord) -> Path | None:
-    """Find the ground-truth transcript for a labeled record, if any exists."""
+    """Find the ground-truth transcript for a labeled record across the GT bases, if any."""
     if record.group != "labeled":
         return None
-    base = root / GROUND_TRUTH_BASE
-    for extension in GROUND_TRUTH_EXTENSIONS:
-        candidate = base / f"{record.stem}{extension}"
-        if candidate.exists():
-            return candidate
+    for base in GROUND_TRUTH_BASES:
+        for extension in GROUND_TRUTH_EXTENSIONS:
+            candidate = root / base / f"{record.stem}{extension}"
+            if candidate.exists():
+                return candidate
     return None
 
 
 def build_corpus(root: Path, group: str = "all") -> list[CorpusEntry]:
     """Resolve the manifest into corpus entries filtered by ``group``.
 
-    ``group`` is ``"labeled"`` (only ground-truth entries) or ``"all"`` (everything).
-    An entry whose image cannot be found is returned with ``image=None`` so the caller
-    can record it as skipped rather than crashing.
+    ``group`` is ``"labeled"``, ``"breadth"``, ``"capability"``, or ``"all"`` (everything).
+    An entry whose image cannot be found is returned with ``image=None`` so the caller can
+    record it as skipped rather than crashing.
     """
     entries: list[CorpusEntry] = []
     for record in MANIFEST:
-        if group == "labeled" and record.group != "labeled":
+        if group != "all" and record.group != group:
             continue
         entries.append(
             CorpusEntry(

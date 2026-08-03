@@ -1,19 +1,28 @@
-"""Head-to-head benchmark: sceptre (release CLI) vs upstream Python EasyOCR.
+"""Head-to-head development benchmark: sceptre vs upstream Python EasyOCR.
 
-Runs both OCR engines over a shared image corpus and reports cross-engine agreement,
-absolute accuracy against ground truth (labeled images), speed, and best-effort peak
-memory. Results are written to ``benchmark-results/comparison.{json,md}``.
+This is a development tool, not a one-off report: it drives sceptre toward release-quality
+parity with EasyOCR at substantially better speed and memory, and is built for tight
+iteration (fast ``--group`` / ``--limit`` subsets, ``--repeats`` for stable numbers, a
+``--baseline`` delta view, and a ``--assert`` regression gate). Results are written to
+``benchmark-results/comparison.{json,md}``.
 
-Fairness notes baked into the harness:
-  * sceptre is invoked as the RELEASE binary; a debug build would be unfairly slow.
-  * EasyOCR is timed warm (Reader constructed once per language set, reused); sceptre
-    is invoked as a fresh process each time (cold: includes ONNX init + model parse),
-    so an "amortized inner" time subtracts a measured fixed startup/model-load cost.
-  * Memory figures are not directly comparable: the EasyOCR RSS includes the whole
-    Python + torch runtime, while sceptre's is a lean native process.
+Fairness — both engines are measured identically (see the benchmark-methodology ADR):
+  * Each engine runs as a FRESH SUBPROCESS per language group, under ``/usr/bin/time``, so
+    peak RSS is a whole-process figure captured the same way for both. The EasyOCR RSS
+    therefore legitimately includes the Python + torch runtime — that is what EasyOCR costs
+    to run.
+  * Each subprocess loads its model/Reader once and processes every image in the group (the
+    warm/batch axis), mirroring how a server reuses a warm engine. Group wall time includes
+    the one-time load for both; ``build_seconds`` is recorded so it can be subtracted.
+  * Both engines run at their native multi-threaded default (representative of real
+    deployment); ``--threads N`` pins both for a controlled per-core comparison. Stability
+    comes from ``--repeats`` (median wall time, max peak RSS), not from crippling parallelism.
+  * sceptre is the RELEASE binary; a debug build would be unfairly slow. A secondary
+    per-image "cold" sceptre figure (fresh process per image, pays model load every time)
+    is reported for the real per-invocation CLI cost.
 
-This is a dev-only tool; it needs the opt-in ``export`` dependency group (torch,
-easyocr). Without it, the run exits cleanly with an explanatory message.
+Needs the opt-in ``export`` dependency group (torch, easyocr) and a built release binary;
+without either it exits cleanly with an explanatory message.
 """
 
 from __future__ import annotations
@@ -35,6 +44,14 @@ from sceptre_rs_tools.corpus import CorpusEntry, build_corpus
 SCEPTRE_BIN = Path("target/release/sceptre")
 OUTPUT_DIR = Path("benchmark-results")
 OVERHEAD_RUNS = 3  # process launches used to estimate sceptre's fixed startup cost
+DEFAULT_REPEATS = 3  # per-measurement repeats: median wall time, max peak RSS
+
+# Regression-gate floors, asserted with --assert (see ADR 0021). Set below the measured
+# like-for-like margins so normal variation does not trip the gate; tighten after a stable
+# full-corpus baseline. Peak RSS is a whole-process max, so a single large image sets it.
+WARM_SPEEDUP_FLOOR = 2.0  # sceptre warm/batch must be at least this much faster than EasyOCR
+RSS_RATIO_FLOOR = 3.0  # EasyOCR peak RSS must be at least this many times sceptre's
+QUALITY_TOKEN_F1_DELTA = 0.05  # sceptre mean labeled token-F1 must be >= EasyOCR's minus this
 
 # Optional accelerated edit distance; the harness falls back to a stdlib DP if absent.
 try:
@@ -182,7 +199,7 @@ def word_error_rate(reference: str, hypothesis: str) -> float | None:
 
 
 # --------------------------------------------------------------------------------------
-# Engine drivers
+# Engine output model
 # --------------------------------------------------------------------------------------
 
 
@@ -195,51 +212,58 @@ class Detection:
 
 
 @dataclass
-class EngineOutput:
-    """The result of running one engine over one image."""
+class ImageDetections:
+    """One image's slice of a batch run: detections, warm inner time, or a failure.
 
-    detections: list[Detection]
-    seconds: float
-    rss_mb: float | None = None
+    ``unsupported_format`` marks an image whose container the engine cannot decode (a
+    capability gap surfaced by the report), distinct from a genuine runtime error.
+    """
+
+    detections: list[Detection] | None
+    seconds: float | None = None
+    error: str | None = None
+    unsupported_format: bool = False
 
     @property
     def text(self) -> str:
         """All line texts joined with single spaces, in engine order."""
-        return " ".join(detection.text for detection in self.detections)
+        return " ".join(detection.text for detection in self.detections or [])
 
     @property
     def quads(self) -> list[list[list[float]]]:
         """All line quads."""
-        return [detection.quad for detection in self.detections]
+        return [detection.quad for detection in self.detections or []]
 
 
-def easyocr_detections(reader: object, image: Path) -> list[Detection]:
-    """Run an EasyOCR reader over one image and normalize to ``Detection`` records."""
-    raw = reader.readtext(str(image))  # type: ignore[attr-defined]
-    detections: list[Detection] = []
-    for box, text, _confidence in raw:
-        quad = [[float(point[0]), float(point[1])] for point in box[:4]]
-        detections.append(Detection(text=str(text), quad=quad))
-    return detections
+@dataclass
+class BatchResult:
+    """One engine's warm/batch run over a whole per-language image group.
+
+    ``total_seconds`` is the median whole-process wall time over repeats (model/Reader load
+    once + every image); ``rss_mb`` is the max peak RSS over repeats; ``build_seconds`` is the
+    one-time model/Reader load, so ``(total - build) / image_count`` is the amortized warm
+    per-image inner time.
+    """
+
+    engine: str
+    langs: tuple[str, ...]
+    total_seconds: float
+    image_count: int
+    rss_mb: float | None
+    build_seconds: float | None
+    per_image: dict[str, ImageDetections]
+
+    def warm_per_image(self) -> float | None:
+        """Amortized warm inner seconds per image: (total - build) / image_count."""
+        if self.image_count <= 0:
+            return None
+        build = self.build_seconds or 0.0
+        return max((self.total_seconds - build) / self.image_count, 0.0)
 
 
-def run_easyocr(reader: object, image: Path) -> EngineOutput:
-    """Time a warm EasyOCR ``readtext`` call and capture the process peak RSS."""
-    import resource
-
-    start = perf_counter()
-    detections = easyocr_detections(reader, image)
-    seconds = perf_counter() - start
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return EngineOutput(detections=detections, seconds=seconds, rss_mb=_maxrss_to_mb(peak))
-
-
-def _maxrss_to_mb(value: int) -> float:
-    """Normalize ``ru_maxrss`` to MB (bytes on darwin, KiB on linux)."""
-    if sys.platform == "darwin":
-        return value / 1_000_000.0
-    return value * 1024 / 1_000_000.0
-
+# --------------------------------------------------------------------------------------
+# Subprocess plumbing (peak RSS, timing, JSON parsing) — shared by both engines
+# --------------------------------------------------------------------------------------
 
 _TIME_RSS_DARWIN = re.compile(r"(\d+)\s+maximum resident set size")
 _TIME_RSS_LINUX = re.compile(r"Maximum resident set size \(kbytes\):\s+(\d+)")
@@ -264,6 +288,40 @@ def _parse_child_rss(stderr: str) -> float | None:
     return None
 
 
+def _strip_time_stats(stderr: str) -> str:
+    """Drop the ``/usr/bin/time`` resource block, leaving only the child's own stderr.
+
+    The wrapper appends a fixed block of ``N  label`` resource lines; keeping them would
+    leak "5 page faults / 0 swaps ..." noise into any surfaced engine error message.
+    """
+    kept: list[str] = []
+    for line in stderr.splitlines():
+        stripped = line.strip()
+        # /usr/bin/time -l/-v lines are "<number>  <words>" (darwin) or "Label: <number>" (linux). ~keep
+        if re.match(r"^[\d,]+\s+[a-z]", stripped) or _TIME_RSS_LINUX.search(stripped):
+            continue
+        if re.match(r"^[A-Z][A-Za-z()/ ]+:\s", stripped) and re.search(r"\d", stripped):
+            continue
+        kept.append(line)
+    return "\n".join(line for line in kept if line.strip())
+
+
+def _is_unsupported_format(message: str) -> bool:
+    """True when an engine error is a decode/format-support failure, not a runtime crash."""
+    lowered = message.lower()
+    return "not supported" in lowered or "failed to decode" in lowered or "unsupported" in lowered
+
+
+def _median(values: list[float]) -> float:
+    """Median of a non-empty list of floats."""
+    return statistics.median(values)
+
+
+# --------------------------------------------------------------------------------------
+# sceptre drivers
+# --------------------------------------------------------------------------------------
+
+
 def _detections_from_lines(lines: list[dict[str, object]]) -> list[Detection]:
     """Convert a sceptre ``lines`` array into ``Detection`` records."""
     detections: list[Detection] = []
@@ -274,160 +332,117 @@ def _detections_from_lines(lines: list[dict[str, object]]) -> list[Detection]:
     return detections
 
 
-def _parse_sceptre_json(payload: str) -> list[Detection]:
-    """Parse sceptre single-image ``run --format json`` stdout into ``Detection`` records."""
-    return _detections_from_lines(json.loads(payload).get("lines", []))
-
-
-@dataclass
-class BatchImageResult:
-    """One image's slice of a batch ``sceptre run`` result: detections or a failure."""
-
-    detections: list[Detection] | None
-    error: str | None = None
-
-
-def _batch_image_from_element(element: dict[str, object]) -> BatchImageResult:
-    """Convert a single batch JSON element into a ``BatchImageResult``."""
+def _sceptre_image_from_element(element: dict[str, object]) -> ImageDetections:
+    """Convert one batch JSON element into an ``ImageDetections`` (detections or failure)."""
     if "error" in element:
-        return BatchImageResult(detections=None, error=str(element["error"]))
-    return BatchImageResult(detections=_detections_from_lines(element.get("lines", [])))
+        message = str(element["error"])
+        return ImageDetections(detections=None, error=message, unsupported_format=_is_unsupported_format(message))
+    return ImageDetections(detections=_detections_from_lines(element.get("lines", [])))
 
 
-def _parse_sceptre_batch_json(payload: str, images: list[Path]) -> dict[str, BatchImageResult]:
+def _parse_sceptre_batch_json(payload: str, images: list[Path]) -> dict[str, ImageDetections]:
     """Parse batch ``sceptre run`` stdout, aligned to the group's input order.
 
     sceptre emits a JSON array (one element per image, each carrying an ``image`` key) for
-    more than one image, and the historical single object ``{"lines": ...}`` for exactly one.
-    The ``image`` key is honored when present; otherwise the element's position selects the
-    matching input path.
+    more than one image, and a single object ``{"lines": ...}`` for exactly one image.
     """
     data = json.loads(payload)
-    results: dict[str, BatchImageResult] = {}
+    results: dict[str, ImageDetections] = {}
     if isinstance(data, dict):
         key = data.get("image") or (str(images[0]) if images else "")
-        results[str(key)] = _batch_image_from_element(data)
+        results[str(key)] = _sceptre_image_from_element(data)
         return results
     for index, element in enumerate(data):
         key = element.get("image")
         if key is None:
             key = str(images[index]) if index < len(images) else str(index)
-        results[str(key)] = _batch_image_from_element(element)
+        results[str(key)] = _sceptre_image_from_element(element)
     return results
 
 
-def sceptre_command(binary: Path, image: Path, sceptre_langs: list[str]) -> list[str]:
-    """Build the sceptre CLI argument vector for one image."""
-    command = [str(binary), "run", str(image)]
-    for language in sceptre_langs:
-        command += ["--lang", language]
-    command += ["--format", "json"]
-    return command
+def _thread_args(threads: int | None) -> list[str]:
+    """The sceptre ``--threads`` flag, or empty to use the engine default (all cores)."""
+    return ["--threads", str(threads)] if threads is not None else []
 
 
-def run_sceptre(binary: Path, image: Path, sceptre_langs: list[str], root: Path) -> EngineOutput:
-    """Invoke the sceptre CLI as a fresh process; time the full cold wall clock."""
-    command = sceptre_command(binary, image, sceptre_langs)
-    wrapped = _time_wrapper() + command
-    start = perf_counter()
-    completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
-    seconds = perf_counter() - start
-    if completed.returncode != 0:
-        raise RuntimeError(f"sceptre exited {completed.returncode}: {completed.stderr.strip()[-500:]}")
-    detections = _parse_sceptre_json(completed.stdout)
-    return EngineOutput(detections=detections, seconds=seconds, rss_mb=_parse_child_rss(completed.stderr))
-
-
-@dataclass
-class SceptreBatchResult:
-    """The result of one warm ``sceptre run`` over a whole per-language image group."""
-
-    langs: tuple[str, ...]
-    total_seconds: float
-    image_count: int
-    rss_mb: float | None
-    per_image: dict[str, BatchImageResult]
-
-
-def sceptre_batch_command(binary: Path, images: list[Path], sceptre_langs: list[str]) -> list[str]:
-    """Build the sceptre CLI argument vector for a batch of images sharing one language set."""
+def _sceptre_batch_command(
+    binary: Path, images: list[Path], sceptre_langs: list[str], threads: int | None
+) -> list[str]:
+    """Build the sceptre CLI argument vector for a batch sharing one language set."""
     command = [str(binary), "run", *[str(image) for image in images]]
     for language in sceptre_langs:
         command += ["--lang", language]
-    command += ["--format", "json"]
+    command += _thread_args(threads) + ["--format", "json"]
     return command
 
 
-def run_sceptre_batch(binary: Path, images: list[Path], sceptre_langs: list[str], root: Path) -> SceptreBatchResult:
-    """Invoke ONE warm ``sceptre run`` over an image group; time the full batch wall clock.
+def _run_sceptre_batch_once(
+    binary: Path, images: list[Path], sceptre_langs: list[str], root: Path, threads: int | None
+) -> tuple[float, float | None, dict[str, ImageDetections]]:
+    """One warm ``sceptre run`` over a group; return (seconds, rss_mb, per_image).
 
-    A single process loads the model once and recognizes every image, mirroring how EasyOCR
-    keeps its Reader warm across ``readtext`` calls.
+    A non-zero exit with per-image errors already encoded in the JSON is tolerated (sceptre
+    exits non-zero when any image fails); only a run with no parseable JSON raises.
     """
-    command = sceptre_batch_command(binary, images, sceptre_langs)
-    wrapped = _time_wrapper() + command
+    wrapped = _time_wrapper() + _sceptre_batch_command(binary, images, sceptre_langs, threads)
     start = perf_counter()
     completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
     seconds = perf_counter() - start
-    if completed.returncode != 0:
-        raise RuntimeError(f"sceptre batch exited {completed.returncode}: {completed.stderr.strip()[-500:]}")
-    per_image = _parse_sceptre_batch_json(completed.stdout, images)
-    return SceptreBatchResult(
+    rss = _parse_child_rss(completed.stderr)
+    try:
+        per_image = _parse_sceptre_batch_json(completed.stdout, images)
+    except json.JSONDecodeError as error:
+        clean = _strip_time_stats(completed.stderr)[-300:]
+        raise RuntimeError(f"sceptre batch produced no JSON (exit {completed.returncode}): {clean}") from error
+    return seconds, rss, per_image
+
+
+def run_sceptre_batch(
+    binary: Path, images: list[Path], sceptre_langs: list[str], root: Path, repeats: int, threads: int | None
+) -> BatchResult:
+    """Warm/batch sceptre over a group, repeated for a stable median time and max RSS."""
+    times: list[float] = []
+    rss_values: list[float] = []
+    per_image: dict[str, ImageDetections] = {}
+    for _ in range(max(repeats, 1)):
+        seconds, rss, per_image = _run_sceptre_batch_once(binary, images, sceptre_langs, root, threads)
+        times.append(seconds)
+        if rss is not None:
+            rss_values.append(rss)
+    return BatchResult(
+        engine="sceptre",
         langs=tuple(sceptre_langs),
-        total_seconds=seconds,
+        total_seconds=_median(times),
         image_count=len(images),
-        rss_mb=_parse_child_rss(completed.stderr),
+        rss_mb=max(rss_values) if rss_values else None,
+        build_seconds=None,
         per_image=per_image,
     )
 
 
-def _group_entries_by_sceptre_langs(entries: list[CorpusEntry]) -> dict[tuple[str, ...], list[CorpusEntry]]:
-    """Group runnable entries by their sceptre language tuple, preserving input order."""
-    groups: dict[tuple[str, ...], list[CorpusEntry]] = {}
-    for entry in entries:
-        if entry.image is None or not entry.image.exists():
-            continue
-        groups.setdefault(tuple(entry.sceptre_langs), []).append(entry)
-    return groups
+def _sceptre_cold_command(binary: Path, image: Path, sceptre_langs: list[str], threads: int | None) -> list[str]:
+    """Build the sceptre CLI argument vector for a single cold image run."""
+    command = [str(binary), "run", str(image)]
+    for language in sceptre_langs:
+        command += ["--lang", language]
+    command += _thread_args(threads) + ["--format", "json"]
+    return command
 
 
-def run_sceptre_batch_pass(
-    binary: Path, entries: list[CorpusEntry], root: Path
-) -> dict[tuple[str, ...], SceptreBatchResult]:
-    """Run one warm ``sceptre run`` per distinct sceptre language group over all its images."""
-    results: dict[tuple[str, ...], SceptreBatchResult] = {}
-    for langs, group in _group_entries_by_sceptre_langs(entries).items():
-        images = [entry.image for entry in group if entry.image is not None]
-        print(f"sceptre_rs_tools.benchmark: batch [{'+'.join(langs)}] x{len(images)}", file=sys.stderr)
-        start = perf_counter()
-        try:
-            results[langs] = run_sceptre_batch(binary, images, list(langs), root)
-        except (RuntimeError, ValueError) as error:
-            failure = str(error)[:200]
-            results[langs] = SceptreBatchResult(
-                langs=langs,
-                total_seconds=perf_counter() - start,
-                image_count=len(images),
-                rss_mb=None,
-                per_image={str(image): BatchImageResult(detections=None, error=failure) for image in images},
-            )
-    return results
+def run_sceptre_cold(binary: Path, image: Path, sceptre_langs: list[str], root: Path, threads: int | None) -> float:
+    """Time ONE fresh ``sceptre run`` over a single image (cold: pays model load)."""
+    wrapped = _time_wrapper() + _sceptre_cold_command(binary, image, sceptre_langs, threads)
+    start = perf_counter()
+    completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
+    seconds = perf_counter() - start
+    if completed.returncode != 0:
+        clean = _strip_time_stats(completed.stderr)[-300:]
+        raise RuntimeError(f"sceptre exited {completed.returncode}: {clean}")
+    return seconds
 
 
-def sceptre_warm_per_image(result: SceptreBatchResult, overhead: float | None) -> float | None:
-    """Amortized per-image warm seconds: (batch total - fixed model-load overhead) / images."""
-    if overhead is None or result.image_count <= 0:
-        return None
-    return max((result.total_seconds - overhead) / result.image_count, 0.0)
-
-
-def measure_sceptre_overhead(binary: Path, entries: list[CorpusEntry], root: Path) -> float | None:
-    """Estimate sceptre's fixed startup + model-load cost.
-
-    Uses the smallest available English image, launched ``OVERHEAD_RUNS`` times, and
-    returns the median cold wall time. This approximates the per-process fixed cost
-    (ONNX init + english model parse) that the amortized-inner time subtracts.
-    """
+def measure_sceptre_overhead(binary: Path, entries: list[CorpusEntry], root: Path, threads: int | None) -> float | None:
+    """Estimate sceptre's fixed startup + model-load cost from the smallest English image."""
     candidates = [
         entry
         for entry in entries
@@ -439,10 +454,129 @@ def measure_sceptre_overhead(binary: Path, entries: list[CorpusEntry], root: Pat
     timings: list[float] = []
     for _ in range(OVERHEAD_RUNS):
         try:
-            timings.append(run_sceptre(binary, smallest.image, ["english"], root).seconds)  # type: ignore[arg-type]
+            timings.append(run_sceptre_cold(binary, smallest.image, ["english"], root, threads))  # type: ignore[arg-type]
         except (RuntimeError, ValueError):
             return None
     return statistics.median(timings)
+
+
+# --------------------------------------------------------------------------------------
+# EasyOCR drivers (subprocess, symmetric to sceptre batch)
+# --------------------------------------------------------------------------------------
+
+
+def _easyocr_runner_command(images: list[Path], easyocr_codes: list[str], threads: int | None) -> list[str]:
+    """Build the ``_easyocr_runner`` argument vector for a batch sharing one language set."""
+    command = [sys.executable, "-m", "sceptre_rs_tools._easyocr_runner"]
+    for code in easyocr_codes:
+        command += ["--lang", code]
+    if threads is not None:
+        command += ["--threads", str(threads)]
+    command += [str(image) for image in images]
+    return command
+
+
+def _parse_easyocr_runner_json(payload: str) -> tuple[float | None, dict[str, ImageDetections]]:
+    """Parse ``_easyocr_runner`` stdout into (reader_build_seconds, per_image)."""
+    data = json.loads(payload)
+    build_seconds = data.get("reader_build_seconds")
+    per_image: dict[str, ImageDetections] = {}
+    for element in data.get("images", []):
+        key = str(element.get("image", ""))
+        if "error" in element:
+            message = str(element["error"])
+            per_image[key] = ImageDetections(
+                detections=None, error=message, unsupported_format=_is_unsupported_format(message)
+            )
+            continue
+        detections = [Detection(text=str(d["text"]), quad=d["quad"]) for d in element.get("detections", [])]
+        per_image[key] = ImageDetections(detections=detections, seconds=element.get("seconds"))
+    return (float(build_seconds) if isinstance(build_seconds, (int, float)) else None, per_image)
+
+
+def _run_easyocr_batch_once(
+    images: list[Path], easyocr_codes: list[str], root: Path, threads: int | None
+) -> tuple[float, float | None, float | None, dict[str, ImageDetections]]:
+    """One warm ``_easyocr_runner`` subprocess over a group; (seconds, rss, build, per_image)."""
+    wrapped = _time_wrapper() + _easyocr_runner_command(images, easyocr_codes, threads)
+    start = perf_counter()
+    completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
+    seconds = perf_counter() - start
+    rss = _parse_child_rss(completed.stderr)
+    try:
+        build_seconds, per_image = _parse_easyocr_runner_json(completed.stdout)
+    except json.JSONDecodeError as error:
+        clean = _strip_time_stats(completed.stderr)[-300:]
+        raise RuntimeError(f"easyocr runner produced no JSON (exit {completed.returncode}): {clean}") from error
+    return seconds, rss, build_seconds, per_image
+
+
+def run_easyocr_batch(
+    images: list[Path], easyocr_codes: list[str], root: Path, repeats: int, threads: int | None
+) -> BatchResult:
+    """Warm/batch EasyOCR over a group, repeated for a stable median time and max RSS."""
+    times: list[float] = []
+    rss_values: list[float] = []
+    build_values: list[float] = []
+    per_image: dict[str, ImageDetections] = {}
+    for _ in range(max(repeats, 1)):
+        seconds, rss, build_seconds, per_image = _run_easyocr_batch_once(images, easyocr_codes, root, threads)
+        times.append(seconds)
+        if rss is not None:
+            rss_values.append(rss)
+        if build_seconds is not None:
+            build_values.append(build_seconds)
+    return BatchResult(
+        engine="easyocr",
+        langs=tuple(easyocr_codes),
+        total_seconds=_median(times),
+        image_count=len(images),
+        rss_mb=max(rss_values) if rss_values else None,
+        build_seconds=_median(build_values) if build_values else None,
+        per_image=per_image,
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Batch orchestration over language groups
+# --------------------------------------------------------------------------------------
+
+
+def _runnable_images(entries: list[CorpusEntry]) -> list[CorpusEntry]:
+    """Entries whose image exists on disk."""
+    return [entry for entry in entries if entry.image is not None and entry.image.exists()]
+
+
+def _group_by(entries: list[CorpusEntry], key) -> dict[tuple[str, ...], list[CorpusEntry]]:
+    """Group runnable entries by a language-tuple key, preserving input order."""
+    groups: dict[tuple[str, ...], list[CorpusEntry]] = {}
+    for entry in _runnable_images(entries):
+        groups.setdefault(tuple(key(entry)), []).append(entry)
+    return groups
+
+
+def run_sceptre_pass(
+    binary: Path, entries: list[CorpusEntry], root: Path, repeats: int, threads: int | None
+) -> dict[tuple[str, ...], BatchResult]:
+    """One warm sceptre batch per distinct sceptre-language group."""
+    results: dict[tuple[str, ...], BatchResult] = {}
+    for langs, group in _group_by(entries, lambda entry: entry.sceptre_langs).items():
+        images = [entry.image for entry in group if entry.image is not None]
+        print(f"sceptre_rs_tools.benchmark: sceptre batch [{'+'.join(langs)}] x{len(images)}", file=sys.stderr)
+        results[langs] = run_sceptre_batch(binary, images, list(langs), root, repeats, threads)
+    return results
+
+
+def run_easyocr_pass(
+    entries: list[CorpusEntry], root: Path, repeats: int, threads: int | None
+) -> dict[tuple[str, ...], BatchResult]:
+    """One warm EasyOCR batch per distinct EasyOCR-language group."""
+    results: dict[tuple[str, ...], BatchResult] = {}
+    for codes, group in _group_by(entries, lambda entry: entry.easyocr_codes).items():
+        images = [entry.image for entry in group if entry.image is not None]
+        print(f"sceptre_rs_tools.benchmark: easyocr batch [{'+'.join(codes)}] x{len(images)}", file=sys.stderr)
+        results[codes] = run_easyocr_batch(images, list(codes), root, repeats, threads)
+    return results
 
 
 # --------------------------------------------------------------------------------------
@@ -458,10 +592,10 @@ class ImageRecord:
     group: str
     languages: list[str]
     skipped: str | None = None
-    easyocr_seconds: float | None = None
+    unsupported_format: bool = False
+    easyocr_warm_seconds: float | None = None
     sceptre_cold_seconds: float | None = None
     sceptre_amortized_seconds: float | None = None
-    sceptre_batch_matches_cold: bool | None = None
     easyocr_rss_mb: float | None = None
     sceptre_rss_mb: float | None = None
     agreement_char_f1: float | None = None
@@ -476,17 +610,20 @@ class ImageRecord:
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to a plain JSON-friendly dict, dropping unset fields."""
-        return {key: value for key, value in self.__dict__.items() if value is not None or key == "skipped"}
+        keep_always = {"skipped", "unsupported_format"}
+        return {key: value for key, value in self.__dict__.items() if value is not None or key in keep_always}
 
 
-def _score_agreement(record: ImageRecord, easyocr: EngineOutput, sceptre: EngineOutput) -> None:
+def _score_agreement(record: ImageRecord, easyocr: ImageDetections, sceptre: ImageDetections) -> None:
     """Populate cross-engine agreement metrics (char/word F1, mean best-line IoU)."""
     record.agreement_char_f1 = char_f1(sceptre.text, easyocr.text)
     record.agreement_word_f1 = word_f1(sceptre.text, easyocr.text)
     record.agreement_mean_iou = mean_best_line_iou(easyocr.quads, sceptre.quads)
 
 
-def _score_accuracy(record: ImageRecord, reference_raw: str, easyocr: EngineOutput, sceptre: EngineOutput) -> None:
+def _score_accuracy(
+    record: ImageRecord, reference_raw: str, easyocr: ImageDetections, sceptre: ImageDetections
+) -> None:
     """Populate absolute CER/WER/token-F1 for both engines against ground truth."""
     reference = normalize_text(reference_raw)
     for output, cer_field, wer_field, token_field in (
@@ -499,69 +636,67 @@ def _score_accuracy(record: ImageRecord, reference_raw: str, easyocr: EngineOutp
         setattr(record, token_field, word_f1(hypothesis, reference))
 
 
-def _detections_match(left: list[Detection], right: list[Detection]) -> bool:
-    """True when two detection lists carry identical text and quads in the same order."""
-    if len(left) != len(right):
-        return False
-    return all(a.text == b.text and a.quad == b.quad for a, b in zip(left, right, strict=True))
-
-
-def _apply_batch(
-    record: ImageRecord,
-    entry: CorpusEntry,
-    sceptre: EngineOutput,
-    batch: SceptreBatchResult | None,
-) -> None:
-    """Flag whether this image's warm/batch detections drift from its cold run.
-
-    Per-image warm timings are intentionally not recorded: the batch process only yields a
-    real whole-group wall time, so warm speed is reported corpus-wide from the per-group
-    ``sceptre_batch`` metadata, never as an approximate per-image split.
-    """
-    if batch is None or entry.image is None:
-        return
-    slice_result = batch.per_image.get(str(entry.image))
-    if slice_result is None or slice_result.detections is None:
-        return
-    record.sceptre_batch_matches_cold = _detections_match(sceptre.detections, slice_result.detections)
-
-
 def benchmark_entry(
     entry: CorpusEntry,
-    reader: object,
     binary: Path,
-    overhead: float | None,
     root: Path,
-    batch: SceptreBatchResult | None = None,
+    overhead: float | None,
+    repeats: int,
+    threads: int | None,
+    sceptre_slice: ImageDetections | None,
+    easyocr_slice: ImageDetections | None,
+    sceptre_rss: float | None,
+    easyocr_rss: float | None,
 ) -> ImageRecord:
-    """Run both engines over one entry and assemble its metrics record."""
+    """Assemble one entry's metrics from its resolved batch slices plus a cold sceptre timing.
+
+    Slices are looked up by image path outside; ``sceptre_rss`` / ``easyocr_rss`` are the
+    group-level peak RSS for the entry's measured language batches (``None`` for capability
+    probes, which are excluded from the timed passes).
+    """
     record = ImageRecord(stem=entry.stem, group=entry.group, languages=list(entry.languages))
     if entry.image is None or not entry.image.exists():
         record.skipped = "image not found on disk"
         return record
-    try:
-        easyocr = run_easyocr(reader, entry.image)
-        sceptre = run_sceptre(binary, entry.image, entry.sceptre_langs, root)
-    except Exception as error:  # noqa: BLE001 - record the failure instead of aborting the run
-        record.skipped = f"engine error: {type(error).__name__}: {str(error)[:200]}"
+
+    if sceptre_slice is not None and sceptre_slice.unsupported_format:
+        record.unsupported_format = True
+        record.skipped = "sceptre cannot decode this format (capability gap)"
+        # EasyOCR memory/time for this group is still meaningful, but per-image parity is not. ~keep
+        return record
+    if sceptre_slice is None or sceptre_slice.detections is None:
+        detail = sceptre_slice.error if sceptre_slice else "missing from sceptre batch output"
+        record.skipped = f"sceptre error: {detail}"
+        return record
+    if easyocr_slice is None or easyocr_slice.detections is None:
+        detail = easyocr_slice.error if easyocr_slice else "missing from easyocr batch output"
+        record.skipped = f"easyocr error: {detail}"
         return record
 
-    record.easyocr_seconds = easyocr.seconds
-    record.easyocr_rss_mb = easyocr.rss_mb
-    record.sceptre_cold_seconds = sceptre.seconds
-    record.sceptre_rss_mb = sceptre.rss_mb
-    if overhead is not None:
-        record.sceptre_amortized_seconds = max(sceptre.seconds - overhead, 0.0)
-    _apply_batch(record, entry, sceptre, batch)
+    # Warm figures come from the batch passes (group-level RSS, per-image warm time). ~keep
+    record.easyocr_warm_seconds = easyocr_slice.seconds
+    record.easyocr_rss_mb = easyocr_rss
+    record.sceptre_rss_mb = sceptre_rss
 
-    _score_agreement(record, easyocr, sceptre)
+    try:
+        cold_times = [
+            run_sceptre_cold(binary, entry.image, entry.sceptre_langs, root, threads) for _ in range(max(repeats, 1))
+        ]
+        record.sceptre_cold_seconds = _median(cold_times)
+        if overhead is not None:
+            record.sceptre_amortized_seconds = max(record.sceptre_cold_seconds - overhead, 0.0)
+    except (RuntimeError, ValueError) as error:
+        record.skipped = f"sceptre cold run failed: {str(error)[:200]}"
+        return record
+
+    _score_agreement(record, easyocr_slice, sceptre_slice)
     if entry.ground_truth is not None and entry.ground_truth.exists():
-        _score_accuracy(record, entry.ground_truth.read_text(encoding="utf-8"), easyocr, sceptre)
+        _score_accuracy(record, entry.ground_truth.read_text(encoding="utf-8"), easyocr_slice, sceptre_slice)
     return record
 
 
 # --------------------------------------------------------------------------------------
-# Aggregation and reporting
+# Aggregation
 # --------------------------------------------------------------------------------------
 
 
@@ -585,7 +720,7 @@ def _collect(records: list[ImageRecord], attribute: str) -> list[float]:
 
 
 AGGREGATE_FIELDS = (
-    "easyocr_seconds",
+    "easyocr_warm_seconds",
     "sceptre_cold_seconds",
     "sceptre_amortized_seconds",
     "easyocr_rss_mb",
@@ -631,15 +766,110 @@ class RunReport:
         }
 
 
+# --------------------------------------------------------------------------------------
+# Headline totals
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class HeadlineTotals:
+    """Corpus-wide warm/cold totals and peak RSS for the honest headline figures."""
+
+    scored_n: int
+    sceptre_warm_total: float
+    sceptre_warm_imgs: int
+    sceptre_cold_total: float
+    easyocr_warm_total: float
+    easyocr_warm_imgs: int
+    sceptre_peak_rss: float | None
+    easyocr_peak_rss: float | None
+
+
+def _batch_totals(batch: dict[str, object]) -> tuple[float, int]:
+    """Sum per-group warm wall time and image count from a serialized batch summary."""
+    groups = [group for group in batch.values() if isinstance(group, dict)]
+    total = sum(float(g["total_seconds"]) for g in groups if isinstance(g.get("total_seconds"), (int, float)))
+    images = sum(int(g["image_count"]) for g in groups if isinstance(g.get("image_count"), int))
+    return total, images
+
+
+def _peak_rss(batch: dict[str, object]) -> float | None:
+    """Max peak RSS across the language groups of a serialized batch summary."""
+    values = [g["rss_mb"] for g in batch.values() if isinstance(g, dict) and isinstance(g.get("rss_mb"), (int, float))]
+    return max(values) if values else None
+
+
+def headline_totals(report: RunReport) -> HeadlineTotals:
+    """Corpus-total warm/cold figures and peak RSS from the batch metadata."""
+    scored = [record for record in report.records if record.skipped is None]
+    sceptre_batch = report.metadata.get("sceptre_batch", {})
+    easyocr_batch = report.metadata.get("easyocr_batch", {})
+    sceptre_batch = sceptre_batch if isinstance(sceptre_batch, dict) else {}
+    easyocr_batch = easyocr_batch if isinstance(easyocr_batch, dict) else {}
+    sceptre_total, sceptre_imgs = _batch_totals(sceptre_batch)
+    easyocr_total, easyocr_imgs = _batch_totals(easyocr_batch)
+    return HeadlineTotals(
+        scored_n=len(scored),
+        sceptre_warm_total=sceptre_total,
+        sceptre_warm_imgs=sceptre_imgs,
+        sceptre_cold_total=sum(_collect(scored, "sceptre_cold_seconds")),
+        easyocr_warm_total=easyocr_total,
+        easyocr_warm_imgs=easyocr_imgs,
+        sceptre_peak_rss=_peak_rss(sceptre_batch),
+        easyocr_peak_rss=_peak_rss(easyocr_batch),
+    )
+
+
+def _throughput(count: int, total_seconds: float) -> float | None:
+    """Images-per-second, or None if not measurable."""
+    if not total_seconds or count <= 0:
+        return None
+    return count / total_seconds
+
+
+def speedup_summary(report: RunReport) -> str:
+    """One-line warm speedup and peak-RSS ratio versus EasyOCR."""
+    totals = headline_totals(report)
+    parts: list[str] = []
+    warm_speedup = _warm_speedup(totals)
+    if warm_speedup is not None:
+        parts.append(f"~{warm_speedup:.1f}x faster warm")
+    if totals.sceptre_cold_total > 0 and totals.easyocr_warm_total > 0:
+        parts.append(f"~{totals.easyocr_warm_total / totals.sceptre_cold_total:.1f}x faster cold")
+    rss_ratio = _rss_ratio(totals)
+    if rss_ratio is not None:
+        parts.append(f"~{rss_ratio:.0f}x less peak RSS")
+    if not parts:
+        return ""
+    return "sceptre is " + ", ".join(parts) + " vs EasyOCR (per-image normalized, both warm/batch subprocesses)."
+
+
+def _warm_speedup(totals: HeadlineTotals) -> float | None:
+    """Per-image-normalized warm speedup of sceptre over EasyOCR, or None."""
+    if not (totals.sceptre_warm_total > 0 and totals.sceptre_warm_imgs > 0):
+        return None
+    if not (totals.easyocr_warm_total > 0 and totals.easyocr_warm_imgs > 0):
+        return None
+    return (totals.easyocr_warm_total / totals.easyocr_warm_imgs) / (
+        totals.sceptre_warm_total / totals.sceptre_warm_imgs
+    )
+
+
+def _rss_ratio(totals: HeadlineTotals) -> float | None:
+    """Ratio of EasyOCR peak RSS to sceptre peak RSS, or None."""
+    if totals.sceptre_peak_rss and totals.easyocr_peak_rss and totals.sceptre_peak_rss > 0:
+        return totals.easyocr_peak_rss / totals.sceptre_peak_rss
+    return None
+
+
+# --------------------------------------------------------------------------------------
+# Markdown report
+# --------------------------------------------------------------------------------------
+
+
 def _fmt(value: float | None, digits: int = 3) -> str:
     """Format an optional number for a Markdown cell."""
     return "-" if value is None else f"{value:.{digits}f}"
-
-
-def _median_of(aggregates: dict[str, dict[str, float]], field_name: str) -> float | None:
-    """Median of an aggregate field, or None if absent."""
-    summary = aggregates.get(field_name)
-    return summary["median"] if summary else None
 
 
 def _mean_of(aggregates: dict[str, dict[str, float]], field_name: str) -> float | None:
@@ -648,116 +878,10 @@ def _mean_of(aggregates: dict[str, dict[str, float]], field_name: str) -> float 
     return summary["mean"] if summary else None
 
 
-def _median_batch_rss(metadata: dict[str, object]) -> float | None:
-    """Median child peak RSS across the warm/batch language groups, if recorded."""
-    batch = metadata.get("sceptre_batch", {})
-    if not isinstance(batch, dict):
-        return None
-    values = [
-        group["rss_mb"]
-        for group in batch.values()
-        if isinstance(group, dict) and isinstance(group.get("rss_mb"), (int, float))
-    ]
-    return statistics.median(values) if values else None
-
-
-@dataclass
-class HeadlineTotals:
-    """Corpus-wide warm/cold totals used for the honest headline throughput figures."""
-
-    scored_n: int
-    easy_total: float
-    cold_total: float
-    warm_total: float
-    warm_imgs: int
-
-
-def _warm_corpus_totals(metadata: dict[str, object]) -> tuple[float, int]:
-    """Sum the real per-group warm wall time and image count from ``sceptre_batch``."""
-    batch = metadata.get("sceptre_batch", {})
-    if not isinstance(batch, dict):
-        return 0.0, 0
-    groups = [group for group in batch.values() if isinstance(group, dict)]
-    total = sum(
-        float(group["total_seconds"]) for group in groups if isinstance(group.get("total_seconds"), (int, float))
-    )
-    images = sum(int(group["image_count"]) for group in groups if isinstance(group.get("image_count"), int))
-    return total, images
-
-
-def headline_totals(report: RunReport) -> HeadlineTotals:
-    """Corpus-total EasyOCR-warm, sceptre-cold, and sceptre-warm/batch figures.
-
-    Warm/batch comes from the per-group ``sceptre_batch`` metadata (the only real batch
-    timing); cold and EasyOCR-warm are summed over the scored (non-skipped) records.
-    """
-    scored = [record for record in report.records if record.skipped is None]
-    warm_total, warm_imgs = _warm_corpus_totals(report.metadata)
-    return HeadlineTotals(
-        scored_n=len(scored),
-        easy_total=sum(_collect(scored, "easyocr_seconds")),
-        cold_total=sum(_collect(scored, "sceptre_cold_seconds")),
-        warm_total=warm_total,
-        warm_imgs=warm_imgs,
-    )
-
-
-def _corpus_throughput(count: int, total_seconds: float) -> str:
-    """Images-per-second from a corpus-total image count and wall time."""
-    if not total_seconds or count <= 0:
-        return "-"
-    return f"{count / total_seconds:.2f}"
-
-
-def speedup_summary(report: RunReport) -> str:
-    """One-line per-image-normalized warm and cold speedups versus EasyOCR warm."""
-    totals = headline_totals(report)
-    parts: list[str] = []
-    if totals.warm_total > 0 and totals.warm_imgs > 0 and totals.scored_n > 0 and totals.easy_total > 0:
-        warm_speedup = (totals.easy_total / totals.scored_n) / (totals.warm_total / totals.warm_imgs)
-        parts.append(f"~{warm_speedup:.1f}x faster warm")
-    if totals.cold_total > 0 and totals.easy_total > 0:
-        cold_speedup = totals.easy_total / totals.cold_total
-        parts.append(f"~{cold_speedup:.1f}x faster cold")
-    if not parts:
-        return ""
-    return "sceptre is " + ", ".join(parts) + " vs EasyOCR (per-image normalized)."
-
-
-def headline_rows(report: RunReport) -> list[list[str]]:
-    """Build the headline comparison table rows (one per engine)."""
-    labeled = report.aggregates_labeled
-    every = report.aggregates_all
-    totals = headline_totals(report)
-    return [
-        [
-            "EasyOCR (warm readtext)",
-            _fmt(totals.easy_total, 2),
-            _corpus_throughput(totals.scored_n, totals.easy_total),
-            _fmt(_median_of(every, "easyocr_rss_mb"), 1),
-            _fmt(_mean_of(labeled, "easyocr_cer")),
-            _fmt(_mean_of(labeled, "easyocr_wer")),
-            _fmt(_mean_of(labeled, "easyocr_token_f1")),
-        ],
-        [
-            "sceptre (cold CLI run)",
-            _fmt(totals.cold_total, 2),
-            _corpus_throughput(totals.scored_n, totals.cold_total),
-            _fmt(_median_of(every, "sceptre_rss_mb"), 1),
-            _fmt(_mean_of(labeled, "sceptre_cer")),
-            _fmt(_mean_of(labeled, "sceptre_wer")),
-            _fmt(_mean_of(labeled, "sceptre_token_f1")),
-        ],
-        [
-            "sceptre (warm/batch)",
-            _fmt(totals.warm_total, 2),
-            _corpus_throughput(totals.warm_imgs, totals.warm_total),
-            _fmt(_median_batch_rss(report.metadata), 1),
-            _fmt(_mean_of(labeled, "sceptre_cer")),
-            _fmt(_mean_of(labeled, "sceptre_wer")),
-            _fmt(_mean_of(labeled, "sceptre_token_f1")),
-        ],
-    ]
+def _median_of(aggregates: dict[str, dict[str, float]], field_name: str) -> float | None:
+    """Median of an aggregate field, or None if absent."""
+    summary = aggregates.get(field_name)
+    return summary["median"] if summary else None
 
 
 def _markdown_table(header: list[str], rows: list[list[str]]) -> str:
@@ -772,17 +896,53 @@ HEADLINE_HEADER = [
     "Engine",
     "Corpus total s",
     "Throughput img/s",
-    "Median RSS MB",
+    "Peak RSS MB",
     "Mean CER",
     "Mean WER",
     "Mean token-F1",
 ]
 
+
+def headline_rows(report: RunReport) -> list[list[str]]:
+    """Build the headline comparison table rows (both engines warm/batch, sceptre cold)."""
+    labeled = report.aggregates_labeled
+    totals = headline_totals(report)
+    return [
+        [
+            "EasyOCR (warm/batch)",
+            _fmt(totals.easyocr_warm_total, 2),
+            _fmt(_throughput(totals.easyocr_warm_imgs, totals.easyocr_warm_total), 2),
+            _fmt(totals.easyocr_peak_rss, 1),
+            _fmt(_mean_of(labeled, "easyocr_cer")),
+            _fmt(_mean_of(labeled, "easyocr_wer")),
+            _fmt(_mean_of(labeled, "easyocr_token_f1")),
+        ],
+        [
+            "sceptre (warm/batch)",
+            _fmt(totals.sceptre_warm_total, 2),
+            _fmt(_throughput(totals.sceptre_warm_imgs, totals.sceptre_warm_total), 2),
+            _fmt(totals.sceptre_peak_rss, 1),
+            _fmt(_mean_of(labeled, "sceptre_cer")),
+            _fmt(_mean_of(labeled, "sceptre_wer")),
+            _fmt(_mean_of(labeled, "sceptre_token_f1")),
+        ],
+        [
+            "sceptre (cold CLI run)",
+            _fmt(totals.sceptre_cold_total, 2),
+            _fmt(_throughput(totals.scored_n, totals.sceptre_cold_total), 2),
+            _fmt(totals.sceptre_peak_rss, 1),
+            _fmt(_mean_of(labeled, "sceptre_cer")),
+            _fmt(_mean_of(labeled, "sceptre_wer")),
+            _fmt(_mean_of(labeled, "sceptre_token_f1")),
+        ],
+    ]
+
+
 PER_IMAGE_HEADER = [
     "Image",
     "Group",
     "Lang",
-    "EasyOCR s",
+    "EasyOCR warm s",
     "sceptre cold s",
     "sceptre amort s",
     "char-F1",
@@ -794,19 +954,37 @@ PER_IMAGE_HEADER = [
 ]
 
 
-def per_image_rows(records: list[ImageRecord]) -> list[list[str]]:
-    """Build the per-image detail table rows."""
+def _baseline_index(baseline: dict[str, object] | None) -> dict[str, dict[str, object]]:
+    """Index a prior report's records by stem for delta lookups."""
+    if not baseline:
+        return {}
+    records = baseline.get("records", [])
+    return {str(record.get("stem")): record for record in records if isinstance(record, dict)}
+
+
+def _delta(current: float | None, previous: object) -> str:
+    """Signed delta ``current - previous`` for a Markdown cell, or '-' if unavailable."""
+    if current is None or not isinstance(previous, (int, float)):
+        return "-"
+    difference = current - float(previous)
+    return f"{difference:+.3f}"
+
+
+def per_image_rows(records: list[ImageRecord], baseline: dict[str, dict[str, object]]) -> list[list[str]]:
+    """Build the per-image detail table rows, with a baseline delta note when available."""
     rows: list[list[str]] = []
     for record in records:
         note = record.skipped or ""
-        if record.sceptre_batch_matches_cold is False:
-            note = ("batch != cold; " + note).strip()
+        prior = baseline.get(record.stem)
+        if prior is not None and record.sceptre_token_f1 is not None:
+            delta = _delta(record.sceptre_token_f1, prior.get("sceptre_token_f1"))
+            note = (f"ΔtokF1 {delta}; " + note).strip("; ").strip()
         rows.append(
             [
                 record.stem,
                 record.group,
                 "+".join(record.languages),
-                _fmt(record.easyocr_seconds),
+                _fmt(record.easyocr_warm_seconds),
                 _fmt(record.sceptre_cold_seconds),
                 _fmt(record.sceptre_amortized_seconds),
                 _fmt(record.agreement_char_f1),
@@ -820,14 +998,11 @@ def per_image_rows(records: list[ImageRecord]) -> list[list[str]]:
     return rows
 
 
-def render_markdown(report: RunReport) -> str:
+def render_markdown(report: RunReport, baseline: dict[str, object] | None = None) -> str:
     """Render the full scannable Markdown report."""
     meta = report.metadata
-    overhead = meta.get("sceptre_overhead_seconds")
-    scep_amort = _median_of(report.aggregates_all, "sceptre_amortized_seconds")
-    totals = headline_totals(report)
-    warm_per_image = totals.warm_total / totals.warm_imgs if totals.warm_imgs > 0 else None
-    skips = [record for record in report.records if record.skipped is not None]
+    capability = [record for record in report.records if record.unsupported_format]
+    skips = [record for record in report.records if record.skipped is not None and not record.unsupported_format]
     sections = [
         "# sceptre vs EasyOCR benchmark",
         "",
@@ -835,12 +1010,11 @@ def render_markdown(report: RunReport) -> str:
         (
             f"- Corpus: {meta['corpus_total']} entries "
             f"({meta['labeled_scored']} labeled scored, {meta['breadth_scored']} breadth scored, "
-            f"{len(skips)} skipped)"
+            f"{len(capability)} capability gaps, {len(skips)} skipped)"
         ),
         (
-            f"- sceptre fixed overhead (startup + english model load): "
-            f"{_fmt(overhead if isinstance(overhead, float) else None)} s "
-            f"(median of {OVERHEAD_RUNS} runs on the smallest English image)"
+            f"- Repeats: {meta.get('repeats')} (median wall time, max peak RSS) | "
+            f"threads: {meta.get('threads')} (same for both engines)"
         ),
         "",
         "## Headline",
@@ -850,55 +1024,25 @@ def render_markdown(report: RunReport) -> str:
         speedup_summary(report),
         "",
         (
-            "CER / WER / token-F1 are averaged over labeled images only. Corpus total s is the summed "
-            "wall time over the scored run set (labeled + breadth); throughput is that count divided by "
-            "the total. Warm/batch total and throughput come from the real per-group `sceptre_batch` "
-            "wall times, not an approximate per-image split."
-        ),
-        "",
-        "### Cold vs amortized speed",
-        "",
-        (
-            f"sceptre's median cold run is {_fmt(_median_of(report.aggregates_all, 'sceptre_cold_seconds'))} s, "
-            f"which includes a fixed ~{_fmt(overhead if isinstance(overhead, float) else None)} s startup + "
-            f"model-load cost paid once per process. Subtracting it yields an amortized-inner median of "
-            f"{_fmt(scep_amort)} s — the figure to compare against EasyOCR's warm "
-            f"{_fmt(_median_of(report.aggregates_all, 'easyocr_seconds'))} s readtext, which excludes the "
-            "one-time Reader construction (recorded separately in the JSON metadata)."
-        ),
-        "",
-        "### Warm/batch vs cold",
-        "",
-        (
-            f"sceptre's warm/batch corpus total is {_fmt(totals.warm_total, 2)} s over {totals.warm_imgs} "
-            f"images ({_fmt(warm_per_image)} s per image on average) from single "
-            "`sceptre run img1 img2 ...` processes that load the model once per language group and "
-            "recognize every image, reusing the warm Reader — exactly how EasyOCR reuses its Reader "
-            f"across `readtext` calls ({_fmt(totals.easy_total, 2)} s total over {totals.scored_n} images). "
-            "Both amortize the one-time model-load cost, so warm/batch is the apples-to-apples "
-            f"comparison against EasyOCR warm. Cold ({_fmt(totals.cold_total, 2)} s total) is the real "
-            "per-invocation CLI cost: a fresh process per image that pays model load every time. Only the "
-            "whole-group batch wall time is a real measurement, so no approximate per-image warm time is "
-            "reported; per-group batch totals, image counts, and throughput are recorded in the JSON metadata."
-        ),
-        "",
-        "### Memory caveat",
-        "",
-        (
-            "RSS figures are NOT directly comparable. EasyOCR RSS is the peak of the whole Python + torch "
-            "process (interpreter, torch, model weights), measured via `getrusage(RUSAGE_SELF)` and "
-            "monotonic across the run. sceptre RSS is a lean native subprocess peak from `/usr/bin/time`. "
-            "Treat them as order-of-magnitude context, not a like-for-like delta."
+            "Both engines run as fresh subprocesses per language group, loading their model/Reader once "
+            "and processing every image (warm/batch), with peak RSS captured identically via `/usr/bin/time`. "
+            "EasyOCR peak RSS legitimately includes the Python + torch runtime — that is its real cost. "
+            "CER / WER / token-F1 are averaged over labeled images only; cold is the per-invocation sceptre "
+            "cost (fresh process per image, pays model load every time)."
         ),
         "",
         "## Per-image detail",
         "",
-        _markdown_table(PER_IMAGE_HEADER, per_image_rows(report.records)),
+        _markdown_table(PER_IMAGE_HEADER, per_image_rows(report.records, _baseline_index(baseline))),
         "",
     ]
-    if skips:
-        sections.append("## Skipped")
+    if capability:
+        sections += ["## Capability gaps (sceptre cannot decode; EasyOCR can)", ""]
+        for record in capability:
+            sections.append(f"- `{record.stem}` ({'+'.join(record.languages)})")
         sections.append("")
+    if skips:
+        sections += ["## Skipped", ""]
         for record in skips:
             sections.append(f"- `{record.stem}`: {record.skipped}")
         sections.append("")
@@ -906,57 +1050,89 @@ def render_markdown(report: RunReport) -> str:
 
 
 # --------------------------------------------------------------------------------------
+# Regression gate (--assert)
+# --------------------------------------------------------------------------------------
+
+
+def check_thresholds(report: RunReport) -> list[str]:
+    """Return a list of threshold breaches (empty when the run clears the gate)."""
+    totals = headline_totals(report)
+    labeled = report.aggregates_labeled
+    breaches: list[str] = []
+
+    warm_speedup = _warm_speedup(totals)
+    if warm_speedup is None:
+        breaches.append("warm speedup unmeasurable (missing batch timings)")
+    elif warm_speedup < WARM_SPEEDUP_FLOOR:
+        breaches.append(f"warm speedup {warm_speedup:.2f}x < floor {WARM_SPEEDUP_FLOOR:.2f}x")
+
+    rss_ratio = _rss_ratio(totals)
+    if rss_ratio is None:
+        breaches.append("peak-RSS ratio unmeasurable (missing RSS)")
+    elif rss_ratio < RSS_RATIO_FLOOR:
+        breaches.append(f"peak-RSS ratio {rss_ratio:.2f}x < floor {RSS_RATIO_FLOOR:.2f}x")
+
+    sceptre_f1 = _mean_of(labeled, "sceptre_token_f1")
+    easyocr_f1 = _mean_of(labeled, "easyocr_token_f1")
+    if sceptre_f1 is None or easyocr_f1 is None:
+        breaches.append("labeled token-F1 unmeasurable (no labeled scores)")
+    elif sceptre_f1 < easyocr_f1 - QUALITY_TOKEN_F1_DELTA:
+        breaches.append(f"sceptre token-F1 {sceptre_f1:.3f} < EasyOCR {easyocr_f1:.3f} - {QUALITY_TOKEN_F1_DELTA:.3f}")
+    return breaches
+
+
+# --------------------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------------------
 
 
-def _batch_summary(
-    batch_results: dict[tuple[str, ...], SceptreBatchResult], overhead: float | None
-) -> dict[str, dict[str, object]]:
-    """Per-language-group warm/batch summary: total seconds, image count, throughput, RSS."""
+def _batch_summary(results: dict[tuple[str, ...], BatchResult]) -> dict[str, dict[str, object]]:
+    """Per-language-group warm/batch summary for the JSON metadata."""
     summary: dict[str, dict[str, object]] = {}
-    for langs, result in batch_results.items():
-        throughput = result.image_count / result.total_seconds if result.total_seconds > 0 else None
+    for langs, result in results.items():
         summary["+".join(langs)] = {
             "total_seconds": result.total_seconds,
             "image_count": result.image_count,
-            "throughput": throughput,
-            "warm_per_image_seconds": sceptre_warm_per_image(result, overhead),
+            "throughput": _throughput(result.image_count, result.total_seconds),
+            "warm_per_image_seconds": result.warm_per_image(),
+            "build_seconds": result.build_seconds,
             "rss_mb": result.rss_mb,
         }
     return summary
 
 
-def _build_readers(easyocr_module: object, entries: list[CorpusEntry]) -> dict[tuple[str, ...], object]:
-    """Construct one EasyOCR reader per unique language set and time each build."""
-    readers: dict[tuple[str, ...], object] = {}
-    build_seconds: dict[str, float] = {}
-    for entry in entries:
-        if entry.image is None:
-            continue
-        key = tuple(entry.easyocr_codes)
-        if key in readers:
-            continue
-        start = perf_counter()
-        # gpu=False keeps the benchmark reproducible across machines without a GPU.
-        readers[key] = easyocr_module.Reader(list(key), gpu=False)  # type: ignore[attr-defined]
-        build_seconds["+".join(key)] = perf_counter() - start
-    _build_readers.build_seconds = build_seconds  # type: ignore[attr-defined]
-    return readers
+def _merge_per_image(results: list[BatchResult]) -> dict[str, ImageDetections]:
+    """Flatten every batch's per-image slices into one path-keyed lookup."""
+    merged: dict[str, ImageDetections] = {}
+    for result in results:
+        merged.update(result.per_image)
+    return merged
 
 
-def run_benchmark(group: str, limit: int | None, output_dir: Path) -> int:
-    """Run the full benchmark and write JSON + Markdown; returns a process exit code."""
+def _load_baseline(path: Path | None) -> dict[str, object] | None:
+    """Load a prior comparison.json for delta rendering, or None if absent/unreadable."""
+    if path is None:
+        return None
+    if not path.exists():
+        print(f"sceptre_rs_tools.benchmark: baseline {path} not found; skipping deltas.", file=sys.stderr)
+        return None
     try:
-        import easyocr
-    except ImportError:
-        print(
-            "sceptre_rs_tools.benchmark: needs the optional 'export' dependency group "
-            "(torch, easyocr). Install it with `uv sync --group export`, then re-run.",
-            file=sys.stderr,
-        )
-        return 1
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as error:
+        print(f"sceptre_rs_tools.benchmark: could not read baseline {path}: {error}", file=sys.stderr)
+        return None
 
+
+def run_benchmark(
+    group: str,
+    limit: int | None,
+    output_dir: Path,
+    repeats: int,
+    threads: int | None,
+    baseline_path: Path | None,
+    assert_gate: bool,
+) -> int:
+    """Run the full benchmark and write JSON + Markdown; returns a process exit code."""
     root = repo_root()
     binary = root / SCEPTRE_BIN
     if not binary.exists():
@@ -971,16 +1147,41 @@ def run_benchmark(group: str, limit: int | None, output_dir: Path) -> int:
     if limit is not None:
         entries = entries[:limit]
 
-    overhead = measure_sceptre_overhead(binary, entries, root)
-    batch_results = run_sceptre_batch_pass(binary, entries, root)
-    readers = _build_readers(easyocr, entries)
+    # Capability probes fail-fast on decode; excluding them from the timed passes keeps them
+    # out of the speed/RSS headline (they are gaps, not wins). They still get a one-shot
+    # detection probe so the report can list them. ~keep
+    measured = [entry for entry in entries if entry.group != "capability"]
+    capability = [entry for entry in entries if entry.group == "capability"]
+
+    overhead = measure_sceptre_overhead(binary, measured, root, threads)
+    sceptre_results = run_sceptre_pass(binary, measured, root, repeats, threads)
+    easyocr_results = run_easyocr_pass(measured, root, repeats, threads)
+    cap_sceptre = run_sceptre_pass(binary, capability, root, 1, threads) if capability else {}
+    cap_easyocr = run_easyocr_pass(capability, root, 1, threads) if capability else {}
+
+    sceptre_by_path = _merge_per_image([*sceptre_results.values(), *cap_sceptre.values()])
+    easyocr_by_path = _merge_per_image([*easyocr_results.values(), *cap_easyocr.values()])
 
     records: list[ImageRecord] = []
     for entry in entries:
-        reader = readers.get(tuple(entry.easyocr_codes))
-        batch = batch_results.get(tuple(entry.sceptre_langs))
-        print(f"sceptre_rs_tools.benchmark: {entry.stem} ({'+'.join(entry.easyocr_codes)})", file=sys.stderr)
-        records.append(benchmark_entry(entry, reader, binary, overhead, root, batch))
+        key = str(entry.image) if entry.image is not None else ""
+        sceptre_batch = sceptre_results.get(tuple(entry.sceptre_langs))
+        easyocr_batch = easyocr_results.get(tuple(entry.easyocr_codes))
+        print(f"sceptre_rs_tools.benchmark: score {entry.stem} ({'+'.join(entry.easyocr_codes)})", file=sys.stderr)
+        records.append(
+            benchmark_entry(
+                entry,
+                binary,
+                root,
+                overhead,
+                repeats,
+                threads,
+                sceptre_by_path.get(key),
+                easyocr_by_path.get(key),
+                sceptre_batch.rss_mb if sceptre_batch else None,
+                easyocr_batch.rss_mb if easyocr_batch else None,
+            )
+        )
 
     labeled = [record for record in records if record.group == "labeled"]
     scored = [record for record in records if record.skipped is None]
@@ -988,12 +1189,15 @@ def run_benchmark(group: str, limit: int | None, output_dir: Path) -> int:
         "platform": platform.platform(),
         "sceptre_binary": str(SCEPTRE_BIN),
         "group": group,
+        "repeats": repeats,
+        "threads": threads if threads is not None else "engine default (all cores)",
         "corpus_total": len(records),
         "labeled_scored": sum(1 for record in labeled if record.skipped is None),
         "breadth_scored": sum(1 for record in scored if record.group == "breadth"),
+        "capability_gaps": sum(1 for record in records if record.unsupported_format),
         "sceptre_overhead_seconds": overhead,
-        "sceptre_batch": _batch_summary(batch_results, overhead),
-        "easyocr_reader_build_seconds": getattr(_build_readers, "build_seconds", {}),
+        "sceptre_batch": _batch_summary(sceptre_results),
+        "easyocr_batch": _batch_summary(easyocr_results),
         "overhead_runs": OVERHEAD_RUNS,
     }
     report = RunReport(
@@ -1003,18 +1207,27 @@ def run_benchmark(group: str, limit: int | None, output_dir: Path) -> int:
         aggregates_all=aggregate(records),
     )
 
+    baseline = _load_baseline(baseline_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "comparison.json").write_text(
         json.dumps(report.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    markdown = render_markdown(report)
-    (output_dir / "comparison.md").write_text(markdown + "\n", encoding="utf-8")
+    (output_dir / "comparison.md").write_text(render_markdown(report, baseline) + "\n", encoding="utf-8")
 
     print(_markdown_table(HEADLINE_HEADER, headline_rows(report)))
     summary = speedup_summary(report)
     if summary:
         print(summary)
     print(f"\nWrote {output_dir / 'comparison.json'} and {output_dir / 'comparison.md'}", file=sys.stderr)
+
+    if assert_gate:
+        breaches = check_thresholds(report)
+        if breaches:
+            print("\nBenchmark gate FAILED:", file=sys.stderr)
+            for breach in breaches:
+                print(f"  - {breach}", file=sys.stderr)
+            return 1
+        print("\nBenchmark gate passed.", file=sys.stderr)
     return 0
 
 
@@ -1023,11 +1236,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark sceptre against upstream EasyOCR.")
     parser.add_argument(
         "--group",
-        choices=["labeled", "all"],
+        choices=["labeled", "breadth", "capability", "all"],
         default="all",
-        help="Corpus subset: 'labeled' (ground-truth images) or 'all' (default).",
+        help="Corpus subset to run (default: all).",
     )
     parser.add_argument("--limit", type=int, default=None, help="Cap the number of images (for smoke runs).")
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=DEFAULT_REPEATS,
+        help=f"Timing repeats per measurement (default: {DEFAULT_REPEATS}).",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="Pin both engines to N threads (default: each engine's native multi-threaded default).",
+    )
+    parser.add_argument(
+        "--baseline", type=Path, default=None, help="Prior comparison.json to render per-image deltas against."
+    )
+    parser.add_argument(
+        "--assert", dest="assert_gate", action="store_true", help="Fail (exit 1) if a regression floor is breached."
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -1040,7 +1271,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main() -> None:
     """CLI entry point."""
     args = parse_args()
-    sys.exit(run_benchmark(group=args.group, limit=args.limit, output_dir=args.output_dir))
+    sys.exit(
+        run_benchmark(
+            group=args.group,
+            limit=args.limit,
+            output_dir=args.output_dir,
+            repeats=args.repeats,
+            threads=args.threads,
+            baseline_path=args.baseline,
+            assert_gate=args.assert_gate,
+        )
+    )
 
 
 if __name__ == "__main__":
