@@ -46,7 +46,7 @@ Publish for real from the tag-triggered release workflow using **trusted publish
   finalized release keeps the source and binary surfaces atomic across a partial failure.
 
 The trusted publisher must be configured on crates.io for **both** `sceptre` and `sceptre-cli`
-(owner `Goldziher`, repo `sceptre`, workflow `release.yaml`) before the first tag; the
+(owner `Goldziher`, repo `sceptre`, workflow `publish.yaml`) before the first tag; the
 workspace version already equals the tag (`meta` verifies this). The local
 `task release:dry-run` remains for packaging validation off the release path.
 
