@@ -61,7 +61,12 @@ models with no network.
 sceptre run receipt.png --lang english --format json
 sceptre run page1.png page2.png page3.png            # batch: models load once
 sceptre run sign.jpg --lang english --lang korean    # multi-language
+sceptre run page.png --lang english --timings        # per-stage load/detect/recognize breakdown
+sceptre run huge-scan.png --canvas-size 1600         # trade some accuracy for lower peak memory
 ```
+
+Decodes PNG, JPEG, BMP, GIF, TIFF, WebP, and NetPBM (all pure-Rust; HEIF/AVIF/JPEG-2000
+are out of scope — see [`adrs/0022`](adrs/0022-input-image-format-coverage.md)).
 
 **Library:**
 
