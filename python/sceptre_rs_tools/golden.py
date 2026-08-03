@@ -24,6 +24,8 @@ IMAGE_LANGUAGES: dict[str, list[str]] = {
     "japanese.jpg": ["ja", "en"],
     "korean.png": ["ko", "en"],
     "cyrillic.png": ["ru"],
+    "telugu.png": ["te"],
+    "kannada.png": ["kn"],
 }
 
 

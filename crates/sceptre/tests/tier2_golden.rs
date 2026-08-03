@@ -166,6 +166,18 @@ fn parity_cyrillic_png() {
     run_dual_golden_parity("cyrillic.png", "cyrillic", Language::Cyrillic);
 }
 
+#[test]
+#[cfg(feature = "ort")]
+fn parity_telugu() {
+    run_dual_golden_parity("telugu.png", "telugu", Language::Telugu);
+}
+
+#[test]
+#[cfg(feature = "ort")]
+fn parity_kannada() {
+    run_dual_golden_parity("kannada.png", "kannada", Language::Kannada);
+}
+
 /// The rotated french sign: sceptre detects and recognizes every reference line at
 /// parity, but splits `[Palais du LOUVRE` into two boxes (`[Palais du` + a rotated
 /// `LOUVRE`) where EasyOCR keeps one. The split is a knife-edge slope classification
