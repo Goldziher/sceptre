@@ -19,6 +19,7 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,6 +32,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       release_complete: ${{ steps.assets.outputs.release_complete }}
+      crates_exists: ${{ steps.published.outputs.crates_exists }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,6 +65,20 @@ jobs:
             exit 1
           fi
           echo "Workspace version matches tag: $target"
+
+      - name: Detect an already-published crates.io version
+        id: published
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          crates_exists=false
+          # sceptre-cli is published last (it depends on sceptre), so its presence at this ~keep
+          # version means the whole set is already on crates.io — the job can be skipped. ~keep
+          if curl -fsS "https://crates.io/api/v1/crates/sceptre-cli/${version}" >/dev/null 2>&1; then
+            crates_exists=true
+          fi
+          echo "crates_exists=$crates_exists" >> "$GITHUB_OUTPUT"
+          echo "crates.io already has sceptre-cli ${version}? $crates_exists"
 
       - name: Detect a COMPLETE existing release (all archives + checksums)
         id: assets
@@ -260,22 +276,42 @@ jobs:
           gh release edit "$tag" --draft=false
           echo "Promoted $tag to a published release"
 
-  publish-dry-run:
-    name: Validate crates.io packaging (dry run)
-    needs: meta
+  publish-crates:
+    name: Publish to crates.io
+    needs: [meta, finalize]
+    # crates.io is irreversible, so publish source only after the platform binaries built
+    # and the GitHub release promoted — keeping the surfaces atomic across a partial failure
+    # (ADR 0023). Skipped when this version is already on crates.io (idempotent re-runs). ~keep
+    if: always() && needs.meta.outputs.crates_exists != 'true' && needs.finalize.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: arduino/setup-task@v2
-        with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      # Dry-run only: validates the library packages cleanly for crates.io WITHOUT publishing.
-      # A real `cargo publish` is intentionally omitted pending the release decision in ADR 0020;
-      # flipping it on is a one-line change (drop --dry-run, add token auth). ~keep
-      - name: cargo publish --dry-run (library)
-        run: task release:dry-run
+      - name: Authenticate to crates.io (trusted publishing, OIDC)
+        uses: rust-lang/crates-io-auth-action@v1
+        id: crates_auth
+      - name: Publish sceptre then sceptre-cli (dependency order)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          # `cargo publish` waits for each crate to appear in the index before returning, so
+          # sceptre-cli resolves its just-published `sceptre = "x"` dependency. The helper is
+          # idempotent: a version already uploaded (a re-run of the same tag) is a skip, not a
+          # failure, so a partial publish heals on re-dispatch. ~keep
+          publish() {
+            pkg="$1"
+            echo "::group::cargo publish -p $pkg"
+            if cargo publish -p "$pkg" 2>publish.err; then
+              cat publish.err; echo "::endgroup::"; return 0
+            fi
+            if grep -Eq "already (exists|uploaded)|is already uploaded" publish.err; then
+              echo "$pkg already published; skipping"; cat publish.err; echo "::endgroup::"; return 0
+            fi
+            cat publish.err >&2; echo "::endgroup::"; return 1
+          }
+          publish sceptre
+          publish sceptre-cli
