@@ -3,6 +3,8 @@
 
 # poly (polylint) local cache
 /.polylint
+# poly local hook-channel preferences (per-machine; not shared)
+poly.local.toml
 
 # downloaded ONNX model cache (default location is ~/.cache/sceptre, but keep
 # any in-tree cache out of git as well)

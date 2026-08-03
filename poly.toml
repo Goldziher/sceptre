@@ -9,6 +9,8 @@ exclude = [
   "**/*.lock",
   "**/Cargo.lock",
   "**/*.onnx",
+  # Brand/asset SVGs are hand-tuned; poly must not reflow them. ~keep
+  "**/*.svg",
   "target/**",
   "dist/**",
   "node_modules/**",
@@ -17,6 +19,10 @@ exclude = [
   "**/tests/data/**",
   # Vendored OCR corpus submodule — third-party content, not ours to lint. ~keep
   "test_documents/**",
+  "website/dist/**",
+  "website/node_modules/**",
+  "website/.astro/**",
+  "**/package-lock.json",
 ]
 
 [lint.markdown.rumdl]
@@ -39,15 +45,53 @@ preserve_patterns = ["SAFETY", "HACK", "WORKAROUND", "NOTE"]
 "**/*.generated.*" = ["comment", "doc-comment"]
 # Python uses `#` comments idiomatically; the uncomment hook targets Rust/TOML. ~keep
 "python/**" = ["comment", "doc-comment"]
+# The docs site is JS/CSS/MDX; comments there are idiomatic, not stray Rust/TOML cruft. ~keep
+"website/**" = ["comment", "doc-comment"]
 
 [hooks]
 stages = ["pre-commit"]
 
 [hooks.builtin]
-lint = { exclude = ["**/*.lock", "**/*.onnx", "target/**", "**/assets/**", "**/tests/data/**", "test_documents/**"] }
-fmt = { exclude = ["**/*.lock", "**/*.onnx", "target/**", "**/assets/**", "**/tests/data/**", "test_documents/**"] }
+lint = { exclude = [
+  "**/*.lock",
+  "**/*.onnx",
+  "**/*.svg",
+  "target/**",
+  "**/assets/**",
+  "**/tests/data/**",
+  "test_documents/**",
+  "website/dist/**",
+  "website/node_modules/**",
+  "website/.astro/**",
+  "**/package-lock.json",
+] }
+fmt = { exclude = [
+  "**/*.lock",
+  "**/*.onnx",
+  "**/*.svg",
+  "target/**",
+  "**/assets/**",
+  "**/tests/data/**",
+  "test_documents/**",
+  "website/dist/**",
+  "website/node_modules/**",
+  "website/.astro/**",
+  "**/package-lock.json",
+] }
 commit = { stages = ["commit-msg"] }
-file_safety = { exclude = ["**/*.lock", "**/*.onnx", "target/**", "**/assets/**", "**/tests/data/**", "test_documents/**"] }
+file_safety = { exclude = [
+  "**/*.lock",
+  "**/*.onnx",
+  "**/*.svg",
+  "target/**",
+  "**/assets/**",
+  "**/tests/data/**",
+  "test_documents/**",
+  "website/dist/**",
+  "website/node_modules/**",
+  "website/.astro/**",
+  "**/package-lock.json",
+] }
 cargo = true
 
 [[hooks.sources]]
