@@ -96,7 +96,6 @@ jobs:
             "sceptre-x86_64-unknown-linux-gnu.tar.gz"
             "sceptre-aarch64-unknown-linux-gnu.tar.gz"
             "sceptre-aarch64-apple-darwin.tar.gz"
-            "sceptre-x86_64-apple-darwin.tar.gz"
             "sceptre-x86_64-pc-windows-msvc.zip"
             "sceptre_${version}_checksums.txt"
           )
@@ -153,8 +152,9 @@ jobs:
             os: ubuntu-24.04-arm
           - triple: aarch64-apple-darwin
             os: macos-latest
-          - triple: x86_64-apple-darwin
-            os: macos-15-intel
+          # No x86_64-apple-darwin: ort's `download-binaries` ships no prebuilt ONNX Runtime
+          # for Intel macOS, so a self-contained build is impossible. Apple Silicon covers
+          # macOS; Intel-mac users build from source. ~keep
           - triple: x86_64-pc-windows-msvc
             os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -186,7 +186,10 @@ jobs:
           dir="$(mktemp -d)"
           if [ "${{ matrix.triple }}" = "x86_64-pc-windows-msvc" ]; then
             archive="sceptre-${{ matrix.triple }}.zip"
-            powershell -Command "Expand-Archive -Path '$archive' -DestinationPath '$dir' -Force"
+            # Expand-Archive is a Windows program, so it reads DestinationPath as a Windows
+            # path; mktemp returns an MSYS path (/tmp/...) that PowerShell resolves elsewhere.
+            # Translate it with cygpath so extraction lands where bash then looks. ~keep
+            powershell -Command "Expand-Archive -Path '$archive' -DestinationPath '$(cygpath -w "$dir")' -Force"
             "$dir/sceptre.exe" --version
           else
             archive="sceptre-${{ matrix.triple }}.tar.gz"
@@ -229,7 +232,6 @@ jobs:
             "sceptre-x86_64-unknown-linux-gnu.tar.gz"
             "sceptre-aarch64-unknown-linux-gnu.tar.gz"
             "sceptre-aarch64-apple-darwin.tar.gz"
-            "sceptre-x86_64-apple-darwin.tar.gz"
             "sceptre-x86_64-pc-windows-msvc.zip"
           )
           gh release view "$tag" --json assets -q '.assets[].name' > /tmp/have.txt || true
@@ -263,7 +265,6 @@ jobs:
             "sceptre-x86_64-unknown-linux-gnu.tar.gz"
             "sceptre-aarch64-unknown-linux-gnu.tar.gz"
             "sceptre-aarch64-apple-darwin.tar.gz"
-            "sceptre-x86_64-apple-darwin.tar.gz"
             "sceptre-x86_64-pc-windows-msvc.zip"
             "sceptre_${version}_checksums.txt"
           )

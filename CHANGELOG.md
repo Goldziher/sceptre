@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured confidence threshold instead of being accepted without affecting output; its default
   is now `0.1`, which improves the measured DocLayNet and TextOCR quality without regressing the
   receipt and scanned-PDF fixtures.
+- The Hugging Face cache root now falls back to `%USERPROFILE%` when `$HOME` is unset, so
+  `sceptre models` works on Windows instead of failing to locate the cache.
 
 ## [0.1.0] - 2026-08-01
 
