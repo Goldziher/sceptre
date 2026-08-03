@@ -16,6 +16,11 @@ tasks:
     cmds:
       - uv run ruff format python
 
+  test:
+    desc: Run the Python unit tests (pure harness logic; no torch/easyocr needed)
+    cmds:
+      - uv run pytest python/tests -q
+
   export:
     # Assumes the Python package import name is sceptre_rs_tools; confirm this once
     # pyproject.toml and python/ land. ~keep
@@ -39,3 +44,10 @@ tasks:
       image corpus; requires the opt-in export/torch group and a built release binary
     cmds:
       - uv run python -m sceptre_rs_tools.benchmark
+
+  benchmark:check:
+    desc: >-
+      Head-to-head benchmark with the regression gate: fails if sceptre's warm speedup,
+      peak-RSS ratio, or labeled token-F1 falls below the floors in benchmark.py
+    cmds:
+      - uv run python -m sceptre_rs_tools.benchmark --assert

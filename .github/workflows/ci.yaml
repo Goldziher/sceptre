@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # Weekly head-to-head benchmark regression gate (Mondays 06:00 UTC). ~keep
+    - cron: "0 6 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -67,6 +70,35 @@ jobs:
         run: uv run ruff check python
       - name: Ruff format check
         run: uv run ruff format --check python
+      - name: Pytest (pure harness logic)
+        # The benchmark unit tests cover metrics, capability detection, report rendering,
+        # and the regression gate without torch/easyocr or the release binary. ~keep
+        run: uv run pytest python/tests -q
+
+  # Opt-in head-to-head regression gate. Heavy (torch + easyocr + models + a release
+  # binary), so it does not run on every push: trigger it manually via workflow_dispatch
+  # or on the weekly schedule. Mirrors the SCEPTRE_REQUIRE_MODELS opt-in discipline. ~keep
+  benchmark:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install torch + easyocr (export group)
+        run: uv sync --group export
+      - name: Build release CLI (bundled ONNX Runtime + on-demand model download)
+        run: cargo build --release -p sceptre-cli --no-default-features --features ort-bundled,download
+      - name: Benchmark and assert regression floors
+        # Models (CRAFT + gen2) fetch on demand into the HF hub cache on first use; EasyOCR
+        # fetches its own weights on Reader build. --assert fails the job on a floor breach. ~keep
+        run: uv run python -m sceptre_rs_tools.benchmark --repeats 2 --assert
 
   deny:
     runs-on: ubuntu-latest
