@@ -11,7 +11,7 @@ It matches EasyOCR's output on every script it supports, runs **~2.8× faster on
 memory** (and a cold one-shot run is ~4.4× faster than EasyOCR warm), and ships as one self-contained
 binary with **no Python runtime**. Use it as a **library**, a **CLI**, or an **MCP server**.
 
-6 scripts · CRAFT + gen2 CRNN · ONNX Runtime **or** pure-Rust · library · CLI · MCP · offline-first
+8 scripts · CRAFT + gen2 CRNN · ONNX Runtime **or** pure-Rust · library · CLI · MCP · offline-first
 
 [![crates.io](https://img.shields.io/crates/v/sceptre?color=f5b301&style=flat-square)](https://crates.io/crates/sceptre)
 [![CI](https://img.shields.io/github/actions/workflow/status/Goldziher/sceptre/ci.yaml?style=flat-square&color=f5b301)](https://github.com/Goldziher/sceptre/actions/workflows/ci.yaml)

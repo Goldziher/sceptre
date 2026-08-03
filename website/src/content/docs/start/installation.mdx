@@ -61,9 +61,8 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 ## Model download and caching
 
-The CRAFT detector and the gen2 recognizers are ONNX artifacts fetched from Hugging Face
-(`itextresearch/itext-EasyOCR-*`) on first use. Each download is verified against a pinned SHA-256
-before use.
+The CRAFT detector and the gen2 recognizers are first-party ONNX artifacts fetched from Hugging Face
+(`sceptre-ocr/*`) on first use. Each download is verified against a pinned SHA-256 before use.
 
 Models are cached in the standard Hugging Face hub cache — `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE`
 → `$HF_HOME/hub` → `~/.cache/huggingface/hub` — so the library, the CLI, and any other Hugging Face

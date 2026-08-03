@@ -21,14 +21,16 @@ language group:
 | Japanese | `japanese_g2` | `japanese` |
 | Korean | `korean_g2` | `korean` |
 | Cyrillic-script | `cyrillic_g2` | `cyrillic` |
+| Telugu | `telugu_g2` | `telugu` |
+| Kannada | `kannada_g2` | `kannada` |
 
-Only the gen2 (`*_g2`) recognizer family is supported — see
+All eight of EasyOCR's gen2 (`*_g2`) recognizers are supported — the complete gen2 family — see
 [ADR 0002](https://github.com/Goldziher/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md).
 
 ## Source, verification, and caching
 
-Every ONNX artifact comes from the
-[`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch) repos on Hugging Face
+Every ONNX artifact is a first-party export — built from EasyOCR's weights by the sceptre export
+pipeline and hosted on the [`sceptre-ocr`](https://huggingface.co/sceptre-ocr) org on Hugging Face
 (Apache-2.0, dynamic-width — no letterbox distortion). Each model's SHA-256 is pinned in the
 registry and verified against the downloaded bytes.
 
@@ -45,7 +47,7 @@ Hugging Face tooling on the machine share one store. The cache root resolves, in
   re-downloaded.
 </Aside>
 
-The registry owner (`itextresearch` by default) can be overridden per config
+The registry owner (`sceptre-ocr` by default) can be overridden per config
 (`ModelConfig::registry_owner`) to point at a mirror without any code change — the owner is
 validated to a safe form before it reaches the cache path.
 

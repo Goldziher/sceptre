@@ -87,7 +87,7 @@ See [Backends](/concepts/backends/) for why this is a single shared budget.
 | `languages` | `[Language::English]` | Recognition languages to load. Repeatable — one recognizer per entry, duplicates preserved. |
 | `backend` | `Backend::Ort` | Inference backend: `Ort`, `Tract`, or `Candle`. |
 | `cache_dir` | `None` | Override for the Hugging Face hub cache root. `None` resolves from `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` → `~/.cache/huggingface/hub`. |
-| `registry_owner` | `None` | Override for the Hugging Face registry owner. `None` uses the upstream `itextresearch` org; only the owner segment of each model repo id changes. |
+| `registry_owner` | `None` | Override for the Hugging Face registry owner. `None` uses the first-party `sceptre-ocr` org; only the owner segment of each model repo id changes. |
 
 ## Feature-flag interaction
 

@@ -19,7 +19,7 @@ entirely, while matching EasyOCR's output on every script it supports.
 
 | | What you get |
 |---|---|
-| **Parity accuracy** | Validated against real EasyOCR output across all six gen2 scripts — text (word/char-F1) and boxes (IoU). |
+| **Parity accuracy** | Validated against real EasyOCR output across all eight gen2 scripts — text (word/char-F1) and boxes (IoU). |
 | **Substantially faster, less memory** | Higher throughput and a fraction of the peak RSS of the Python + torch process, measured like-for-like. See [Benchmarks](/reference/benchmarks/). |
 | **One binary, no Python** | A single executable. Models download once from Hugging Face, cache locally, and run offline thereafter. |
 | **Three surfaces** | The same engine as a Rust library, a CLI (`sceptre`), and an MCP server for agents. |
@@ -39,13 +39,14 @@ entirely, while matching EasyOCR's output on every script it supports.
 sceptre targets EasyOCR's current, actively maintained path:
 
 - **Detection**: the CRAFT model only.
-- **Recognition**: the six **gen2** (`*_g2`) recognizers — English, Latin, Chinese (simplified),
-  Japanese, Korean, Cyrillic.
+- **Recognition**: all eight **gen2** (`*_g2`) recognizers — English, Latin, Chinese (simplified),
+  Japanese, Korean, Cyrillic, Telugu, Kannada.
 - **Decoding**: greedy CTC decoding.
 
 Legacy gen1 recognizer models, DBNet detection, and beam-search decoding are out of scope. Model
-ONNX artifacts come from the [`itextresearch/itext-EasyOCR-*`](https://huggingface.co/itextresearch)
-repos on Hugging Face (Apache-2.0). See [Models & parity](/concepts/models-and-parity/) and
+ONNX artifacts are first-party exports built from EasyOCR's weights and hosted on the
+[`sceptre-ocr`](https://huggingface.co/sceptre-ocr) Hugging Face org (Apache-2.0). See
+[Models & parity](/concepts/models-and-parity/) and
 [ADR 0002](https://github.com/Goldziher/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md)
 for the full rationale.
 
