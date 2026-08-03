@@ -1,24 +1,25 @@
 <!-- markdownlint-disable MD033 MD041 -->
 <div align="center">
 
-<img src="docs/assets/banner.svg" alt="sceptre — text recognition, CRAFT + CRNN, in Rust" width="820">
+<img src="https://raw.githubusercontent.com/Goldziher/sceptre/main/docs/assets/banner.svg" alt="sceptre" width="820">
 
 **EasyOCR's accuracy. Rust's speed and footprint.**
 
 sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
 OCR pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX.
-It matches EasyOCR's output on every script it supports, runs **~2–3× faster on a fraction of the
-memory**, and ships as one self-contained binary with **no Python runtime**. Use it as a **library**,
-a **CLI**, or an **MCP server**.
+It matches EasyOCR's output on every script it supports, runs **~2.8× faster on a fraction of the
+memory** (and a cold one-shot run is ~4.4× faster than EasyOCR warm), and ships as one self-contained
+binary with **no Python runtime**. Use it as a **library**, a **CLI**, or an **MCP server**.
 
 6 scripts · CRAFT + gen2 CRNN · ONNX Runtime **or** pure-Rust · library · CLI · MCP · offline-first
 
 [![crates.io](https://img.shields.io/crates/v/sceptre?color=f5b301&style=flat-square)](https://crates.io/crates/sceptre)
 [![CI](https://img.shields.io/github/actions/workflow/status/Goldziher/sceptre/ci.yaml?style=flat-square&color=f5b301)](https://github.com/Goldziher/sceptre/actions/workflows/ci.yaml)
 [![docs.rs](https://img.shields.io/docsrs/sceptre?style=flat-square&color=f5b301)](https://docs.rs/sceptre)
+[![Documentation](https://img.shields.io/badge/docs-goldziher.github.io%2Fsceptre-f5b301?style=flat-square)](https://goldziher.github.io/sceptre)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-[Install](#install) · [Quickstart](#quickstart) · [Why sceptre](#why-sceptre) · [Benchmarks](#benchmarks) · [How it works](#how-it-works) · [Contributing](CONTRIBUTING.md)
+[Documentation](https://goldziher.github.io/sceptre) · [Install](#install) · [Quickstart](#quickstart) · [Why sceptre](#why-sceptre) · [Benchmarks](#benchmarks) · [How it works](#how-it-works) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -32,8 +33,8 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 | | What you get | Why it matters |
 |---|---|---|
 | **Parity accuracy** | Validated against real EasyOCR output across all six gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic — matching text (word/char-F1) and boxes (IoU). | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
-| **Substantially faster** | ~2–3× higher throughput than EasyOCR on the same corpus — even a cold, one-shot CLI run beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
-| **A fraction of the memory** | Peak RSS around **4× lower** than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
+| **Substantially faster** | ~2.8× higher throughput than EasyOCR warm on the same corpus — and even a cold, one-shot CLI run (~4.4×) beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
+| **A fraction of the memory** | Peak RSS around **3× lower** than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
 | **One binary, no Python** | A single static executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
 | **Three surfaces** | The same engine as a Rust **library**, a **CLI** (`sceptre`), and an **MCP server** for agents. | Drop it into a service, a shell pipeline, or an AI tool without re-plumbing. |
 | **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM / Android — behind one seam. | Portability when you need it, native performance when you don't. |
@@ -91,17 +92,22 @@ sceptre mcp --lang english
 
 ## Benchmarks
 
-Measured against upstream EasyOCR over a mixed corpus (documents, tables, rotated scans, scene text,
-receipts, five scripts), on CPU. Both engines are measured **identically** — each a fresh subprocess
-per language group under `/usr/bin/time`, at its native multi-threaded default — so peak RSS is a
-like-for-like whole-process figure (EasyOCR's legitimately includes the torch runtime). Numbers vary
-with hardware and load; the **ratios** are the point.
+Measured against upstream EasyOCR over a 43-image mixed corpus (documents, tables, rotated scans,
+scene text, receipts, five scripts), on CPU. Both engines are measured **identically** — each a fresh
+subprocess per language group under `/usr/bin/time`, at its native multi-threaded default, loading its
+model/reader once and processing every image — so peak RSS is a like-for-like whole-process figure
+(EasyOCR's legitimately includes the torch runtime). Numbers vary with hardware and load; the
+**ratios** are the point.
 
-| | EasyOCR (warm/batch) | **sceptre** |
-|---|---|---|
-| Throughput | 1× | **~4× faster** |
-| Peak memory | 1× | **~4× lower** |
-| Accuracy (CER / token-F1) | baseline | **at parity or better** |
+| Engine | Throughput (img/s) | Peak RSS | Mean CER | Mean token-F1 |
+|---|---|---|---|---|
+| EasyOCR (warm/batch) | 0.14 | 22.6 GB | 0.554 | 0.348 |
+| **sceptre** (warm/batch) | **0.39** (~2.8×) | **6.6 GB** (~3× lower) | 0.568 | **0.356** |
+| sceptre (cold CLI run) | 0.60 (~4.4×) | 6.6 GB | 0.568 | 0.356 |
+
+CER and token-F1 are at parity (sceptre is marginally ahead on token-F1); the win is speed and memory.
+Even a cold, one-shot CLI run — which pays model load every invocation — is ~4.4× faster than
+EasyOCR's already-warm reader.
 
 `cargo bench` covers the internal hot paths; the head-to-head harness (`task python:benchmark`)
 reproduces the table above and writes `benchmark-results/comparison.{json,md}`. Use

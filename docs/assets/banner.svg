@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" width="1200" height="340" role="img" aria-label="sceptre - EasyOCR reimagined in Rust">
-<title>sceptre - EasyOCR reimagined in Rust</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" width="1200" height="340" role="img" aria-label="sceptre">
+<title>sceptre</title>
 <defs>
 <linearGradient id="warmBeam" x1="0" y1="0" x2="1" y2="1">
 <stop offset="0%" stop-color="#ffe6a3" stop-opacity="0.32"/>
@@ -43,9 +43,8 @@
 <rect x="92" y="211" width="72" height="12"/>
 </g>
 </g>
-<text x="392" y="182" fill="#f5b301" filter="url(#amberLift)" font-family="'Courier New', ui-monospace, monospace" font-size="128" font-weight="700" letter-spacing="2">sceptre</text>
-<rect x="396" y="206" width="710" height="4" fill="url(#amberRule)"/>
-<text x="398" y="252" fill="#f4dfb2" font-family="'Courier New', ui-monospace, monospace" font-size="25" font-weight="700" letter-spacing="6">TEXT RECOGNITION · CRAFT + CRNN · RUST</text>
+<text x="392" y="200" fill="#f5b301" filter="url(#amberLift)" font-family="'Courier New', ui-monospace, monospace" font-size="128" font-weight="700" letter-spacing="2">sceptre</text>
+<rect x="396" y="226" width="710" height="4" fill="url(#amberRule)"/>
 <rect x="34" y="300" width="1132" height="2" fill="#f5b301"/>
 <rect width="1200" height="340" fill="url(#grain)" opacity="0.42"/>
 </g>
