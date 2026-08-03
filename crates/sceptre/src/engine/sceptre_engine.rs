@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 use image::GrayImage;
 use rayon::prelude::*;
 
-use crate::config::{Language, OcrConfig, resolve_thread_budget};
+use crate::config::{Backend, Language, OcrConfig, resolve_thread_budget};
 use crate::detect::{CraftDetector, DetectedRegions, DetectorInput, TextDetector};
 use crate::error::{OcrError, Result};
 use crate::imaging::to_grayscale;
@@ -21,6 +21,8 @@ use super::{OcrEngine, ReadOptions};
 const STAGE_DETECT: &str = "detect";
 /// Progress label emitted before the recognition stage.
 const STAGE_RECOGNIZE: &str = "recognize";
+/// CRAFT spatial-dimension alignment; the fixed tract canvas is rounded up to this.
+const DETECT_ALIGN: u32 = 32;
 
 /// The default engine: CRAFT detection followed by CRNN + CTC recognition.
 ///
@@ -63,12 +65,28 @@ impl SceptreEngine {
 
     /// Read a model file resolved by the provider and load it into the configured
     /// backend, capped to the shared thread budget.
-    fn load(&self, model_path: PathBuf) -> Result<Arc<dyn ModelBackend>> {
+    ///
+    /// `fixed_input` pins the model input to a concrete shape (see [`load_backend`]);
+    /// the CRAFT detector passes its fixed square canvas on the tract backend, and the
+    /// recognizer always passes `None`.
+    fn load(&self, model_path: PathBuf, fixed_input: Option<&[usize]>) -> Result<Arc<dyn ModelBackend>> {
         let bytes = std::fs::read(&model_path)?;
         let budget = resolve_thread_budget(Some(&self.config.concurrency));
-        let backend: Arc<dyn ModelBackend> = Arc::from(load_backend(self.config.model.backend, &bytes, budget)?);
+        let backend: Arc<dyn ModelBackend> =
+            Arc::from(load_backend(self.config.model.backend, &bytes, budget, fixed_input)?);
         tracing::debug!(backend = backend.name(), path = %model_path.display(), "loaded inference backend");
         Ok(backend)
+    }
+
+    /// The fixed square CRAFT canvas for the tract backend, or `None` for dynamic shapes.
+    ///
+    /// tract cannot shape-infer CRAFT under dynamic H/W, so on that backend detection
+    /// pads every image to a fixed `canvas × canvas` square (rounded up to the CRAFT
+    /// alignment) and the model is pinned to the matching shape (see ADR 0027). ort
+    /// handles dynamic shapes and uses `None`.
+    fn detector_fixed_canvas(&self) -> Option<u32> {
+        (self.config.model.backend == Backend::Tract)
+            .then(|| self.config.detection.canvas_size.next_multiple_of(DETECT_ALIGN))
     }
 
     /// The CRAFT detector backend, loaded once and cached for later calls.
@@ -76,7 +94,13 @@ impl SceptreEngine {
         if let Some(backend) = self.detector_cache.get() {
             return Ok(backend.clone());
         }
-        let backend = self.load(self.models.detector()?)?;
+        let fixed_shape = self
+            .detector_fixed_canvas()
+            .map(|canvas| [1, 3, canvas as usize, canvas as usize]);
+        let backend = self.load(
+            self.models.detector()?,
+            fixed_shape.as_ref().map(|shape| shape.as_slice()),
+        )?;
         // A concurrent first call may win the race to `set`; both loaded sessions are ~keep
         // valid, so the loser just uses its own copy and drops the cache write. ~keep
         let _ = self.detector_cache.set(backend.clone());
@@ -90,7 +114,7 @@ impl SceptreEngine {
         }
         let language = self.language()?;
         let recognizer = Arc::new(CrnnRecognizer::new(
-            self.load(self.models.recognizer(language)?)?,
+            self.load(self.models.recognizer(language)?, None)?,
             Charset::for_language(language),
             self.config.recognition.clone(),
         ));
@@ -102,7 +126,11 @@ impl SceptreEngine {
 
     /// Detect candidate text regions with the CRAFT detector.
     fn detect_regions(&self, image: &Image) -> Result<DetectedRegions> {
-        let detector = CraftDetector::new(self.detector_backend()?, self.config.detection.clone());
+        let detector = CraftDetector::new(
+            self.detector_backend()?,
+            self.config.detection.clone(),
+            self.detector_fixed_canvas(),
+        );
         detector.detect(&DetectorInput { image })
     }
 

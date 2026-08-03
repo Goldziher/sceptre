@@ -49,14 +49,26 @@ pub(crate) struct DetectedRegion {
 pub(crate) struct CraftDetector {
     backend: Arc<dyn ModelBackend>,
     config: DetectionConfig,
+    /// Fixed square canvas for the CRAFT input, or `None` for the dynamic-shape path.
+    /// Set to `Some(canvas)` on the `tract` backend, whose loaded model is pinned to
+    /// the matching `[1, 3, canvas, canvas]` shape (see ADR 0027).
+    fixed_canvas: Option<u32>,
 }
 
 impl CraftDetector {
     /// Construct a CRAFT detector from a loaded model backend and detection config.
-    pub(crate) fn new(backend: Arc<dyn ModelBackend>, detection_config: DetectionConfig) -> Self {
+    ///
+    /// `fixed_canvas` pins the detection input to a fixed square canvas (tract); pass
+    /// `None` for the dynamic-shape path (ort).
+    pub(crate) fn new(
+        backend: Arc<dyn ModelBackend>,
+        detection_config: DetectionConfig,
+        fixed_canvas: Option<u32>,
+    ) -> Self {
         Self {
             backend,
             config: detection_config,
+            fixed_canvas,
         }
     }
 }
@@ -65,7 +77,12 @@ impl TextDetector for CraftDetector {
     /// Run the full CRAFT pipeline: resize/normalize, forward pass to heat-maps,
     /// threshold into boxes, scale back to image space, then group into lines.
     fn detect(&self, input: &DetectorInput) -> Result<DetectedRegions> {
-        let prepared = super::preprocess::prepare(input.image, self.config.canvas_size, self.config.mag_ratio)?;
+        let prepared = super::preprocess::prepare_with_canvas(
+            input.image,
+            self.config.canvas_size,
+            self.config.mag_ratio,
+            self.fixed_canvas,
+        )?;
         let heat = super::craft::run_craft(self.backend.as_ref(), prepared.tensor)?;
         let mut boxes = super::postprocess::get_det_boxes(
             &heat.region,
@@ -231,7 +248,7 @@ mod tests {
             min_size: 0,
             ..DetectionConfig::default()
         };
-        let detector = CraftDetector::new(backend, config);
+        let detector = CraftDetector::new(backend, config, None);
 
         let image = solid_image(16, 16);
         let input = DetectorInput { image: &image };
@@ -253,9 +270,9 @@ mod tests {
         let model_path =
             std::env::var("EASYOCR_TEST_CRAFT_ONNX").expect("set EASYOCR_TEST_CRAFT_ONNX to a CRAFT ONNX model path");
         let model_bytes = std::fs::read(&model_path).expect("read the model file");
-        let backend = crate::inference::load_backend(crate::config::Backend::Ort, &model_bytes, 1)
+        let backend = crate::inference::load_backend(crate::config::Backend::Ort, &model_bytes, 1, None)
             .expect("load the CRAFT ONNX model");
-        let detector = CraftDetector::new(Arc::from(backend), DetectionConfig::default());
+        let detector = CraftDetector::new(Arc::from(backend), DetectionConfig::default(), None);
 
         let image = solid_image(64, 64);
         let input = DetectorInput { image: &image };

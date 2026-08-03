@@ -394,7 +394,7 @@ mod tests {
         let model_path = std::env::var("EASYOCR_TEST_RECOG_ONNX")
             .expect("set EASYOCR_TEST_RECOG_ONNX to a recognizer ONNX model path");
         let model_bytes = std::fs::read(&model_path).expect("read the model file");
-        let backend = crate::inference::load_backend(crate::config::Backend::Ort, &model_bytes, 1)
+        let backend = crate::inference::load_backend(crate::config::Backend::Ort, &model_bytes, 1, None)
             .expect("load the recognizer ONNX model");
         let recognizer = CrnnRecognizer::new(
             Arc::from(backend),

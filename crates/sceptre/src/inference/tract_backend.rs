@@ -11,8 +11,8 @@
 use ndarray::{ArrayD, IxDyn};
 use tract_onnx::onnx;
 use tract_onnx::prelude::{
-    Framework, InferenceModelExt, IntoTValue, IntoTensor, Tensor as TractTensor, TractError, TypedModel,
-    TypedRunnableModel, tvec,
+    DatumType, Framework, InferenceFact, InferenceModelExt, IntoTValue, IntoTensor, Tensor as TractTensor, TractError,
+    TypedModel, TypedRunnableModel, tvec,
 };
 
 use super::{ModelBackend, Tensor};
@@ -38,10 +38,22 @@ impl TractBackend {
     /// The bytes are parsed into an inference model, type-and-shape inferred and
     /// optimized, then lowered into a runnable plan. The ONNX bytes are read from
     /// memory, so no temporary file is written.
-    pub(crate) fn load(model_bytes: &[u8]) -> Result<Self> {
-        let inference_model = onnx()
+    ///
+    /// `fixed_input` pins the model's input tensor to a concrete shape before
+    /// optimization. The recognizer graph shape-infers under a dynamic batch and
+    /// width, so it passes `None`. The CRAFT detector's U-net cannot: tract cannot
+    /// unify the `Resize`-upsampled and skip-connection extents when H/W are
+    /// symbolic, so the engine pins CRAFT to a fixed square canvas (see ADR 0027).
+    pub(crate) fn load(model_bytes: &[u8], fixed_input: Option<&[usize]>) -> Result<Self> {
+        let mut inference_model = onnx()
             .model_for_read(&mut &model_bytes[..])
             .map_err(|error| tract_error("parse the ONNX model", error))?;
+        if let Some(shape) = fixed_input {
+            let fact = InferenceFact::dt_shape(DatumType::F32, shape);
+            inference_model = inference_model
+                .with_input_fact(0, fact)
+                .map_err(|error| tract_error("pin the tract input shape", error))?;
+        }
         let typed_model = inference_model
             .into_optimized()
             .map_err(|error| tract_error("optimize the ONNX model", error))?;
@@ -191,25 +203,31 @@ mod tests {
     /// Ignored by default: it needs a model file on disk. Point
     /// `EASYOCR_TEST_ONNX` at an ONNX model and optionally set `EASYOCR_TEST_SHAPE`
     /// to a comma-separated input shape. The default `[1, 3, 64, 64]` suits a CRAFT
-    /// detector; for a gen2 recognizer use `EASYOCR_TEST_SHAPE=1,1,64,200`. This is
-    /// the quickest way to check a fresh first-party export loads under tract's
+    /// detector; for a gen2 recognizer use `EASYOCR_TEST_SHAPE=1,1,64,200`. Set
+    /// `EASYOCR_TEST_FIX_SHAPE` to the same dims to pin the input before optimize
+    /// (required for the CRAFT detector under tract; see ADR 0027). This is the
+    /// quickest way to check a fresh first-party export loads under tract's
     /// `into_optimized()` (see ADR 0025).
     #[test]
     #[ignore = "requires a model file on disk (set EASYOCR_TEST_ONNX)"]
     fn load_and_run_over_real_model() {
+        fn parse_shape(value: &str) -> Vec<usize> {
+            value
+                .split(',')
+                .map(|part| part.trim().parse().expect("usize dim"))
+                .collect()
+        }
         let model_path = std::env::var("EASYOCR_TEST_ONNX").expect("set EASYOCR_TEST_ONNX to an ONNX model path");
         let model_bytes = std::fs::read(&model_path).expect("read the model file");
-        let backend = TractBackend::load(&model_bytes).expect("load the ONNX model");
+        let fixed = std::env::var("EASYOCR_TEST_FIX_SHAPE")
+            .ok()
+            .map(|value| parse_shape(&value));
+        let backend = TractBackend::load(&model_bytes, fixed.as_deref()).expect("load the ONNX model");
         assert_eq!(backend.name(), "tract");
 
         let dims: Vec<usize> = std::env::var("EASYOCR_TEST_SHAPE")
             .ok()
-            .map(|value| {
-                value
-                    .split(',')
-                    .map(|part| part.trim().parse().expect("usize dim"))
-                    .collect()
-            })
+            .map(|value| parse_shape(&value))
             .unwrap_or_else(|| vec![1, 3, 64, 64]);
         let input = ArrayD::from_elem(IxDyn(&dims), 1.0_f32);
         let output = backend.run(input).expect("run inference");

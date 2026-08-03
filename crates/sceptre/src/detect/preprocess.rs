@@ -44,7 +44,28 @@ pub(super) struct Prepared {
 /// zero — `(0 - mean) / std`, not `0.0`. That normalized-zero border feeds CRAFT's
 /// convolutions near the real-pixel edges, so we normalize the full canvas the same
 /// way to preserve parity.
+// Thin dynamic-canvas wrapper retained for the preprocess unit tests and the `bench`
+// preprocess shim; production detection calls `prepare_with_canvas` directly. ~keep
+#[cfg(any(test, feature = "bench"))]
 pub(super) fn prepare(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result<Prepared> {
+    prepare_with_canvas(image, canvas_size, mag_ratio, None)
+}
+
+/// [`prepare`], but with an optional fixed square output canvas.
+///
+/// With `fixed_canvas` `None` the padded output is the aspect-preserving resized image
+/// rounded up to a multiple of 32 (the default, dynamic-shape path). With `Some(canvas)`
+/// the resized image is padded (bottom-right, like the dynamic path) into a fixed
+/// `canvas × canvas` output, so every image yields the same CRAFT input shape — required
+/// by the `tract` backend, which cannot shape-infer CRAFT under dynamic H/W and is instead
+/// pinned to this one shape (see ADR 0027). `canvas` must be a multiple of 32 and at least
+/// as large as the resized image; otherwise this errors.
+pub(super) fn prepare_with_canvas(
+    image: &Image,
+    canvas_size: u32,
+    mag_ratio: f32,
+    fixed_canvas: Option<u32>,
+) -> Result<Prepared> {
     let width = image.width();
     let height = image.height();
     if width == 0 || height == 0 {
@@ -56,8 +77,17 @@ pub(super) fn prepare(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result
         .ok_or_else(|| OcrError::image("failed to build RGB image view from raw RGB8 buffer"))?;
     let resized = resize(&source, target_w, target_h, FilterType::Triangle);
 
-    let padded_h = pad_to_multiple(target_h, ALIGN);
-    let padded_w = pad_to_multiple(target_w, ALIGN);
+    let (padded_h, padded_w) = match fixed_canvas {
+        Some(canvas) => {
+            if target_h > canvas || target_w > canvas {
+                return Err(OcrError::image(format!(
+                    "resized detection input {target_w}x{target_h} exceeds the fixed canvas {canvas}"
+                )));
+            }
+            (canvas, canvas)
+        }
+        None => (pad_to_multiple(target_h, ALIGN), pad_to_multiple(target_w, ALIGN)),
+    };
     let tensor = normalize_into_tensor(&resized, padded_h, padded_w)?;
 
     Ok(Prepared {
