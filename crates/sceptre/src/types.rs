@@ -133,3 +133,39 @@ pub struct OcrResult {
     /// Recognized text lines, in reading order where determinable.
     pub lines: Vec<TextLine>,
 }
+
+#[cfg(test)]
+mod format_tests {
+    use super::Image;
+    use image::{DynamicImage, ImageFormat, RgbImage};
+
+    /// Encode a small RGB image to `format`, then decode it back through
+    /// [`Image::from_bytes`] — proving the format's decoder is compiled in.
+    fn assert_round_trips(format: ImageFormat) {
+        let pixels: Vec<u8> = (0..3 * 2 * 3).map(|value| value as u8).collect();
+        let rgb = RgbImage::from_raw(3, 2, pixels).expect("3x2 rgb buffer");
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(rgb)
+            .write_to(&mut encoded, format)
+            .unwrap_or_else(|error| panic!("encoding {format:?}: {error}"));
+
+        let decoded = Image::from_bytes(&encoded.into_inner())
+            .unwrap_or_else(|error| panic!("decoding {format:?} back through Image::from_bytes: {error}"));
+        assert_eq!(
+            (decoded.width(), decoded.height()),
+            (3, 2),
+            "{format:?} decodes to the original size"
+        );
+    }
+
+    #[test]
+    fn should_decode_newly_enabled_raster_formats() {
+        // The pure-Rust decoders enabled alongside png/jpeg; heif/avif/jp2 stay out (C libs).
+        // WebP is decode-only in `image` 0.25 (no encoder to round-trip), so it is verified
+        // live instead; here we round-trip every format that also encodes. ~keep
+        assert_round_trips(ImageFormat::Bmp);
+        assert_round_trips(ImageFormat::Tiff);
+        assert_round_trips(ImageFormat::Gif);
+        assert_round_trips(ImageFormat::Pnm);
+    }
+}

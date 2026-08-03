@@ -33,7 +33,15 @@ clap_complete = "4.6"
 criterion = { version = "0.8", features = ["html_reports"] }
 
 hf-hub = { version = "1.0", default-features = false, features = ["blocking", "rustls-tls"] }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "gif",
+    "tiff",
+    "webp",
+    "pnm",
+] }
 # CRAFT postprocess geometry: connected components, morphological dilation, min-area-rect (ADR 0013). ~keep
 imageproc = { version = "0.27", default-features = false }
 ndarray = "0.17"

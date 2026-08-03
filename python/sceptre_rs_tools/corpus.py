@@ -132,6 +132,8 @@ _BREADTH: tuple[ManifestRecord, ...] = (
     ManifestRecord("layout_parser_ocr", "documents", ("english",), "breadth"),
     ManifestRecord("test_hello_world", "documents", ("english",), "breadth"),
     ManifestRecord("sample", "documents", ("english",), "breadth"),
+    # BMP is now decodable (pure-Rust image feature), so this is a scored breadth entry.
+    ManifestRecord("sample_text", "documents", ("english",), "breadth", ".bmp"),
     ManifestRecord("simple_table", "documents", ("english",), "breadth"),
     ManifestRecord("english", "examples", ("english",), "breadth"),
     ManifestRecord("french", "examples", ("latin",), "breadth"),
@@ -142,8 +144,9 @@ _BREADTH: tuple[ManifestRecord, ...] = (
 
 # Capability probes: formats sceptre cannot decode yet (see Cargo.toml image features).
 # EasyOCR decodes them; the benchmark reports each as an unsupported-format gap.
+# Remaining gaps need C libraries (libheif / dav1d / openjpeg), which would break the
+# pure-Rust WASM/Android build, so they stay out of scope (see ADR 0022).
 _CAPABILITY: tuple[ManifestRecord, ...] = (
-    ManifestRecord("sample_text", "documents", ("english",), "capability", ".bmp"),
     ManifestRecord("alpha", "documents", ("english",), "capability", ".heif"),
     ManifestRecord("test", "documents", ("english",), "capability", ".avif"),
     ManifestRecord("Hadley_Crater", "documents", ("english",), "capability", ".jp2"),
