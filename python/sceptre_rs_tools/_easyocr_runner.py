@@ -9,11 +9,11 @@ the sceptre batch process loads its model once — this is the honest warm/batch
 It emits one JSON object on stdout::
 
     {
-      "reader_build_seconds": 1.83,
-      "images": [
-        {"image": "path", "seconds": 0.42, "detections": [{"text": "...", "quad": [[x, y], ...]}]},
-        {"image": "path", "error": "..."}
-      ]
+        "reader_build_seconds": 1.83,
+        "images": [
+            {"image": "path", "seconds": 0.42, "detections": [{"text": "...", "quad": [[x, y], ...]}]},
+            {"image": "path", "error": "..."},
+        ],
     }
 
 Timing is per-``readtext`` (warm inner time, model already loaded). Threads default to
