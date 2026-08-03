@@ -63,6 +63,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The corpus resolution tests read capability-probe images from the
+          # test_documents submodule; without it they resolve to None and fail. ~keep
+          submodules: recursive
+          lfs: true
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
