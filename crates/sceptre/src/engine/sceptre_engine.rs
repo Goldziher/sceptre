@@ -1,9 +1,10 @@
 //! The default [`OcrEngine`] implementation: [`SceptreEngine`].
 
-use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use image::GrayImage;
+use once_cell::sync::OnceCell;
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 use crate::config::{Backend, Language, OcrConfig, resolve_thread_budget};
@@ -14,7 +15,7 @@ use crate::inference::{ModelBackend, load_backend};
 use crate::recognize::{Charset, CrnnRecognizer, RecognizedText, RegionCrop, TextRecognizer, crop_region};
 use crate::types::{Image, OcrResult, Point, QUAD_CORNERS, Quad, TextLine};
 
-use super::seams::{ModelProvider, ProgressSink};
+use super::seams::{ModelArtifact, ModelProvider, ProgressSink};
 use super::{OcrEngine, ReadOptions};
 
 /// Progress label emitted before the detection stage.
@@ -33,10 +34,10 @@ const DETECT_ALIGN: u32 = 32;
 /// [`Reader`](crate::Reader) initializes each ONNX session and charset once.
 pub(crate) struct SceptreEngine {
     config: OcrConfig,
-    models: Arc<dyn ModelProvider>,
+    models: Mutex<Option<Arc<dyn ModelProvider>>>,
     progress: Arc<dyn ProgressSink>,
-    detector_cache: OnceLock<Arc<dyn ModelBackend>>,
-    recognizer_cache: OnceLock<Arc<CrnnRecognizer>>,
+    detector_cache: OnceCell<Arc<dyn ModelBackend>>,
+    recognizer_cache: OnceCell<Arc<CrnnRecognizer>>,
 }
 
 impl SceptreEngine {
@@ -44,10 +45,10 @@ impl SceptreEngine {
     pub(crate) fn new(config: OcrConfig, models: Arc<dyn ModelProvider>, progress: Arc<dyn ProgressSink>) -> Self {
         Self {
             config,
-            models,
+            models: Mutex::new(Some(models)),
             progress,
-            detector_cache: OnceLock::new(),
-            recognizer_cache: OnceLock::new(),
+            detector_cache: OnceCell::new(),
+            recognizer_cache: OnceCell::new(),
         }
     }
 
@@ -69,13 +70,42 @@ impl SceptreEngine {
     /// `fixed_input` pins the model input to a concrete shape (see [`load_backend`]);
     /// the CRAFT detector passes its fixed square canvas on the tract backend, and the
     /// recognizer always passes `None`.
-    fn load(&self, model_path: PathBuf, fixed_input: Option<&[usize]>) -> Result<Arc<dyn ModelBackend>> {
-        let bytes = std::fs::read(&model_path)?;
+    fn load(&self, artifact: ModelArtifact, fixed_input: Option<&[usize]>) -> Result<Arc<dyn ModelBackend>> {
+        let (bytes, source) = match artifact {
+            ModelArtifact::Path(path) => {
+                let bytes = std::fs::read(&path).map_err(|source| OcrError::Model {
+                    message: format!("could not read model artifact `{}`", path.display()),
+                    source: Some(Box::new(source)),
+                })?;
+                (bytes.into(), path.display().to_string())
+            }
+            ModelArtifact::Bytes(bytes) => (bytes, "memory".to_string()),
+        };
         let budget = resolve_thread_budget(Some(&self.config.concurrency));
         let backend: Arc<dyn ModelBackend> =
             Arc::from(load_backend(self.config.model.backend, &bytes, budget, fixed_input)?);
-        tracing::debug!(backend = backend.name(), path = %model_path.display(), "loaded inference backend");
+        tracing::debug!(backend = backend.name(), %source, "loaded inference backend");
         Ok(backend)
+    }
+
+    fn model_provider(&self) -> Result<Arc<dyn ModelProvider>> {
+        self.models
+            .lock()
+            .map_err(|_| OcrError::model("model provider lock was poisoned"))?
+            .clone()
+            .ok_or_else(|| OcrError::model("model provider was released before initialization completed"))
+    }
+
+    fn release_provider_if_warmed(&self) -> Result<()> {
+        if self.detector_cache.get().is_none() || self.recognizer_cache.get().is_none() {
+            return Ok(());
+        }
+        let mut models = self
+            .models
+            .lock()
+            .map_err(|_| OcrError::model("model provider lock was poisoned while releasing initialized models"))?;
+        *models = None;
+        Ok(())
     }
 
     /// The fixed square CRAFT canvas for the tract backend, or `None` for dynamic shapes.
@@ -91,37 +121,31 @@ impl SceptreEngine {
 
     /// The CRAFT detector backend, loaded once and cached for later calls.
     fn detector_backend(&self) -> Result<Arc<dyn ModelBackend>> {
-        if let Some(backend) = self.detector_cache.get() {
-            return Ok(backend.clone());
-        }
-        let fixed_shape = self
-            .detector_fixed_canvas()
-            .map(|canvas| [1, 3, canvas as usize, canvas as usize]);
-        let backend = self.load(
-            self.models.detector()?,
-            fixed_shape.as_ref().map(|shape| shape.as_slice()),
-        )?;
-        // A concurrent first call may win the race to `set`; both loaded sessions are ~keep
-        // valid, so the loser just uses its own copy and drops the cache write. ~keep
-        let _ = self.detector_cache.set(backend.clone());
-        Ok(backend)
+        let backend = self.detector_cache.get_or_try_init(|| {
+            let fixed_shape = self
+                .detector_fixed_canvas()
+                .map(|canvas| [1, 3, canvas as usize, canvas as usize]);
+            self.load(
+                self.model_provider()?.detector()?,
+                fixed_shape.as_ref().map(|shape| shape.as_slice()),
+            )
+        })?;
+        self.release_provider_if_warmed()?;
+        Ok(backend.clone())
     }
 
     /// The recognizer for the configured language set, loaded once and cached for later calls.
     fn recognizer(&self) -> Result<Arc<CrnnRecognizer>> {
-        if let Some(recognizer) = self.recognizer_cache.get() {
-            return Ok(recognizer.clone());
-        }
-        let language = self.language()?;
-        let recognizer = Arc::new(CrnnRecognizer::new(
-            self.load(self.models.recognizer(language)?, None)?,
-            Charset::for_language(language),
-            self.config.recognition.clone(),
-        ));
-        // A concurrent first call may build a second valid recognizer; the winner is ~keep
-        // cached and the loser finishes its current call with its own instance. ~keep
-        let _ = self.recognizer_cache.set(recognizer.clone());
-        Ok(recognizer)
+        let recognizer = self.recognizer_cache.get_or_try_init(|| {
+            let language = self.language()?;
+            Ok::<Arc<CrnnRecognizer>, OcrError>(Arc::new(CrnnRecognizer::new(
+                self.load(self.model_provider()?.recognizer(language)?, None)?,
+                Charset::for_language(language),
+                self.config.recognition.clone(),
+            )))
+        })?;
+        self.release_provider_if_warmed()?;
+        Ok(recognizer.clone())
     }
 
     /// Detect candidate text regions with the CRAFT detector.
@@ -141,6 +165,12 @@ impl SceptreEngine {
 }
 
 impl OcrEngine for SceptreEngine {
+    fn warm_up(&self) -> Result<()> {
+        self.detector_backend()?;
+        self.recognizer()?;
+        Ok(())
+    }
+
     fn recognize(&self, image: &Image, _options: &ReadOptions) -> Result<OcrResult> {
         self.config.recognition.validate()?;
         self.progress.on_stage(STAGE_DETECT);
@@ -227,13 +257,15 @@ fn resolve_recognition_language(languages: &[Language]) -> Result<Language> {
 /// (a zero-area box after clamping, or a degenerate quad) so one bad region never
 /// aborts the whole run. Dropped regions are logged rather than silently discarded.
 ///
-/// Regions crop in parallel over the shared Rayon pool; `crop_region` is pure CPU and
-/// `GrayImage` is `Sync`, so this is safe. `filter_map(...).collect()` preserves the
-/// input order, keeping the output bit-identical to a sequential crop.
+/// Native targets crop regions on the reader's Rayon pool; browser WASM uses the
+/// sequential iterator. Both preserve input order and produce identical crops.
 fn crop_regions(grey: &GrayImage, regions: &DetectedRegions) -> Vec<RegionCrop> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let regions = regions.regions.par_iter();
+    #[cfg(target_arch = "wasm32")]
+    let regions = regions.regions.iter();
+
     regions
-        .regions
-        .par_iter()
         .filter_map(|region| match crop_region(grey, &region.corners, region.axis_aligned) {
             Ok(crop) => Some(crop),
             Err(error) => {

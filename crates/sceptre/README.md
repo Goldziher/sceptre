@@ -11,6 +11,9 @@ backend (`tract`) behind one seam.
 Models download from Hugging Face on first use, cache locally, and are sha256-verified on download —
 every run after that reads the cache with no network.
 
+Embedding hosts can instead supply registry-described ONNX bytes through `VerifiedModelProvider`;
+`build_warmed` verifies and initializes the detector and selected recognizer once.
+
 ## Usage
 
 ```rust

@@ -11,6 +11,13 @@ use super::ReadOptions;
 /// return an [`OcrResult`]. Custom engines can be injected through
 /// [`ReaderBuilder::engine`](crate::ReaderBuilder::engine).
 pub trait OcrEngine: Send + Sync {
+    /// Eagerly initialize reusable model/backend state.
+    ///
+    /// Custom engines that need no initialization may keep this default no-op.
+    fn warm_up(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Recognize all text in `image`, honoring `options`.
     fn recognize(&self, image: &Image, options: &ReadOptions) -> Result<OcrResult>;
 

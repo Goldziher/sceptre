@@ -15,9 +15,7 @@ mod sceptre_engine;
 use std::path::Path;
 use std::sync::Arc;
 
-use rayon::ThreadPool;
-
-use crate::config::{OcrConfig, build_thread_pool, resolve_thread_budget};
+use crate::config::{OcrConfig, WorkerPool, build_thread_pool, resolve_thread_budget};
 use crate::error::Result;
 use crate::types::{Image, OcrResult, Quad, TextLine};
 
@@ -52,7 +50,7 @@ pub struct Reader {
 struct Inner {
     config: OcrConfig,
     engine: Arc<dyn OcrEngine>,
-    thread_pool: ThreadPool,
+    thread_pool: WorkerPool,
 }
 
 impl Reader {
@@ -64,6 +62,11 @@ impl Reader {
     /// The effective configuration.
     pub fn config(&self) -> &OcrConfig {
         &self.inner.config
+    }
+
+    /// Eagerly initialize and cache reusable model/backend state.
+    pub fn warm_up(&self) -> Result<()> {
+        self.inner.thread_pool.install(|| self.inner.engine.warm_up())
     }
 
     /// Decode an image at `image` and run the engine over it.
@@ -135,6 +138,7 @@ impl ReaderBuilder {
     /// provider and progress sink.
     pub fn build(self) -> Result<Reader> {
         self.config.recognition.validate()?;
+        self.config.model.validate()?;
         let budget = resolve_thread_budget(Some(&self.config.concurrency));
         let thread_pool = build_thread_pool(budget)?;
 
@@ -158,9 +162,16 @@ impl ReaderBuilder {
             }),
         })
     }
+
+    /// Finalize the reader and eagerly initialize reusable model/backend state.
+    pub fn build_warmed(self) -> Result<Reader> {
+        let reader = self.build()?;
+        reader.warm_up()?;
+        Ok(reader)
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 

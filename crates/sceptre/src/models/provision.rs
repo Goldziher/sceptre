@@ -32,6 +32,44 @@ pub struct ModelInfo {
     pub path: Option<PathBuf>,
 }
 
+/// Filesystem-free registry metadata for one model artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelDescriptor {
+    /// Logical model name, such as `craft_mlt_25k`.
+    pub name: String,
+    /// Effective Hugging Face repository id.
+    pub repo: String,
+    /// Registry revision containing the artifact.
+    pub revision: String,
+    /// File name within the repository.
+    pub file: String,
+    /// Expected lowercase SHA-256 digest.
+    pub sha256: String,
+    /// Detector or language-specific recognizer role.
+    pub role: ModelRole,
+}
+
+/// Describe the detector and each distinct configured recognizer without filesystem
+/// or network access.
+pub fn model_descriptors(config: &OcrConfig) -> Result<Vec<ModelDescriptor>> {
+    let owner = config.model.registry_owner.as_deref();
+    let mut descriptors = Vec::with_capacity(config.model.languages.len() + 1);
+    descriptors.push(descriptor_for(&craft_entry(), ModelRole::Detector, owner)?);
+    let mut described_languages = Vec::new();
+    for &language in &config.model.languages {
+        if described_languages.contains(&language) {
+            continue;
+        }
+        described_languages.push(language);
+        descriptors.push(descriptor_for(
+            &recognizer_entry(language),
+            ModelRole::Recognizer(language),
+            owner,
+        )?);
+    }
+    Ok(descriptors)
+}
+
 /// The models required by `config`: the CRAFT detector plus one recognizer per
 /// configured language (in order, duplicates preserved), each annotated with cache
 /// status. Pure filesystem inspection — no network.
@@ -65,6 +103,17 @@ pub fn download_models(config: &OcrConfig) -> Result<Vec<ModelInfo>> {
 /// Resolve the Hugging Face hub cache root: the config override or the environment default.
 fn resolve_cache_dir(config: &OcrConfig) -> Result<PathBuf> {
     hf_cache_root(config.model.cache_dir.as_deref())
+}
+
+fn descriptor_for(entry: &ModelEntry, role: ModelRole, owner: Option<&str>) -> Result<ModelDescriptor> {
+    Ok(ModelDescriptor {
+        name: entry.name.to_string(),
+        repo: effective_repo(entry, owner)?,
+        revision: entry.revision.to_string(),
+        file: entry.file.to_string(),
+        sha256: entry.sha256.to_string(),
+        role,
+    })
 }
 
 /// Inspect the cache for `entry` without touching the network.
@@ -167,5 +216,17 @@ mod tests {
         let recognizer_roles: Vec<ModelRole> = manifest[1..].iter().map(|info| info.role.clone()).collect();
         let expected: Vec<ModelRole> = languages.into_iter().map(ModelRole::Recognizer).collect();
         assert_eq!(recognizer_roles, expected);
+    }
+
+    #[test]
+    fn model_descriptors_deduplicate_repeated_languages() {
+        let mut config = OcrConfig::default();
+        config.model.languages = vec![Language::English, Language::English, Language::Telugu];
+
+        let descriptors = model_descriptors(&config).expect("registry metadata should resolve");
+
+        assert_eq!(descriptors.len(), 3);
+        assert_eq!(descriptors[1].role, ModelRole::Recognizer(Language::English));
+        assert_eq!(descriptors[2].role, ModelRole::Recognizer(Language::Telugu));
     }
 }

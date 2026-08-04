@@ -26,3 +26,4 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0005](0005-mcp-as-feature-module-and-subcommand.md) | MCP as a feature-gated module + subcommand | Accepted |
 | [0006](0006-ai-rulez-for-agent-config.md) | Generate agent config with ai-rulez | Accepted |
 | [0007](0007-tooling-scaffolding-from-basemind.md) | Tooling scaffolding adapted from basemind | Accepted |
+| [0028](0028-host-supplied-model-artifacts-and-wasm-execution.md) | Host-supplied model artifacts and sequential browser-WASM execution | Accepted |

@@ -6,5 +6,6 @@
 //! prefetches (`download_models`) the models a configuration requires.
 
 pub(crate) mod download;
+pub(crate) mod integrity;
 pub(crate) mod provision;
 pub(crate) mod registry;

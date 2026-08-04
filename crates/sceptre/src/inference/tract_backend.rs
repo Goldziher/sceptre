@@ -5,14 +5,16 @@
 //! referenced only from this module; the rest of the crate speaks in
 //! [`Tensor`]s. See `adrs/` for the backend selection rationale.
 //!
-//! tract pins its own (older) `ndarray`, so tensors cross this seam as a raw
-//! shape plus a row-major `f32` buffer rather than as a shared `ArrayBase`.
+//! Tensors cross this backend boundary as a raw shape plus a row-major `f32`
+//! buffer, keeping tract's tensor representation private to this module.
+
+use std::sync::Arc;
 
 use ndarray::{ArrayD, IxDyn};
 use tract_onnx::onnx;
 use tract_onnx::prelude::{
-    DatumType, Framework, InferenceFact, InferenceModelExt, IntoTValue, IntoTensor, Tensor as TractTensor, TractError,
-    TypedModel, TypedRunnableModel, tvec,
+    DatumType, Framework, InferenceFact, InferenceModelExt, IntoRunnable, IntoTValue, IntoTensor,
+    Tensor as TractTensor, TractError, TypedRunnableModel, tvec,
 };
 
 use super::{ModelBackend, Tensor};
@@ -27,9 +29,10 @@ use crate::error::{OcrError, Result};
 /// This backend does not consume the [`ConcurrencyConfig`](crate::config::ConcurrencyConfig)
 /// thread budget: tract's matmul kernels run single-threaded here (the `tract-linalg`
 /// multithreading feature is not enabled), so `load` takes no thread count. The shared
-/// Rayon pool remains the only source of parallelism on the tract path.
+/// native Rayon pool remains the only source of parallelism on the tract path;
+/// browser WASM executes sequentially.
 pub(crate) struct TractBackend {
-    model: TypedRunnableModel<TypedModel>,
+    model: Arc<TypedRunnableModel>,
 }
 
 impl TractBackend {
@@ -84,9 +87,12 @@ impl ModelBackend for TractBackend {
             .ok_or_else(|| OcrError::inference("tract returned no output tensor"))?;
         let output = output.into_tensor();
         let out_data = output
-            .as_slice::<f32>()
-            .map_err(|error| tract_error("read the tract output tensor as f32", error))?;
-        array_from_parts(output.shape(), out_data.to_vec())
+            .to_plain_array_view::<f32>()
+            .map_err(|error| tract_error("read the tract output tensor as f32", error))?
+            .iter()
+            .copied()
+            .collect();
+        array_from_parts(output.shape(), out_data)
     }
 }
 
@@ -191,8 +197,13 @@ mod tests {
 
         let (shape, data) = input_buffer(input);
         let tensor = TractTensor::from_shape(&shape, &data).expect("build the tract tensor");
-        let restored =
-            array_from_parts(tensor.shape(), tensor.as_slice::<f32>().expect("read as f32").to_vec()).expect("rebuild");
+        let restored_data = tensor
+            .to_plain_array_view::<f32>()
+            .expect("read as f32")
+            .iter()
+            .copied()
+            .collect();
+        let restored = array_from_parts(tensor.shape(), restored_data).expect("rebuild");
 
         assert_eq!(restored.shape(), &[2, 3, 2]);
         assert_eq!(restored.iter().copied().collect::<Vec<_>>(), expected);

@@ -1,13 +1,36 @@
 //! Concurrency / thread-budget configuration.
 //!
-//! Each reader resolves one `max_threads` budget for its private Rayon pool and
-//! the inference backend's intra-op threads, preventing nested parallelism from
-//! oversubscribing the CPU within that reader.
+//! Native readers resolve one `max_threads` budget for their private Rayon pool
+//! and the inference backend's intra-op threads, preventing nested parallelism.
+//! Browser-WASM readers use the same API with sequential execution.
 
-use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{OcrError, Result};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::OcrError;
+use crate::error::Result;
+
+/// Per-reader execution context: a private Rayon pool on native targets and a
+/// sequential adapter on browser WASM.
+pub(crate) struct WorkerPool {
+    #[cfg(not(target_arch = "wasm32"))]
+    inner: rayon::ThreadPool,
+}
+
+impl WorkerPool {
+    pub(crate) fn install<T: Send>(&self, operation: impl FnOnce() -> T + Send) -> T {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.inner.install(operation);
+
+        #[cfg(target_arch = "wasm32")]
+        operation()
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    fn current_num_threads(&self) -> usize {
+        self.inner.current_num_threads()
+    }
+}
 
 /// Caps the worker and inference thread pools within each reader.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -22,18 +45,32 @@ pub(crate) fn resolve_thread_budget(config: Option<&ConcurrencyConfig>) -> usize
     if let Some(n) = config.and_then(|c| c.max_threads) {
         return n.max(1);
     }
-    num_cpus::get().min(8)
+    #[cfg(not(target_arch = "wasm32"))]
+    return num_cpus::get().min(8);
+
+    #[cfg(target_arch = "wasm32")]
+    1
 }
 
-/// Build an isolated Rayon pool for one reader.
-pub(crate) fn build_thread_pool(budget: usize) -> Result<ThreadPool> {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(budget)
-        .build()
-        .map_err(|source| OcrError::Config {
-            message: format!("failed to initialize the OCR worker pool with {budget} threads"),
-            source: Some(Box::new(source)),
-        })
+/// Build the target-appropriate execution context for one reader.
+pub(crate) fn build_thread_pool(budget: usize) -> Result<WorkerPool> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let inner = rayon::ThreadPoolBuilder::new()
+            .num_threads(budget)
+            .build()
+            .map_err(|source| OcrError::Config {
+                message: format!("failed to initialize the OCR worker pool with {budget} threads"),
+                source: Some(Box::new(source)),
+            })?;
+        Ok(WorkerPool { inner })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = budget;
+        Ok(WorkerPool {})
+    }
 }
 
 #[cfg(test)]
@@ -59,6 +96,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn private_pool_uses_resolved_budget() {
         let pool = build_thread_pool(2).expect("the private pool should build");
         assert_eq!(pool.current_num_threads(), 2);

@@ -84,6 +84,13 @@ for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.li
 The library ships `default = []`, so enable a backend and model download:
 `sceptre = { version = "0.1", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
 
+WASM and mobile hosts can avoid filesystem and network assumptions by calling `model_descriptors`,
+fetching the selected artifacts, constructing a `VerifiedModelProvider`, and passing it to
+`Reader::builder().model_provider(...).build_warmed()`.
+
+Android and iOS hosts that package ONNX assets as real files may instead set both
+`model.detector_path` and `model.recognizer_path`; the default provider then bypasses Hugging Face.
+
 **MCP server** — expose a `readtext` tool to an agent:
 
 ```sh

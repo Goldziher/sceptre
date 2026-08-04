@@ -59,7 +59,7 @@ toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # The tract-onnx frontend is CPU-only and WASM-safe; the top-level tract facade bundles GPU backends. ~keep
-tract-onnx = { version = "0.22", default-features = false }
+tract-onnx = { version = "0.23.4", default-features = false }
 
 [profile.release]
 lto = "thin"

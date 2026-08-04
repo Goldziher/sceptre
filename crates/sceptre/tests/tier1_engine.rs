@@ -11,6 +11,8 @@ use sceptre::{
     FallbackEngine, Image, OcrConfig, OcrEngine, OcrError, OcrResult, Point, Quad, ReadOptions, Reader, TextLine,
 };
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 /// Absolute path to a committed fixture under `tests/data/images/`.
 fn image_path(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -51,6 +53,37 @@ enum FakeEngine {
     Empty,
     Lines(Vec<TextLine>),
     Error(String),
+}
+
+struct WarmingEngine {
+    warm_count: Arc<AtomicUsize>,
+}
+
+impl OcrEngine for WarmingEngine {
+    fn recognize(&self, _image: &Image, _options: &ReadOptions) -> sceptre::Result<OcrResult> {
+        Ok(OcrResult::default())
+    }
+
+    fn warm_up(&self) -> sceptre::Result<()> {
+        self.warm_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[test]
+fn should_eagerly_warm_an_injected_engine_when_requested() {
+    let warm_count = Arc::new(AtomicUsize::new(0));
+
+    let reader = Reader::builder()
+        .engine(Arc::new(WarmingEngine {
+            warm_count: warm_count.clone(),
+        }))
+        .build_warmed()
+        .expect("warm initialization succeeds");
+
+    assert_eq!(warm_count.load(Ordering::SeqCst), 1);
+    reader.warm_up().expect("explicit warm up succeeds");
+    assert_eq!(warm_count.load(Ordering::SeqCst), 2);
 }
 
 impl FakeEngine {

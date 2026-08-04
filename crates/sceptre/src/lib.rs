@@ -43,10 +43,12 @@ pub mod mcp;
 pub use config::{
     Backend, ConcurrencyConfig, Decoder, DetectionConfig, Language, ModelConfig, OcrConfig, RecognitionConfig,
 };
-pub use engine::seams::{ModelProvider, ProgressSink};
+pub use engine::seams::{ModelArtifact, ModelProvider, ProgressSink, VerifiedModelProvider};
 pub use engine::{FallbackEngine, OcrEngine, ReadOptions, Reader, ReaderBuilder};
 pub use error::{OcrError, Result};
-pub use models::provision::{ModelInfo, ModelRole, download_models, model_manifest};
+pub use models::provision::{
+    ModelDescriptor, ModelInfo, ModelRole, download_models, model_descriptors, model_manifest,
+};
 pub use types::{BBox, Image, OcrResult, Point, Quad, TextLine};
 
 #[cfg(test)]

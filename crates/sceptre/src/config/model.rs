@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{OcrError, Result};
+
 /// A supported recognition language group (gen2 models only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -48,6 +50,15 @@ pub struct ModelConfig {
     pub languages: Vec<Language>,
     /// Inference backend.
     pub backend: Backend,
+    /// Explicit local CRAFT detector ONNX path for host-managed model assets.
+    ///
+    /// Must be configured together with [`Self::recognizer_path`]. When both are
+    /// present, the default provider bypasses Hugging Face cache resolution.
+    pub detector_path: Option<PathBuf>,
+    /// Explicit local recognizer ONNX path for the configured language group.
+    ///
+    /// Must be configured together with [`Self::detector_path`].
+    pub recognizer_path: Option<PathBuf>,
     /// Override for the Hugging Face hub cache ROOT that stores model artifacts.
     ///
     /// `None` (the default) resolves the root from the environment in Hugging
@@ -71,8 +82,41 @@ impl Default for ModelConfig {
         Self {
             languages: vec![Language::English],
             backend: Backend::default(),
+            detector_path: None,
+            recognizer_path: None,
             cache_dir: None,
             registry_owner: None,
         }
+    }
+}
+
+impl ModelConfig {
+    pub(crate) fn validate(&self) -> Result<()> {
+        match (&self.detector_path, &self.recognizer_path) {
+            (Some(_), None) => Err(OcrError::config(
+                "model.recognizer_path is required when model.detector_path is configured",
+            )),
+            (None, Some(_)) => Err(OcrError::config(
+                "model.detector_path is required when model.recognizer_path is configured",
+            )),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_accept_model_paths_only_as_a_pair() {
+        let mut config = ModelConfig {
+            detector_path: Some("craft.onnx".into()),
+            ..ModelConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        config.recognizer_path = Some("english.onnx".into());
+        config.validate().expect("paired paths are valid");
     }
 }

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Filesystem-free model provisioning through `ModelDescriptor`, `model_descriptors`,
+  `ModelArtifact::Bytes`, and the SHA-256-verifying `VerifiedModelProvider`.
+- Paired `model.detector_path` and `model.recognizer_path` configuration for mobile or other
+  host-managed local model assets.
+- Eager, reusable model initialization through `Reader::warm_up` and
+  `ReaderBuilder::build_warmed`.
+
+### Changed
+
+- `ModelProvider` now resolves `ModelArtifact::{Path, Bytes}` instead of paths only; initialized
+  detector and recognizer plans are serialized, cached, and release their source provider.
+- Browser WASM uses sequential crop and decoding loops without a Rayon worker pool, and the pure-Rust
+  backend is aligned to tract 0.23.4.
+
 ## [0.2.0] - 2026-08-03
 
 ### Added

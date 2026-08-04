@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use ndarray::Axis;
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 use crate::config::{Decoder, RecognitionConfig};
@@ -85,10 +86,13 @@ impl CrnnRecognizer {
                 ));
                 continue;
             }
-            // Decode each region on the shared Rayon pool; indexed mapping keeps the ~keep
-            // output in input order and each row borrows a view, avoiding a per-row copy. ~keep
-            let decoded: Vec<RecognizedText> = (0..chunk.len())
-                .into_par_iter()
+            // Native targets use the reader's Rayon pool; browser WASM uses the sequential range. ~keep
+            // Both preserve input order and borrow each row view. ~keep
+            #[cfg(not(target_arch = "wasm32"))]
+            let rows = (0..chunk.len()).into_par_iter();
+            #[cfg(target_arch = "wasm32")]
+            let rows = 0..chunk.len();
+            let decoded: Vec<RecognizedText> = rows
                 .map(|row| {
                     super::ctc::decode_greedy_with_mask(
                         logits.index_axis(Axis(0), row),
