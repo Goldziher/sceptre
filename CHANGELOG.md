@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-04
+
 ### Added
 
 - Filesystem-free model provisioning through `ModelDescriptor`, `model_descriptors`,
@@ -80,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Offline-first model provisioning: models download from Hugging Face on first use, cache locally,
   and are sha256-verified on download — every run thereafter reads the cache with no network.
 
-[Unreleased]: https://github.com/Goldziher/sceptre/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Goldziher/sceptre/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Goldziher/sceptre/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Goldziher/sceptre/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Goldziher/sceptre/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Goldziher/sceptre/releases/tag/v0.1.0
