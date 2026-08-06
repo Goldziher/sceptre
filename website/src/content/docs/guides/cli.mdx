@@ -80,6 +80,7 @@ sceptre models download [OPTIONS]
 
 | Flag | Description |
 |---|---|
+| `--all` | Cover every supported language instead of the configured ones. Conflicts with `--lang`. |
 | `--format <text\|json>` | Output format. Default `text`. |
 
 Plus the [shared overrides](#shared-overrides) (notably `--lang`, to select which recognizers are
@@ -87,6 +88,30 @@ listed or fetched).
 
 `list` inspects the cache without touching the network. `download` fetches any missing model
 (requires the `download` feature) and reports the resulting manifest.
+
+Languages default to `[english]`, so a bare `sceptre models download` fetches only CRAFT and
+`english_g2`. Use `--all` to pre-seed the complete set — see
+[Offline and CI](/guides/offline-and-ci/).
+
+## `sceptre env`
+
+Report the runtime the current configuration would execute on: sceptre version, OS and arch, the
+selected backend, the requested and actually-registered accelerator, and — for the `ort` backend —
+the ONNX Runtime provisioning strategy (`bundled`, `dynamic`, or `system`), `ORT_DYLIB_PATH` when
+set, and the runtime's build-info string and version.
+
+```sh
+sceptre env
+sceptre env --format json
+```
+
+| Flag | Description |
+|---|---|
+| `--format <text\|json>` | Output format. Default `text`. |
+
+Plus the [shared overrides](#shared-overrides) — `--backend` and `--accelerator` in particular, to
+ask what a given selection would actually resolve to before committing a run to it. This is the
+environment record that belongs alongside any parity or benchmark artifact.
 
 ## `sceptre completions`
 
@@ -118,7 +143,8 @@ These flags are available on every subcommand above and layer on top of the load
 |---|---|
 | `--lang <LANG>` | Recognition language, repeatable (e.g. `--lang english --lang korean`). One of `english`, `latin`, `chinese-simplified`, `japanese`, `korean`, `cyrillic`, `telugu`, `kannada`. |
 | `--threads <N>` | Maximum worker threads. |
-| `--backend <BACKEND>` | Inference backend: `ort`, `tract`, or `candle`. |
+| `--backend <BACKEND>` | Inference backend: `ort`, `tract`, or `candle`. The backend must be compiled in — `tract` needs the CLI's `tract` feature, which is not in the default set. |
+| `--accelerator <ACCELERATOR>` | Hardware the backend runs on: `cpu` (default), `auto`, `coreml`, `directml`, or `cuda`. Only `ort` supports a non-CPU accelerator. An explicitly requested one that cannot register is a hard error, not a silent fall back to CPU; only `auto` falls back. See [Backends](/concepts/backends/#accelerator-selection). |
 | `--text-threshold <FLOAT>` | Detection text-confidence threshold, `0.0`–`1.0`. |
 | `--link-threshold <FLOAT>` | Detection link-confidence threshold, `0.0`–`1.0`. |
 | `--canvas-size <PX>` | Detection canvas size (longest side, in px). Lower cuts peak memory and detection time on large pages at some accuracy cost; the default (`2560`) matches EasyOCR. |
