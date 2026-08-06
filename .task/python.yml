@@ -39,13 +39,15 @@ tasks:
   benchmark:
     desc: >-
       Head-to-head benchmark of sceptre (release CLI) vs upstream EasyOCR over the
-      image corpus; requires the opt-in export/torch group and a built release binary
+      image corpus (forwards extra CLI args, e.g. --group/--limit/--repeats/--baseline);
+      requires the opt-in export/torch group and a built release binary
     cmds:
-      - uv run python -m sceptre_rs_tools.benchmark
+      - uv run python -m sceptre_rs_tools.benchmark {{.CLI_ARGS}}
 
   benchmark:check:
     desc: >-
-      Head-to-head benchmark with the regression gate: fails if sceptre's warm speedup,
-      peak-RSS ratio, or labeled token-F1 falls below the floors in benchmark.py
+      Head-to-head benchmark with the regression gate (forwards extra CLI args): fails if
+      sceptre's warm speedup, peak-RSS ratio, or labeled token-F1 falls below the floors
+      in benchmark.py
     cmds:
-      - uv run python -m sceptre_rs_tools.benchmark --assert
+      - uv run python -m sceptre_rs_tools.benchmark --assert {{.CLI_ARGS}}
