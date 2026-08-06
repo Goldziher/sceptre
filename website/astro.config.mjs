@@ -105,6 +105,7 @@ export default defineConfig({
             { label: "Library", slug: "guides/library" },
             { label: "MCP server", slug: "guides/mcp-server" },
             { label: "Configuration", slug: "guides/configuration" },
+            { label: "Offline and CI", slug: "guides/offline-and-ci" },
           ],
         },
         {

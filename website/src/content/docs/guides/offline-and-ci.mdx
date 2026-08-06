@@ -1,0 +1,179 @@
+---
+title: Offline and CI
+description: >-
+  Pin the model cache, pre-seed it before a parallel matrix, key a CI cache on the model digests,
+  and understand exactly what sceptre guarantees about concurrent cache access.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+sceptre downloads its models once and reads them from a shared on-disk cache thereafter. Getting a
+CI job — or an air-gapped image build — to do that reliably comes down to four things: putting the
+cache somewhere you control, filling it before anything runs in parallel, keying the restore on
+something that actually changes when the models change, and knowing which concurrency guarantees
+are real.
+
+## Where the cache lives
+
+sceptre uses Hugging Face's standard hub cache, so it shares one store with `huggingface_hub`, the
+`hf` CLI, and anything else on the machine. The root resolves in this order, and the **first**
+source that yields a value wins:
+
+<Steps>
+
+1. `ModelConfig::cache_dir`, when set (library-only — there is no CLI flag for it).
+2. `HF_HUB_CACHE`
+3. `HUGGINGFACE_HUB_CACHE`
+4. `$HF_HOME/hub`
+5. `~/.cache/huggingface/hub` — where `~` is `$HOME` on Unix and `%USERPROFILE%` on Windows.
+
+</Steps>
+
+Two details matter in a CI environment:
+
+- **An empty value counts as unset.** `HF_HUB_CACHE=""` does not mean "the current directory"; it
+  falls through to the next source. A variable that a previous step cleared will not silently
+  repoint the cache at the workspace root.
+- **`XDG_CACHE_HOME` is deliberately not honored.** The final fallback is literally
+  `$HOME/.cache/huggingface/hub`. This matches `huggingface_hub`'s own resolution, so the Python
+  and Rust tooling agree on one path; honoring XDG would split the cache in two on any machine
+  where `XDG_CACHE_HOME` is set.
+
+Artifacts land at `<root>/models--<owner>--<name>/snapshots/<rev>/<file>`, with the real bytes in a
+content-addressed blob and the snapshot entry pointing at it.
+
+<Aside type="tip">
+  Set `HF_HOME` once at the job level rather than `HF_HUB_CACHE` per step. It covers sceptre, the
+  Python benchmark harness, and the reference EasyOCR run with one variable, and it gives you a
+  single directory to hand to `actions/cache`.
+</Aside>
+
+## Pre-seed before you fan out
+
+`sceptre models download` fetches only what the current configuration asks for, and languages
+default to `[english]` — so a bare invocation fetches CRAFT plus `english_g2` and nothing else. Use
+`--all` to fetch the complete set:
+
+```sh
+sceptre models download --all
+```
+
+Run this **once, serially**, before any parallel matrix or test job starts. Every job that then
+reads the cache takes the fast path with no network at all, and no two jobs race to produce the
+same file.
+
+`sceptre models list --all --format json` reports the same set with a `cached` flag per artifact
+and touches no network, which makes it a cheap assertion that a pre-seed actually worked before you
+spend matrix minutes on it.
+
+## Cache keys
+
+Key the cache on the **model digests**, not on a revision string or a lockfile.
+
+The registry does carry a `revision` field, but it is the floating string `"main"`, and it is never
+passed to the Hub — it only shapes the on-disk snapshot path. It will not change when the models
+change. The pinned SHA-256 is the only real pin.
+
+Those digests live in one file, so hashing it gives an exact, self-invalidating key:
+
+```yaml
+key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+```
+
+Bump a digest in the registry and the key changes, so the stale cache is not restored. Change
+anything else in the repository and the key holds, so the cache is reused.
+
+<Aside type="caution">
+  Verification happens as bytes download, not on a cache hit. A restored cache entry is checked for
+  being a readable, non-empty regular file and then used — it is not re-hashed. That is why the key
+  has to be exact: a cache restored under a key that no longer describes its contents will be
+  trusted.
+</Aside>
+
+## What is actually guaranteed under concurrency
+
+Be precise about this, because the guarantee is narrower than "the cache is safe".
+
+**What hf-hub guarantees.** A download takes an advisory lock on
+`<cache>/.locks/<repo>/<etag>.lock` with a 10-second timeout before writing, and writes into
+content-addressed blobs. Two processes that both decide to *download* the same artifact therefore
+serialize, and neither sees the other's partial write.
+
+**What sceptre adds.** sceptre's own cache fast path runs *ahead* of that lock — it stats the
+snapshot path directly, without taking it. To keep that path from returning a file another process
+is mid-write, the fast path requires a readable, non-empty regular file; anything else falls
+through to the locked download path. A SHA-256 mismatch found during a download evicts both the
+snapshot entry and its backing blob, so a corrupt artifact self-heals on the next run instead of
+being served forever.
+
+**What is not guaranteed.** The fast path is not itself synchronized. It is a heuristic that
+rejects the failure mode that actually occurs — a zero-length or unreadable file mid-write — not a
+proof that a concurrent writer cannot be observed. On a shared cache mount with many writers,
+pre-seeding serially is the thing that makes the question moot; do not rely on the fast path to
+arbitrate a race you could have avoided.
+
+## Running with `download` off
+
+Building without the `download` feature makes the binary incapable of fetching a model. It does
+**not** make it fall back to reading whatever is already in the cache — `ensure` fails immediately:
+
+```text
+model download requires the `download` feature; provide a local model path instead
+```
+
+This is deliberate: a build that cannot download should fail loudly at configuration time rather
+than depending on an ambient cache that may or may not be populated. Supply the artifacts
+explicitly instead, by setting both `model.detector_path` and `model.recognizer_path` (see
+[Configuration](/guides/configuration/#modelconfig)), or by handing the bytes to a
+`VerifiedModelProvider`.
+
+`model_manifest` — and therefore `sceptre models list` — still inspects the cache without the
+feature, because it is pure filesystem work. Only the fetch is gated.
+
+<Aside type="note">
+  There is no `HF_HUB_OFFLINE` support. hf-hub 1.0 has no offline mode, and sceptre does not
+  implement one. "Offline" here means *the cache is already populated*, which is exactly what the
+  pre-seed step above establishes — not a flag that forbids network access.
+</Aside>
+
+## A worked GitHub Actions job
+
+```yaml
+jobs:
+  ocr:
+    runs-on: ubuntu-latest
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.hf
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: Build the CLI
+        run: cargo build --release -p sceptre-cli --locked
+
+      - name: Pre-seed every model (serial, before any fan-out)
+        run: ./target/release/sceptre models download --all
+
+      - name: Confirm the cache is populated without touching the network
+        run: ./target/release/sceptre models list --all --format json
+
+      - name: Record the runtime alongside any results
+        run: ./target/release/sceptre env --format json
+
+      - name: Run
+        run: ./target/release/sceptre run page.png --lang english --format json
+```
+
+The `env` step is worth keeping: it captures the backend, the requested and registered accelerator,
+and the ONNX Runtime version, which is the context any accuracy or timing number needs to be
+interpretable later (see [Backends](/concepts/backends/#accelerator-selection)).
+
+If the job also runs the head-to-head benchmark, cache `~/.EasyOCR` on the same key. EasyOCR
+downloads its own weights through its own mechanism, entirely separately from the Hugging Face
+cache — cache only one of the two and you have fixed half the download cost.
