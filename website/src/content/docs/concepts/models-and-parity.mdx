@@ -41,17 +41,31 @@ Hugging Face tooling on the machine share one store. The cache root resolves, in
 `ModelConfig::cache_dir` override.
 
 <Aside type="note">
-  Cache lookups are offline-first: once an artifact resolves in the hub cache it is used directly,
-  without re-verifying its hash or revalidating the revision against the Hub on every run. A pin
-  bump in the registry only takes effect once the stale cached snapshot is cleared and
-  re-downloaded.
+  The SHA-256 is verified **as bytes download**, not on every read. Cache lookups are offline-first:
+  once an artifact resolves in the hub cache it is used directly, without re-hashing it or
+  revalidating the revision against the Hub. The fast path does check that the cached entry is a
+  readable, non-empty regular file and otherwise falls through to the locked download path, and a
+  mismatch detected during a download evicts both the snapshot entry and its backing blob so a
+  corrupt artifact self-heals. But a pin bump in the registry only takes effect once the stale
+  cached snapshot is cleared and re-downloaded.
 </Aside>
+
+The registry also carries a `revision` field, which is the floating string `"main"` and is never
+passed to the Hub — it only shapes the on-disk snapshot path. **The SHA-256 is the only real pin.**
+Derive CI cache keys from the digest set (see [Offline and CI](/guides/offline-and-ci/)), not from
+the revision.
 
 The registry owner (`sceptre-ocr` by default) can be overridden per config
 (`ModelConfig::registry_owner`) to point at a mirror without any code change — the owner is
 validated to a safe form before it reaches the cache path.
 
 ## How parity is validated
+
+The parity claim is scoped to a runtime: **the `ort` backend on the CPU execution provider**, which
+is what `model.accelerator` defaults to. Every golden fixture and every published benchmark number
+was produced there. The same ONNX graph produces different numeric output on a different execution
+provider, so an accelerated run is a different measurement rather than a faster one — see
+[Backends](/concepts/backends/#accelerator-selection) for how to select one and what it costs you.
 
 sceptre's test suite compares its output against two goldens for every image in the parity corpus:
 
@@ -68,3 +82,14 @@ cache rather than silently passing. See
 
 The same corpus and parity signal (char/word-F1, box-IoU) back the head-to-head performance
 benchmark — see [Benchmarks](/reference/benchmarks/).
+
+### Cross-provider coverage
+
+CI runs a per-execution-provider parity lane: CPU on Linux, macOS, and Windows, plus CoreML on
+macOS. GitHub's macOS runners are virtual machines with **no Neural Engine**, so the CoreML leg
+proves the provider registers and the pipeline runs end to end — it is not evidence about
+on-device ANE numerics. CUDA and TensorRT are **unvalidated**: there is no GPU runner in CI, and
+none of the published accuracy or performance figures should be assumed to transfer to them.
+
+DirectML is deliberately not a CI lane. The Windows runner has no GPU, so DirectML falls back to
+the WARP software adapter, and numbers from it would describe neither CPU nor a real GPU.
