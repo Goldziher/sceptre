@@ -70,8 +70,10 @@ spend matrix minutes on it.
 
 Key the cache on the **model digests**, not on a revision string or a lockfile.
 
-The registry does carry a `revision` field, but it is the floating string `"main"`, and it is never
-passed to the Hub — it only shapes the on-disk snapshot path. It will not change when the models
+The registry does carry a `revision` field, but it is the floating string `"main"`. It is never
+passed to the Hub and never used to resolve a cache path — the cache lookup enumerates every
+`snapshots/` subdirectory under the repo and returns the newest usable one, regardless of
+`revision`. The field is carried only as reporting metadata, so it will not change when the models
 change. The pinned SHA-256 is the only real pin.
 
 Those digests live in one file, so hashing it gives an exact, self-invalidating key:

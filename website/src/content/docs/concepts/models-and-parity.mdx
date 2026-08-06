@@ -50,10 +50,13 @@ Hugging Face tooling on the machine share one store. The cache root resolves, in
   cached snapshot is cleared and re-downloaded.
 </Aside>
 
-The registry also carries a `revision` field, which is the floating string `"main"` and is never
-passed to the Hub — it only shapes the on-disk snapshot path. **The SHA-256 is the only real pin.**
-Derive CI cache keys from the digest set (see [Offline and CI](/guides/offline-and-ci/)), not from
-the revision.
+The registry also carries a `revision` field, which is the floating string `"main"`. It is never
+passed to the Hub and never used to resolve a cache path — the cache lookup enumerates every
+`snapshots/` subdirectory under the repo and returns the newest usable one, regardless of what
+`revision` says. `revision` is carried purely as reporting metadata — its only reader outside the
+registry is `sceptre env --format json`, which echoes it back in each model pin. **The SHA-256 is
+the only real pin.** Derive CI cache keys from the digest set (see
+[Offline and CI](/guides/offline-and-ci/)), not from the revision.
 
 The registry owner (`sceptre-ocr` by default) can be overridden per config
 (`ModelConfig::registry_owner`) to point at a mirror without any code change — the owner is
@@ -85,11 +88,15 @@ benchmark — see [Benchmarks](/reference/benchmarks/).
 
 ### Cross-provider coverage
 
-CI runs a per-execution-provider parity lane: CPU on Linux, macOS, and Windows, plus CoreML on
-macOS. GitHub's macOS runners are virtual machines with **no Neural Engine**, so the CoreML leg
-proves the provider registers and the pipeline runs end to end — it is not evidence about
-on-device ANE numerics. CUDA and TensorRT are **unvalidated**: there is no GPU runner in CI, and
-none of the published accuracy or performance figures should be assumed to transfer to them.
+CI is designed with a per-execution-provider matrix: the golden parity suite runs on the CPU
+provider across Linux, macOS, and Windows, plus a CoreML leg on macOS. The golden suite itself is
+gated to the CPU provider only — the CoreML leg instead runs one end-to-end OCR invocation and
+checks the JSON output contains a recognized `"text"` field, proving the provider registers and
+the pipeline runs at all, not that its numerics match the CPU golden fixtures. GitHub's macOS
+runners are virtual machines with **no Neural Engine** in any case, so even a passing golden
+comparison there would not be evidence about on-device ANE numerics. CUDA is **unvalidated**: there
+is no GPU runner in CI, and none of the measured accuracy or performance figures should be assumed
+to transfer to it.
 
 DirectML is deliberately not a CI lane. The Windows runner has no GPU, so DirectML falls back to
 the WARP software adapter, and numbers from it would describe neither CPU nor a real GPU.

@@ -69,14 +69,14 @@ CRNN recognition and CTC decoding parameters.
 
 | Field | Default | Description |
 |---|---|---|
-| `decoder` | `Decoder::Greedy` | CTC decoding strategy: `Greedy`, `BeamSearch`, or `WordBeamSearch`. |
-| `beam_width` | `5` | Beam width for beam-search decoders. |
+| `decoder` | `Decoder::Greedy` | CTC decoding strategy. `BeamSearch` and `WordBeamSearch` are reserved variants — not yet implemented; setting either is a hard error at recognition time. |
+| `beam_width` | `5` | Reserved for a future beam-search decoder. Not yet implemented — has no effect while `decoder` is `Greedy`. |
 | `batch_size` | `1` | Recognition batch size. |
 | `allowlist` | `""` (empty) | Only these characters may be produced; empty uses the model's full charset. |
 | `blocklist` | `""` (empty) | These characters are never produced. |
 | `contrast_ths` | `0.1` | Contrast below which a low-confidence second pass runs. |
 | `adjust_contrast` | `0.5` | Target contrast for the adjustment pass. |
-| `filter_ths` | `0.003` | Accepted for EasyOCR parity; upstream never applies it, so — matching upstream — it currently has no effect on output. |
+| `filter_ths` | `0.1` | Minimum confidence a recognized region needs to be emitted; results below it are dropped. Validated to `[0, 1]`. |
 
 The recognizer's fixed input height (`imgH`, `64`) is an internal constant, not a config field.
 

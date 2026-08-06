@@ -21,6 +21,7 @@ its backend and capabilities explicitly.
 | `ort-coreml` | Compiles in ONNX Runtime's CoreML execution provider. | You set `model.accelerator = "coreml"` (or `--accelerator coreml`) on macOS/iOS. |
 | `ort-directml` | Compiles in ONNX Runtime's DirectML execution provider. | You set `model.accelerator = "directml"` on Windows. |
 | `ort-cuda` | Compiles in ONNX Runtime's CUDA execution provider. | You set `model.accelerator = "cuda"` and your ONNX Runtime build carries CUDA. |
+| `bench` | Exposes the crate-internal detection/recognition hot paths through a `bench` seam module for the `criterion` benchmarks (`cargo bench`). | You're running or writing the workspace's own microbenchmarks; library consumers never need it. |
 
 The `ort-*` accelerator features only add the Rust-side provider registration; the ONNX Runtime
 build in use must also carry that provider. The pyke prebuilt for `aarch64-apple-darwin` is
@@ -35,10 +36,12 @@ performance on desktop/server, `tract` for a pure-Rust WASM/Android build.
 
 The `sceptre-cli` binary's own `default` feature set is `["ort-bundled", "download"]`, so
 `cargo install sceptre-cli` produces a self-contained binary: the ONNX Runtime is fetched and linked
-at build time, and models download at first use. The CLI re-exports four features, each forwarding
-to the library: `ort-bundled`, `ort-dynamic`, `tract`, `download`, plus `mcp` (off by default) which
-adds the `sceptre mcp` subcommand. The CLI does not expose the `ort-*` accelerator features — build
-the library with them and depend on it directly if you need a non-CPU provider.
+at build time, and models download at first use. The CLI re-exports eight features, each forwarding
+to the identically-named library feature: `ort-bundled`, `ort-dynamic`, `tract`, `ort-coreml`,
+`ort-directml`, `ort-cuda`, `download`, and `mcp` (off by default, which adds the `sceptre mcp`
+subcommand). Compiling in an `ort-*` accelerator feature only makes the provider available to
+select — the user still picks it at runtime with `model.accelerator` (or `--accelerator`, see
+[Backends](/concepts/backends/#accelerator-selection)).
 
 `tract` is a CLI feature in its own right. Before it was exposed, `--backend tract` was accepted by
 the argument parser but could never resolve, because no shipped build compiled the backend in.

@@ -24,17 +24,17 @@ import { Card, CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/comp
 
 sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
 pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX. It
-matches EasyOCR's output on every script it supports, runs **faster on a fraction of the memory**, and
-ships as one self-contained binary with **no Python runtime**. Use it as a **library**, a **CLI**, or
-an **MCP server**.
+agrees with EasyOCR's output on every script it supports, runs **faster on a fraction of the
+memory**, and ships as one self-contained binary with **no Python runtime**. Use it as a
+**library**, a **CLI**, or an **MCP server**.
 
 ## Why sceptre
 
 <CardGrid>
   <Card title="Parity accuracy" icon="approve-check">
     Validated against real EasyOCR output across all eight gen2 scripts — English, Latin, Chinese,
-    Japanese, Korean, Cyrillic, Telugu, Kannada — matching text and boxes. A faithful
-    reimplementation, not an approximation.
+    Japanese, Korean, Cyrillic, Telugu, Kannada — on both text and boxes, to a per-image word-F1
+    and box-IoU floor rather than character-for-character equality.
   </Card>
   <Card title="Substantially faster" icon="rocket">
     ~2.8× higher throughput than EasyOCR warm on the same corpus — and a cold, one-shot CLI run

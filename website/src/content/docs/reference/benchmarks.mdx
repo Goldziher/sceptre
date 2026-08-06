@@ -64,6 +64,6 @@ measures end-to-end OCR against EasyOCR. Parity fixtures backing the quality sig
 
 <Aside type="note">
   The regression gate (`--assert`) enforces three floors — warm speedup ≥ 2.0×, peak-RSS ratio ≥ 3×,
-  and labeled token-F1 within 0.05 of EasyOCR — run via `workflow_dispatch` and a weekly schedule in
-  CI, not on every PR (the reference run needs torch, easyocr, and the full model set).
+  and labeled token-F1 within 0.05 of EasyOCR — run manually via `workflow_dispatch` in CI, not on
+  every PR (the reference run needs torch, easyocr, and the full model set).
 </Aside>

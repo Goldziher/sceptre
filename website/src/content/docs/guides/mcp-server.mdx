@@ -17,9 +17,9 @@ sceptre mcp --lang english
 
 Requires the CLI built with the `mcp` feature (see [Installation](/start/installation/)). `sceptre
 mcp` accepts the same [shared overrides](/guides/cli/#shared-overrides) as the other subcommands —
-`--lang`, `--threads`, `--backend`, `--text-threshold`, `--link-threshold`, `--canvas-size` — used to
-build the `Reader` the server holds for the lifetime of the process. Configure the languages you
-need up front; there is no per-call language override.
+`--lang`, `--threads`, `--backend`, `--accelerator`, `--text-threshold`, `--link-threshold`,
+`--canvas-size` — used to build the `Reader` the server holds for the lifetime of the process.
+Configure the languages you need up front; there is no per-call language override.
 
 The server communicates over stdio, so an agent host spawns it as a subprocess and talks JSON-RPC
 over its stdin/stdout. It is designed for a local, trusted client — the tool reads whatever path the
