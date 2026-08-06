@@ -294,6 +294,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Pre-warm the default-feature build before the irreversible step
+        # `cargo publish -p sceptre-cli` runs a verification build with DEFAULT features,
+        # which is `ort-bundled` — so it fetches an ONNX Runtime prebuilt from cdn.pyke.io
+        # partway through publishing, after the GitHub release has already been promoted.
+        # A CDN outage there strands the release half-published and unrecoverable. Doing
+        # the same build first makes that failure mode land before anything is uploaded. ~keep
+        run: cargo build -p sceptre-cli --locked
+
       - name: Authenticate to crates.io (trusted publishing, OIDC)
         uses: rust-lang/crates-io-auth-action@v1
         id: crates_auth
