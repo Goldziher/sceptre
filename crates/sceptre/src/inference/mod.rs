@@ -12,13 +12,18 @@
 
 use ndarray::ArrayD;
 
-use crate::config::Backend;
+use crate::config::{Accelerator, Backend};
 use crate::error::{OcrError, Result};
 
 #[cfg(feature = "ort")]
 mod ort_backend;
+#[cfg(feature = "ort")]
+mod ort_ep;
+mod runtime;
 #[cfg(feature = "tract")]
 mod tract_backend;
+
+pub use runtime::{OrtRuntimeInfo, RuntimeInfo, runtime_info, runtime_info_for};
 
 /// A dynamically-shaped `f32` tensor exchanged with a backend.
 pub type Tensor = ArrayD<f32>;
@@ -32,24 +37,41 @@ pub trait ModelBackend: Send + Sync {
     fn run(&self, input: Tensor) -> Result<Tensor>;
 }
 
-/// Load a model from ONNX bytes using the requested backend.
+/// Backend-neutral options for [`load_backend`].
 ///
-/// `threads` caps the backend's intra-op parallelism where supported. `fixed_input`
-/// pins the model's input to a concrete shape for backends that cannot shape-infer a
-/// graph with data-dependent dynamic dimensions: the `tract` CRAFT detector requires
-/// this (see ADR 0027), while `ort` handles dynamic shapes natively and ignores it.
-pub fn load_backend(
+/// A struct rather than positional arguments so that adding a knob does not churn
+/// every call site; backends ignore the options they cannot honor.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct BackendOptions<'a> {
+    /// Cap on the backend's intra-op parallelism, drawn from the shared thread
+    /// budget. `0` leaves the backend's own default in place.
+    pub threads: usize,
+    /// Pins the model's input to a concrete shape for backends that cannot
+    /// shape-infer a graph with data-dependent dynamic dimensions: the `tract`
+    /// CRAFT detector requires this (see ADR 0027), while `ort` handles dynamic
+    /// shapes natively and ignores it.
+    pub fixed_input: Option<&'a [usize]>,
+    /// Hardware accelerator to run the graph on. Only the `ort` backend can honor
+    /// a non-CPU selection; the others are CPU-only.
+    pub accelerator: Accelerator,
+}
+
+/// Load a model from ONNX bytes using the requested backend.
+pub(crate) fn load_backend(
     backend: Backend,
     model_bytes: &[u8],
-    threads: usize,
-    fixed_input: Option<&[usize]>,
+    options: BackendOptions<'_>,
 ) -> Result<Box<dyn ModelBackend>> {
-    let _ = (model_bytes, threads, fixed_input);
+    // Every argument is consumed only by feature-gated arms below. ~keep
+    let _ = (model_bytes, options.threads, options.fixed_input, options.accelerator);
     match backend {
         #[cfg(feature = "ort")]
-        Backend::Ort => Ok(Box::new(ort_backend::OrtBackend::load(model_bytes, threads)?)),
+        Backend::Ort => Ok(Box::new(ort_backend::OrtBackend::load(model_bytes, options)?)),
         #[cfg(feature = "tract")]
-        Backend::Tract => Ok(Box::new(tract_backend::TractBackend::load(model_bytes, fixed_input)?)),
+        Backend::Tract => Ok(Box::new(tract_backend::TractBackend::load(
+            model_bytes,
+            options.fixed_input,
+        )?)),
         other => Err(OcrError::inference(format!(
             "backend {other:?} is not compiled in (enable the matching cargo feature)"
         ))),

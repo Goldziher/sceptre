@@ -12,7 +12,7 @@ mod recognition;
 
 pub use concurrency::ConcurrencyConfig;
 pub use detection::DetectionConfig;
-pub use model::{Backend, Language, ModelConfig};
+pub use model::{Accelerator, Backend, Language, ModelConfig};
 pub use recognition::{Decoder, RecognitionConfig};
 
 pub(crate) use concurrency::{WorkerPool, build_thread_pool, resolve_thread_budget};

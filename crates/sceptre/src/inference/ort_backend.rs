@@ -12,7 +12,7 @@ use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor as OrtTensor;
 
-use super::{ModelBackend, Tensor};
+use super::{BackendOptions, ModelBackend, Tensor, ort_ep};
 use crate::error::{OcrError, Result};
 
 /// ONNX Runtime session wrapper.
@@ -25,18 +25,27 @@ pub(crate) struct OrtBackend {
 }
 
 impl OrtBackend {
-    /// Build a session from ONNX bytes, capping intra-op threads.
+    /// Build a session from ONNX bytes, honoring the accelerator and thread budget.
     ///
-    /// When `threads > 0` the session's intra-op thread pool is capped to that
-    /// value; `0` leaves ONNX Runtime's own default in place. The ONNX bytes are
-    /// parsed in memory, so no temporary file is written.
+    /// When `options.threads > 0` the session's intra-op thread pool is capped to
+    /// that value; `0` leaves ONNX Runtime's own default in place. The ONNX bytes
+    /// are parsed in memory, so no temporary file is written.
     ///
     /// The session runs at the maximum graph optimization level, and memory-pattern
     /// planning is disabled because the CRAFT and gen2 CRNN graphs take dynamic-width
     /// inputs; both settings preserve the computed values.
-    pub(crate) fn load(model_bytes: &[u8], threads: usize) -> Result<Self> {
-        let mut builder =
+    ///
+    /// Execution providers are registered before the optimization level is set,
+    /// because ONNX Runtime applies EP-aware layout transforms while optimizing.
+    pub(crate) fn load(model_bytes: &[u8], options: BackendOptions<'_>) -> Result<Self> {
+        let builder =
             Session::builder().map_err(|error| inference_error("create an ONNX Runtime session builder", error))?;
+        let (mut builder, accelerator) = ort_ep::apply_accelerator(builder, options.accelerator)?;
+        tracing::debug!(
+            requested = options.accelerator.as_str(),
+            registered = accelerator.as_str(),
+            "resolved the ONNX Runtime accelerator"
+        );
         // `All` (ORT_ENABLE_ALL) is the highest level, applying every fusion, constant ~keep
         // folding, and layout optimization regardless of the runtime's default. ~keep
         builder = builder
@@ -49,9 +58,9 @@ impl OrtBackend {
         builder = builder.with_memory_pattern(false).map_err(|error| {
             inference_error("disable ONNX Runtime memory-pattern planning", ort::Error::from(error))
         })?;
-        if threads > 0 {
+        if options.threads > 0 {
             builder = builder
-                .with_intra_threads(threads)
+                .with_intra_threads(options.threads)
                 .map_err(|error| inference_error("configure ONNX Runtime intra-op threads", ort::Error::from(error)))?;
         }
         let session = builder
@@ -243,7 +252,11 @@ mod tests {
     fn load_and_run_over_real_model() {
         let model_path = std::env::var("EASYOCR_TEST_ONNX").expect("set EASYOCR_TEST_ONNX to an ONNX model path");
         let model_bytes = std::fs::read(&model_path).expect("read the model file");
-        let backend = OrtBackend::load(&model_bytes, 1).expect("load the ONNX model");
+        let options = BackendOptions {
+            threads: 1,
+            ..BackendOptions::default()
+        };
+        let backend = OrtBackend::load(&model_bytes, options).expect("load the ONNX model");
         assert_eq!(backend.name(), "ort");
 
         let input = ArrayD::from_elem(IxDyn(&[1, 3, 64, 64]), 1.0_f32);

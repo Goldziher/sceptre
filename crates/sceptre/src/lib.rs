@@ -41,11 +41,13 @@ pub mod bench;
 pub mod mcp;
 
 pub use config::{
-    Backend, ConcurrencyConfig, Decoder, DetectionConfig, Language, ModelConfig, OcrConfig, RecognitionConfig,
+    Accelerator, Backend, ConcurrencyConfig, Decoder, DetectionConfig, Language, ModelConfig, OcrConfig,
+    RecognitionConfig,
 };
 pub use engine::seams::{ModelArtifact, ModelProvider, ProgressSink, VerifiedModelProvider};
 pub use engine::{FallbackEngine, OcrEngine, ReadOptions, Reader, ReaderBuilder};
 pub use error::{OcrError, Result};
+pub use inference::{OrtRuntimeInfo, RuntimeInfo, runtime_info, runtime_info_for};
 pub use models::provision::{
     ModelDescriptor, ModelInfo, ModelRole, download_models, model_descriptors, model_manifest,
 };

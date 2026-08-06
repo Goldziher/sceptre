@@ -270,7 +270,11 @@ mod tests {
         let model_path =
             std::env::var("EASYOCR_TEST_CRAFT_ONNX").expect("set EASYOCR_TEST_CRAFT_ONNX to a CRAFT ONNX model path");
         let model_bytes = std::fs::read(&model_path).expect("read the model file");
-        let backend = crate::inference::load_backend(crate::config::Backend::Ort, &model_bytes, 1, None)
+        let options = crate::inference::BackendOptions {
+            threads: 1,
+            ..Default::default()
+        };
+        let backend = crate::inference::load_backend(crate::config::Backend::Ort, &model_bytes, options)
             .expect("load the CRAFT ONNX model");
         let detector = CraftDetector::new(Arc::from(backend), DetectionConfig::default(), None);
 
