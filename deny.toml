@@ -1,6 +1,11 @@
 [graph]
 targets = []
-all-features = false
+# The two ONNX Runtime provisioning strategies pull disjoint dependency subtrees:
+# ort-bundled brings the build-time downloader and its TLS stack, ort-dynamic brings the
+# dylib loader, and tract brings a pure-Rust ONNX stack. Only the default graph was ever
+# audited, so a licence or advisory issue could hide in whichever strategy was not the
+# default. Auditing all features covers every subtree a user can build. ~keep
+all-features = true
 no-default-features = false
 
 [output]

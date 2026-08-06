@@ -11,7 +11,7 @@ use crate::config::{Backend, Language, OcrConfig, resolve_thread_budget};
 use crate::detect::{CraftDetector, DetectedRegions, DetectorInput, TextDetector};
 use crate::error::{OcrError, Result};
 use crate::imaging::to_grayscale;
-use crate::inference::{ModelBackend, load_backend};
+use crate::inference::{BackendOptions, ModelBackend, load_backend};
 use crate::recognize::{Charset, CrnnRecognizer, RecognizedText, RegionCrop, TextRecognizer, crop_region};
 use crate::types::{Image, OcrResult, Point, QUAD_CORNERS, Quad, TextLine};
 
@@ -81,9 +81,12 @@ impl SceptreEngine {
             }
             ModelArtifact::Bytes(bytes) => (bytes, "memory".to_string()),
         };
-        let budget = resolve_thread_budget(Some(&self.config.concurrency));
-        let backend: Arc<dyn ModelBackend> =
-            Arc::from(load_backend(self.config.model.backend, &bytes, budget, fixed_input)?);
+        let options = BackendOptions {
+            threads: resolve_thread_budget(Some(&self.config.concurrency)),
+            fixed_input,
+            accelerator: self.config.model.accelerator,
+        };
+        let backend: Arc<dyn ModelBackend> = Arc::from(load_backend(self.config.model.backend, &bytes, options)?);
         tracing::debug!(backend = backend.name(), %source, "loaded inference backend");
         Ok(backend)
     }

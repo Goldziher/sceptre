@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "text": [
+    {
+      "note": "repeated hypothesis token has no partner in the reference",
+      "hypothesis": "a b b c",
+      "reference": "b c a",
+      "word_f1": 0.8571428571428571,
+      "char_f1": 0.8571428571428571
+    },
+    {
+      "note": "both sides empty",
+      "hypothesis": "",
+      "reference": "",
+      "word_f1": 1.0,
+      "char_f1": 1.0
+    },
+    {
+      "note": "reference empty",
+      "hypothesis": "something",
+      "reference": "",
+      "word_f1": 0.0,
+      "char_f1": 0.0
+    },
+    {
+      "note": "hypothesis empty",
+      "hypothesis": "",
+      "reference": "something",
+      "word_f1": 0.0,
+      "char_f1": 0.0
+    },
+    {
+      "note": "case folding only",
+      "hypothesis": "Easy OCR",
+      "reference": "easy ocr",
+      "word_f1": 1.0,
+      "char_f1": 1.0
+    },
+    {
+      "note": "disjoint word multisets, overlapping characters",
+      "hypothesis": "alpha beta",
+      "reference": "gamma delta",
+      "word_f1": 0.0,
+      "char_f1": 0.631578947368421
+    },
+    {
+      "note": "differs only by whitespace",
+      "hypothesis": "NO LTTB",
+      "reference": "NOLTTB",
+      "word_f1": 0.0,
+      "char_f1": 1.0
+    },
+    {
+      "note": "hypothesis is a subset of the reference",
+      "hypothesis": "a b",
+      "reference": "a b c",
+      "word_f1": 0.8,
+      "char_f1": 0.8
+    },
+    {
+      "note": "repeated token counted once",
+      "hypothesis": "the the cat",
+      "reference": "the cat",
+      "word_f1": 0.8,
+      "char_f1": 0.8
+    },
+    {
+      "note": "identical CJK line",
+      "hypothesis": "清潔できれいな",
+      "reference": "清潔できれいな",
+      "word_f1": 1.0,
+      "char_f1": 1.0
+    },
+    {
+      "note": "CJK line with one extra trailing character",
+      "hypothesis": "ポイ橋て禁止",
+      "reference": "ポイ橋て禁止』",
+      "word_f1": 0.0,
+      "char_f1": 0.923076923076923
+    },
+    {
+      "note": "non-ASCII case folding",
+      "hypothesis": "ÉCOLE",
+      "reference": "école",
+      "word_f1": 1.0,
+      "char_f1": 1.0
+    }
+  ],
+  "boxes": [
+    { "note": "identical", "a": [0.0, 0.0, 10.0, 10.0], "b": [0.0, 0.0, 10.0, 10.0], "iou": 1.0 },
+    { "note": "disjoint", "a": [0.0, 0.0, 1.0, 1.0], "b": [5.0, 5.0, 6.0, 6.0], "iou": 0.0 },
+    { "note": "edge-touching, zero-area intersection", "a": [0.0, 0.0, 1.0, 1.0], "b": [1.0, 0.0, 2.0, 1.0], "iou": 0.0 },
+    { "note": "quarter overlap", "a": [0.0, 0.0, 10.0, 10.0], "b": [5.0, 5.0, 15.0, 15.0], "iou": 0.14285714285714285 },
+    { "note": "half overlap", "a": [0.0, 0.0, 2.0, 1.0], "b": [1.0, 0.0, 3.0, 1.0], "iou": 0.3333333333333333 },
+    { "note": "b contained in a", "a": [0.0, 0.0, 10.0, 10.0], "b": [0.0, 0.0, 5.0, 5.0], "iou": 0.25 },
+    { "note": "both degenerate (zero area)", "a": [0.0, 0.0, 0.0, 0.0], "b": [0.0, 0.0, 0.0, 0.0], "iou": 0.0 },
+    { "note": "one degenerate (zero width)", "a": [0.0, 0.0, 0.0, 10.0], "b": [0.0, 0.0, 10.0, 10.0], "iou": 0.0 }
+  ]
+}

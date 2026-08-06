@@ -14,21 +14,49 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
     cargo install sceptre-cli
     ```
 
-    This is the CLI's default build: ONNX Runtime is loaded at runtime via `ORT_DYLIB_PATH`
-    (`ort-dynamic`) plus model download/caching (`download`) — runnable out of the box once a
-    compatible `libonnxruntime` is available.
-
-    For a zero-config native binary that bundles a prebuilt ONNX Runtime at build time instead:
-
-    ```sh
-    cargo install sceptre-cli --features ort-bundled
-    ```
+    The CLI's default feature set is `["ort-bundled", "download"]`, so this produces a
+    self-contained binary: a prebuilt ONNX Runtime is fetched and linked at build time, and models
+    download and cache at first use. No `ORT_DYLIB_PATH`, no separately installed
+    `libonnxruntime`.
 
     To also expose the MCP server subcommand, add the `mcp` feature:
 
     ```sh
-    cargo install sceptre-cli --features "ort-bundled,mcp"
+    cargo install sceptre-cli --features mcp
     ```
+
+    **Targets with no prebuilt ONNX Runtime.**
+    `ort` publishes prebuilt runtimes for a fixed target list. These have none, and the default
+    install fails **at build time** with ort-sys's own
+    `no prebuilt binaries available for target ...`:
+
+    - `x86_64-apple-darwin` (Intel macOS)
+    - every `*-unknown-linux-musl` target (Alpine)
+    - `armv7-unknown-linux-gnueabihf`
+    - `riscv64gc-*`
+    - `*-unknown-freebsd`
+    - `i686-*`, `s390x-*`, `powerpc64le-*`
+
+    Either bring your own `libonnxruntime`:
+
+    ```sh
+    cargo install sceptre-cli --features ort-dynamic
+    ```
+
+    or build the pure-Rust backend and select it at runtime:
+
+    ```sh
+    cargo install sceptre-cli --no-default-features --features tract,download
+    sceptre run receipt.png --backend tract
+    ```
+
+    <Aside type="note">
+      Cargo features are additive, so `--features ort-dynamic` unions with the default rather than
+      replacing it — and it still wins: `load-dynamic` implies `ort-sys/disable-linking`, which the
+      ort-sys build script checks before its prebuilt-download branch. Switching ONNX Runtime
+      provisioning therefore never needs `--no-default-features`. Only the `tract` path does,
+      because it has to drop `ort` from the dependency graph entirely.
+    </Aside>
 
   </TabItem>
   <TabItem label="Library">
@@ -38,7 +66,7 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
     ```toml
     [dependencies]
-    sceptre = { version = "0.1", features = ["ort-bundled", "download"] }
+    sceptre = { version = "0.4", features = ["ort-bundled", "download"] }
     ```
 
     See [Feature flags](/reference/feature-flags/) for every flag and when to pick it, and
@@ -53,7 +81,7 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
     ```toml
     [dependencies]
-    sceptre = { version = "0.1", features = ["ort-bundled", "download", "mcp"] }
+    sceptre = { version = "0.4", features = ["ort-bundled", "download", "mcp"] }
     ```
 
   </TabItem>
@@ -69,7 +97,13 @@ Models are cached in the standard Hugging Face hub cache — `HF_HUB_CACHE` → 
 tooling on the machine share one cache store. Every run after the first reads the cached models with
 no network access.
 
+Verification happens **as bytes download**. A cache hit is not re-hashed: the cached artifact is
+checked for being a readable, non-empty regular file and then used directly. A hash mismatch found
+on a download evicts the artifact and its backing blob, so a corrupt entry self-heals on the next
+run rather than being served forever.
+
 <Aside type="tip">
-  Run `sceptre models download --lang english` (see [CLI guide](/guides/cli/)) to prefetch models
-  ahead of time — useful for building an offline image or warming a CI cache.
+  Run `sceptre models download --all` (see [CLI guide](/guides/cli/)) to prefetch every model ahead
+  of time — useful for building an offline image or warming a CI cache. See
+  [Offline and CI](/guides/offline-and-ci/) for the full recipe.
 </Aside>

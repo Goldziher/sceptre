@@ -26,11 +26,17 @@ tasks:
     cmds:
       - cargo bench -p sceptre --features bench
 
+  verify:features:
+    desc: Assert the CLI's ONNX Runtime provisioning feature matrix resolves as intended
+    cmds:
+      - bash scripts/verify-features.sh
+
   check:
-    desc: Run fmt check, clippy, and the test suite for the Rust workspace
+    desc: Run fmt check, clippy, the feature-matrix gate, and the test suite for the Rust workspace
     cmds:
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --tests -- -D warnings
+      - task: verify:features
       - cargo test --workspace
 
   release:build:
@@ -48,11 +54,10 @@ tasks:
       - bash scripts/package-release.sh {{.TRIPLE}}
 
   release:dry-run:
-    desc: Validate that the library packages cleanly for crates.io, without publishing
+    desc: Validate that both crates package cleanly for crates.io, without publishing
     cmds:
-      # Only the library can be dry-run-published: cargo resolves sceptre-cli's `sceptre`
-      # dependency from crates.io, where 0.1.0 does not exist yet, so a cli dry-run fails
-      # with "no matching package named sceptre". The cli's publish packaging is validated
-      # at real-publish time (after the lib lands); its build is covered by release:build. ~keep
       # ort-dynamic (not ort-bundled) avoids downloading the ONNX Runtime during the check. ~keep
       - cargo publish --dry-run -p sceptre --no-default-features --features ort-dynamic,download
+      # sceptre-cli resolves its `sceptre` dependency from crates.io, so this only works
+      # once the matching library version is published there. ~keep
+      - cargo publish --dry-run -p sceptre-cli --no-default-features --features ort-dynamic,download

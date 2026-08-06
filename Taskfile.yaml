@@ -46,7 +46,7 @@ tasks:
       - task: python:format
 
   check:
-    desc: Full pre-commit gate (fmt check + clippy + test + poly lint)
+    desc: Full pre-commit gate (fmt check + clippy + feature matrix + test + poly lint)
     cmds:
       - task: rust:check
       - poly lint .

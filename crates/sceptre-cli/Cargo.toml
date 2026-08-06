@@ -12,18 +12,48 @@ readme = "README.md"
 keywords = ["ocr", "text-recognition", "easyocr", "cli", "onnx"]
 categories = ["command-line-utilities", "computer-vision"]
 
+# docs.rs has no network in the build sandbox, so the default `ort-bundled` prebuilt
+# download cannot run there; document the dynamic + pure-Rust surface instead. ~keep
+[package.metadata.docs.rs]
+no-default-features = true
+features = ["ort-dynamic", "tract", "download", "mcp"]
+
 [[bin]]
 name = "sceptre"
 path = "src/main.rs"
 
 [features]
-# Runnable out of the box: recognition over ONNX Runtime loaded at runtime
-# (load-dynamic, no build-time native download) plus model download/caching. ~keep
-default = ["ort-dynamic", "download"]
-# ONNX Runtime linked from a prebuilt binary fetched at build time (zero-config). ~keep
+# Runnable out of the box: `cargo install sceptre-cli` links a prebuilt ONNX Runtime at
+# build time, so the binary needs no ORT_DYLIB_PATH and no separately installed
+# libonnxruntime. `ort-dynamic` used to be the default, which made every install panic at
+# first use with "Failed to load ONNX Runtime dylib" unless the user provisioned the
+# library themselves. ~keep
+default = ["ort-bundled", "download"]
+# ONNX Runtime linked from a prebuilt binary fetched at build time (zero-config).
+# ort ships prebuilts for a fixed target list. Targets without one — x86_64-apple-darwin,
+# any *-unknown-linux-musl, armv7-unknown-linux-gnueabihf, riscv64gc-*, *-unknown-freebsd,
+# i686-*, s390x, powerpc64le — fail at build time with ort-sys's own
+# "no prebuilt binaries available for target ..." error. The remedies are
+# `--features ort-dynamic` (bring your own libonnxruntime) or
+# `--no-default-features --features tract,download` (pure Rust). ~keep
 ort-bundled = ["sceptre/ort-bundled"]
-# ONNX Runtime loaded at runtime via ORT_DYLIB_PATH (no build-time download). ~keep
+# ONNX Runtime loaded at runtime via ORT_DYLIB_PATH (no build-time download).
+# Cargo features are additive, so this unions with the default rather than replacing it —
+# and it still wins: `load-dynamic` implies `ort-sys/disable-linking`, and the ort-sys
+# build script returns before its download branch when linking is disabled. So
+# `--features ort-dynamic` alone is enough; `--no-default-features` is not required. ~keep
 ort-dynamic = ["sceptre/ort-dynamic"]
+# Pure-Rust ONNX backend (tract), selected at runtime with `--backend tract`.
+# Pairs with `--no-default-features` for targets that have neither a prebuilt ONNX Runtime
+# nor a system libonnxruntime. ~keep
+tract = ["sceptre/tract"]
+# Execution providers selectable with `--accelerator`. Each compiles the Rust-side EP
+# struct into the binary; the linked ONNX Runtime must also have been built with the
+# provider, which `sceptre env` reports. Without them `--accelerator coreml` fails loudly
+# rather than silently running on the CPU. ~keep
+ort-coreml = ["sceptre/ort-coreml"]
+ort-directml = ["sceptre/ort-directml"]
+ort-cuda = ["sceptre/ort-cuda"]
 # Runtime model download, caching, and sha256 verification from Hugging Face. ~keep
 download = ["sceptre/download"]
 # Expose the MCP server as the `mcp` subcommand. ~keep

@@ -240,6 +240,16 @@ pub fn golden_lines(json: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// Shared metric contract vectors, also asserted by the Python benchmark harness
+    /// (`python/tests/test_metrics_vectors.py`). The two metric implementations —
+    /// this module and `python/sceptre_rs_tools/benchmark.py` — are independent, so
+    /// this file is the only thing that keeps them from drifting apart.
+    const METRICS_VECTORS: &str = include_str!("../data/metrics_vectors.json");
+
+    /// The vectors are stored as `f64`; the Rust metrics compute in `f32`, so agreement
+    /// is asserted within single-precision slack rather than bit-for-bit.
+    const METRIC_TOLERANCE: f32 = 1e-6;
+
     fn square(x_min: f32, y_min: f32, x_max: f32, y_max: f32) -> BBox {
         BBox {
             x_min,
@@ -340,6 +350,57 @@ mod tests {
         assert_eq!(golden.easyocr.lines.len(), 1);
         assert_eq!(golden.easyocr.lines[0].text, "hi");
         assert_eq!(golden.easyocr.lines[0].bbox(), square(0.0, 0.0, 10.0, 4.0));
+    }
+
+    #[test]
+    fn should_agree_with_the_shared_metric_contract_vectors() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(METRICS_VECTORS).expect("metrics_vectors.json must be valid JSON");
+        assert_eq!(
+            vectors["schema_version"].as_u64(),
+            Some(1),
+            "unknown metrics vector schema version"
+        );
+
+        let text_cases = vectors["text"].as_array().expect("`text` must be an array");
+        assert!(!text_cases.is_empty(), "`text` must carry at least one vector");
+        for case in text_cases {
+            let hypothesis = case["hypothesis"].as_str().expect("`hypothesis` must be a string");
+            let reference = case["reference"].as_str().expect("`reference` must be a string");
+            let expected_word = case["word_f1"].as_f64().expect("`word_f1` must be a number") as f32;
+            let expected_char = case["char_f1"].as_f64().expect("`char_f1` must be a number") as f32;
+            let actual_word = word_f1(hypothesis, reference);
+            let actual_char = char_f1(hypothesis, reference);
+            assert!(
+                (actual_word - expected_word).abs() < METRIC_TOLERANCE,
+                "word_f1({hypothesis:?}, {reference:?}) = {actual_word}, contract says {expected_word}"
+            );
+            assert!(
+                (actual_char - expected_char).abs() < METRIC_TOLERANCE,
+                "char_f1({hypothesis:?}, {reference:?}) = {actual_char}, contract says {expected_char}"
+            );
+        }
+
+        let box_cases = vectors["boxes"].as_array().expect("`boxes` must be an array");
+        assert!(!box_cases.is_empty(), "`boxes` must carry at least one vector");
+        for case in box_cases {
+            let a = bbox_from_vector(&case["a"]);
+            let b = bbox_from_vector(&case["b"]);
+            let expected = case["iou"].as_f64().expect("`iou` must be a number") as f32;
+            let actual = box_iou(a, b);
+            assert!(
+                (actual - expected).abs() < METRIC_TOLERANCE,
+                "box_iou({a:?}, {b:?}) = {actual}, contract says {expected}"
+            );
+        }
+    }
+
+    /// Read a `[x_min, y_min, x_max, y_max]` vector entry into a [`BBox`].
+    fn bbox_from_vector(value: &serde_json::Value) -> BBox {
+        let corners = value.as_array().expect("a box must be a 4-element array");
+        assert_eq!(corners.len(), 4, "a box must be [x_min, y_min, x_max, y_max]");
+        let coordinate = |index: usize| corners[index].as_f64().expect("box coordinates must be numbers") as f32;
+        square(coordinate(0), coordinate(1), coordinate(2), coordinate(3))
     }
 
     #[test]

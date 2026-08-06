@@ -10,11 +10,15 @@ It emits one JSON object on stdout::
 
     {
         "reader_build_seconds": 1.83,
+        "versions": {"easyocr": "1.7.2", "torch": "2.5.1", "python": "3.11.9 (...)"},
         "images": [
             {"image": "path", "seconds": 0.42, "detections": [{"text": "...", "quad": [[x, y], ...]}]},
             {"image": "path", "error": "..."},
         ],
     }
+
+The ``versions`` block is the reference half of the benchmark report's ``environment``
+provenance: published EasyOCR numbers are meaningless without the versions that produced them.
 
 Timing is per-``readtext`` (warm inner time, model already loaded). Threads default to
 torch's native setting; ``--threads N`` pins torch/OMP to match a ``sceptre --threads N`` run.
@@ -43,6 +47,20 @@ def _pin_threads(threads: int | None) -> None:
         torch.set_num_threads(threads)
     except ImportError:
         pass
+
+
+def _versions() -> dict[str, str]:
+    """Report the reference runtime's versions so the benchmark can record provenance."""
+    versions: dict[str, str] = {"python": sys.version}
+    for name in ("easyocr", "torch"):
+        try:
+            module = __import__(name)
+        except ImportError:
+            continue
+        version = getattr(module, "__version__", None)
+        if version is not None:
+            versions[name] = str(version)
+    return versions
 
 
 def _detections(reader: object, image: str) -> list[dict[str, object]]:
@@ -75,7 +93,7 @@ def run(languages: list[str], images: list[str], threads: int | None) -> dict[st
             results.append({"image": image, "error": f"{type(error).__name__}: {str(error)[:200]}"})
             continue
         results.append({"image": image, "seconds": perf_counter() - start, "detections": detections})
-    return {"reader_build_seconds": reader_build_seconds, "images": results}
+    return {"reader_build_seconds": reader_build_seconds, "versions": _versions(), "images": results}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
