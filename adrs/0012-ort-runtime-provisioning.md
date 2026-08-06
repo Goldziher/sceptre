@@ -63,3 +63,24 @@ it does not change the backend choice. The pure-Rust story is unaffected — tha
 - Bad: `ort-bundled` pulls a TLS/HTTP stack (`tls-rustls` → `ureq`, `rustls`) and a build-time
   binary download into the supply chain (covered by `cargo-deny`).
 - Neutral: the CLI's per-target feature selection is deferred to the CLI pass.
+
+## Status update (2026-08-06)
+
+[ADR 0029](0029-cli-provisioning-default-and-runtime-scoped-parity.md) resolves the deferred
+item above: the CLI ships `default = ["ort-bundled", "download"]`, with `ort-dynamic`
+available as an additive override that needs no `--no-default-features`, and `tract` exposed
+for targets that have neither a prebuilt nor a system `libonnxruntime`.
+
+Two claims made here were also weaker than stated. The "no artifact for some targets" note
+named only macOS x86_64; the real set is `x86_64-apple-darwin`, every
+`*-unknown-linux-musl`, `armv7-unknown-linux-gnueabihf`, `riscv64gc-*`, `*-unknown-freebsd`,
+`i686-*`, `s390x`, and `powerpc64le`.
+
+And the supply-chain consequence claimed the `ort-bundled` tree was "covered by
+`cargo-deny`" — it was not. `deny.toml` audited only the default feature graph, which at the
+time did not include `ort-bundled`, so that dependency tree had never been in the
+license/advisory scan. Measured against the `ort-dynamic` graph it adds roughly ten
+build-only dependencies (all already licence-allow-listed) — `byteorder`, `getrandom`,
+`hmac-sha256`, `lzma-rust2`, `ring`, `socks`, `ureq`, `ureq-proto`, `utf8-zero`,
+`webpki-roots` — plus a build-time fetch of the ONNX Runtime prebuilt from `cdn.pyke.io`.
+The claim became true only when `deny.toml` moved to `all-features = true`.
