@@ -22,19 +22,44 @@ without touching the pipeline. See
 
 | Backend | Feature | Target | Notes |
 |---|---|---|---|
-| `ort` | `ort`, `ort-bundled`, `ort-dynamic` | Desktop / server | Native ONNX Runtime. `ort-bundled` fetches a prebuilt runtime at build time (zero-config); `ort-dynamic` `dlopen`s `libonnxruntime` at runtime via `ORT_DYLIB_PATH`. |
-| `tract` | `tract` | WASM / Android | Pure-Rust ONNX interpreter — no native library to ship or load. |
+| `ort` | `ort`, `ort-bundled`, `ort-dynamic` | Desktop / server | Native ONNX Runtime, and the only backend that can run on a non-CPU accelerator. `ort-bundled` fetches a prebuilt runtime at build time (zero-config, and the CLI default); `ort-dynamic` `dlopen`s `libonnxruntime` at runtime via `ORT_DYLIB_PATH`, which is the path on [targets with no prebuilt](/reference/feature-flags/#targets-with-no-prebuilt-onnx-runtime). |
+| `tract` | `tract` | WASM / Android, and targets with no prebuilt ONNX Runtime | Pure-Rust ONNX interpreter — no native library to ship or load. CPU-only. |
 | `candle` | `candle` | Reserved | A pure-Rust native-tensor backend, deferred as a fallback if `tract`'s recurrent-layer (BiLSTM) support proves insufficient for the recognizer. Not yet implemented. |
 
 Pick `ort` (native) for CPU/RSS-optimized execution on desktop or server; pick `tract` when you need
-a pure-Rust build with no native dependency, notably WASM and Android. See
+a pure-Rust build with no native dependency — WASM, Android, or any target ONNX Runtime ships no
+prebuilt for. See
 [ADR 0012](https://github.com/Goldziher/sceptre/blob/main/adrs/0012-ort-runtime-provisioning.md) for
-the `ort-bundled`/`ort-dynamic` provisioning tradeoff, and
+the `ort-bundled`/`ort-dynamic` provisioning tradeoff,
+[ADR 0029](https://github.com/Goldziher/sceptre/blob/main/adrs/0029-cli-provisioning-default-and-runtime-scoped-parity.md)
+for why the CLI defaults to `ort-bundled` and how the accelerator is selected, and
 [ADR 0009](https://github.com/Goldziher/sceptre/blob/main/adrs/0009-candle-evaluation-ort-primary.md)
 for why `candle` is off the critical path.
 
 The active backend is selected through `ModelConfig::backend` (`Backend::Ort` / `Backend::Tract` /
 `Backend::Candle`), or `--backend` on the CLI.
+
+## Accelerator selection
+
+`ModelConfig::accelerator` (`--accelerator` on the CLI) chooses the hardware the backend runs the
+graph on: `cpu` (the default), `auto`, `coreml`, `directml`, or `cuda`. The vocabulary is named for
+the seam rather than for ONNX Runtime, so `tract` and `candle` answer the same field — they are
+CPU-only, and configuring a hardware accelerator on them is rejected at config-validation time.
+
+The default is `cpu` rather than `auto` deliberately. The same ONNX graph produces different numeric
+output on different providers, and sceptre's published parity and benchmark figures are CPU figures;
+defaulting to `auto` would silently change a user's results on upgrade.
+
+<Aside type="caution">
+  An **explicitly** requested accelerator that cannot register is a hard error. ONNX Runtime's
+  `ExecutionProviderDispatch` defaults to failing silently, which would make "asked for CoreML, got
+  CPU" look like success, so explicit requests register with `error_on_failure`. Only `auto` falls
+  back — it registers candidates individually and reports the one that actually took.
+</Aside>
+
+`runtime_info()` (and `sceptre env --format json`) reports the backend, the requested and the
+registered accelerator, the ONNX Runtime provisioning strategy and version, and the target arch —
+the environment any parity or benchmark artifact has to record alongside its numbers.
 
 <Aside type="caution">
   `candle` is a reserved cargo feature with no implementation yet. Selecting `Backend::Candle`

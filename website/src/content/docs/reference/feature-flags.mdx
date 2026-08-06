@@ -13,11 +13,18 @@ its backend and capabilities explicitly.
 |---|---|---|
 | `ort` | The native ONNX Runtime backend, provisioning-agnostic. | You're linking `libonnxruntime` yourself and don't need either provisioning helper below. |
 | `ort-bundled` | `ort` plus a prebuilt ONNX Runtime fetched at build time (`download-binaries`, `tls-rustls`). | You want a zero-config native binary for a target with a prebuilt runtime available. |
-| `ort-dynamic` | `ort` plus `dlopen`-based loading of `libonnxruntime` at runtime via `ORT_DYLIB_PATH`. | You want no build-time download — e.g. shipping a dylib next to the release binary — or you're on a target with no prebuilt (such as macOS x86_64). |
-| `tract` | The pure-Rust ONNX backend. | You're targeting WASM or Android, or want no native library dependency at all. |
+| `ort-dynamic` | `ort` plus `dlopen`-based loading of `libonnxruntime` at runtime via `ORT_DYLIB_PATH`. | You want no build-time download — e.g. shipping a dylib next to the release binary — or you're on a [target with no prebuilt](#targets-with-no-prebuilt-onnx-runtime). |
+| `tract` | The pure-Rust ONNX backend. | You're targeting WASM or Android, want no native library dependency at all, or you're on a target with no prebuilt and no `libonnxruntime`. |
 | `candle` | Reserved for a future pure-Rust native-tensor backend. | Not yet implemented — do not select `Backend::Candle` in production. |
 | `download` | Runtime model download, caching, and SHA-256 verification from Hugging Face. | You want the library to fetch missing models itself rather than requiring them pre-provisioned. |
 | `mcp` | The MCP (`rmcp`) server surface. | You're running `sceptre mcp` or embedding the MCP server in your own binary. |
+| `ort-coreml` | Compiles in ONNX Runtime's CoreML execution provider. | You set `model.accelerator = "coreml"` (or `--accelerator coreml`) on macOS/iOS. |
+| `ort-directml` | Compiles in ONNX Runtime's DirectML execution provider. | You set `model.accelerator = "directml"` on Windows. |
+| `ort-cuda` | Compiles in ONNX Runtime's CUDA execution provider. | You set `model.accelerator = "cuda"` and your ONNX Runtime build carries CUDA. |
+
+The `ort-*` accelerator features only add the Rust-side provider registration; the ONNX Runtime
+build in use must also carry that provider. The pyke prebuilt for `aarch64-apple-darwin` is
+CoreML-enabled by construction, so on Apple Silicon `ort-coreml` is sufficient on its own.
 
 ## `ort` vs. `tract`: which backend
 
@@ -26,13 +33,38 @@ performance on desktop/server, `tract` for a pure-Rust WASM/Android build.
 
 ## CLI defaults
 
-The `sceptre-cli` binary's own `default` feature set is `["ort-dynamic", "download"]` — runnable out
-of the box once a compatible `libonnxruntime` is present, with model download enabled. Building
-with `--features ort-bundled` instead trades that runtime dependency for a build-time download,
-producing a fully self-contained binary. The CLI's `mcp` feature (off by default) forwards to
-`sceptre/mcp` and adds the `sceptre mcp` subcommand.
+The `sceptre-cli` binary's own `default` feature set is `["ort-bundled", "download"]`, so
+`cargo install sceptre-cli` produces a self-contained binary: the ONNX Runtime is fetched and linked
+at build time, and models download at first use. The CLI re-exports four features, each forwarding
+to the library: `ort-bundled`, `ort-dynamic`, `tract`, `download`, plus `mcp` (off by default) which
+adds the `sceptre mcp` subcommand. The CLI does not expose the `ort-*` accelerator features — build
+the library with them and depend on it directly if you need a non-CPU provider.
+
+`tract` is a CLI feature in its own right. Before it was exposed, `--backend tract` was accepted by
+the argument parser but could never resolve, because no shipped build compiled the backend in.
 
 <Aside type="tip">
-  `ort-bundled` and `ort-dynamic` are two provisioning strategies for the same `ort` backend — pick
-  one per target rather than enabling both.
+  `ort-bundled` and `ort-dynamic` are two provisioning strategies for the same `ort` backend, and
+  enabling both is the **supported** way to override the default. Cargo features are additive, so
+  `--features ort-dynamic` unions with the CLI's `ort-bundled` default — and `ort-dynamic` still
+  wins, because `load-dynamic` implies `ort-sys/disable-linking`, which the ort-sys build script
+  checks before its prebuilt-download branch. You do not need `--no-default-features` to switch
+  provisioning strategy.
 </Aside>
+
+## Targets with no prebuilt ONNX Runtime
+
+`ort-bundled` resolves a prebuilt runtime from a fixed target list. On a target that has none, the
+build fails with ort-sys's own `no prebuilt binaries available for target ...` — at **build** time,
+so `cargo install sceptre-cli` never produces a binary at all:
+
+- `x86_64-apple-darwin` (Intel macOS)
+- every `*-unknown-linux-musl` target (Alpine)
+- `armv7-unknown-linux-gnueabihf`
+- `riscv64gc-*`
+- `*-unknown-freebsd`
+- `i686-*`, `s390x-*`, `powerpc64le-*`
+
+On those targets pick `ort-dynamic` and supply a `libonnxruntime`, or drop `ort` entirely with
+`--no-default-features --features tract,download` and run with `--backend tract`. See
+[Installation](/start/installation/).

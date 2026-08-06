@@ -32,7 +32,7 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 
 | | What you get | Why it matters |
 |---|---|---|
-| **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic, plus Telugu and Kannada — matching text (word/char-F1) and boxes (IoU). | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
+| **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic, plus Telugu and Kannada — matching text (word/char-F1) and boxes (IoU), on the CPU execution provider. | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
 | **Substantially faster** | ~2.8× higher throughput than EasyOCR warm on the same corpus — and even a cold, one-shot CLI run (~4.4×) beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
 | **A fraction of the memory** | Peak RSS around **3× lower** than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
 | **One binary, no Python** | A single static executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
@@ -47,12 +47,29 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 cargo install sceptre-cli
 ```
 
-The models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached
-under the standard HF cache, and sha256-verified on download. Every run after that reads the cached
-models with no network.
+That default build is self-contained: it links a prebuilt ONNX Runtime fetched at build time
+(`ort-bundled`) and enables model download (`download`), so the binary needs no `ORT_DYLIB_PATH` and
+no separately installed `libonnxruntime`.
 
-> The default build loads ONNX Runtime at runtime (`ORT_DYLIB_PATH`). For a zero-config native
-> binary that bundles the runtime, install with `--features ort-bundled`.
+The models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached
+under the standard HF cache, and sha256-verified as they download. Every run after that reads the
+cached models with no network.
+
+> **Targets with no prebuilt ONNX Runtime.** `ort` publishes prebuilts for a fixed target list.
+> `x86_64-apple-darwin` (Intel macOS), every `*-unknown-linux-musl` (Alpine),
+> `armv7-unknown-linux-gnueabihf`, `riscv64gc-*`, `*-unknown-freebsd`, `i686-*`, `s390x`, and
+> `powerpc64le` have none, so the default install fails **at build time** with ort-sys's own
+> `no prebuilt binaries available for target ...`. Two remedies:
+>
+> ```sh
+> cargo install sceptre-cli --features ort-dynamic                          # bring your own libonnxruntime
+> cargo install sceptre-cli --no-default-features --features tract,download  # pure Rust, then --backend tract
+> ```
+>
+> `--features ort-dynamic` is additive, but it still wins over the bundled default: `load-dynamic`
+> implies `ort-sys/disable-linking`, which the ort-sys build script checks before its download
+> branch. So switching ONNX Runtime provisioning never needs `--no-default-features` — only the
+> pure-Rust path does, because it has to drop `ort` from the graph entirely.
 
 ## Quickstart
 
@@ -82,7 +99,7 @@ for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.li
 ```
 
 The library ships `default = []`, so enable a backend and model download:
-`sceptre = { version = "0.1", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
+`sceptre = { version = "0.3", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
 
 WASM and mobile hosts can avoid filesystem and network assumptions by calling `model_descriptors`,
 fetching the selected artifacts, constructing a `VerifiedModelProvider`, and passing it to
@@ -91,9 +108,11 @@ fetching the selected artifacts, constructing a `VerifiedModelProvider`, and pas
 Android and iOS hosts that package ONNX assets as real files may instead set both
 `model.detector_path` and `model.recognizer_path`; the default provider then bypasses Hugging Face.
 
-**MCP server** — expose a `readtext` tool to an agent:
+**MCP server** — expose a `readtext` tool to an agent. The `mcp` subcommand is behind the `mcp`
+cargo feature, which is off by default:
 
 ```sh
+cargo install sceptre-cli --features mcp
 sceptre mcp --lang english
 ```
 
@@ -115,6 +134,18 @@ model/reader once and processing every image — so peak RSS is a like-for-like 
 CER and token-F1 are at parity (sceptre is marginally ahead on token-F1); the win is speed and memory.
 Even a cold, one-shot CLI run — which pays model load every invocation — is ~4.4× faster than
 EasyOCR's already-warm reader.
+
+**Runtime scope.** Every figure above — speed, memory, and the parity claim — was produced on the
+`ort` backend running the **CPU execution provider**, which is what `model.accelerator` defaults to.
+The same ONNX graph produces different numeric output on a different provider, so an accelerated run
+is a different measurement, not a faster one. Select a provider with `--accelerator`
+(`cpu` | `auto` | `coreml` | `directml` | `cuda`) or `model.accelerator`; the matching cargo feature
+(`ort-coreml`, `ort-directml`, `ort-cuda`) must also be compiled in, and the ONNX Runtime build has
+to carry the provider. An **explicitly requested** provider that cannot register is a hard error, not
+a silent fall back to CPU — only `auto` is allowed to settle for whatever it finds. No accelerated
+provider is covered by a published parity run today: CoreML, DirectML, CUDA and TensorRT are all
+**unvalidated**, so none of the numbers above should be assumed to transfer. Re-run the parity
+harness on your own target before relying on them.
 
 `cargo bench` covers the internal hot paths; the head-to-head harness (`task python:benchmark`)
 reproduces the table above and writes `benchmark-results/comparison.{json,md}`. Use
@@ -148,17 +179,24 @@ Hugging Face org (Apache-2.0; see [`adrs/0025`](adrs/0025-first-party-onnx-expor
 
 ## Feature flags
 
-| Feature | Enables |
-| --- | --- |
-| `ort` | Native ONNX Runtime backend (desktop / server) |
-| `ort-bundled` | `ort` with a prebuilt runtime fetched at build time (zero-config) |
-| `tract` | Pure-Rust ONNX backend (WASM / Android) |
-| `download` | Runtime model download + cache from Hugging Face |
-| `mcp` | MCP (`rmcp`) server surface |
-| `candle` | Reserved for a future pure-Rust native-tensor backend (see ADR 0009) |
+| Feature | Enables | Library | CLI |
+| --- | --- | --- | --- |
+| `ort` | Native ONNX Runtime backend (desktop / server), provisioning-agnostic | ✓ | — |
+| `ort-bundled` | `ort` with a prebuilt runtime fetched at build time (zero-config) | ✓ | **default** |
+| `ort-dynamic` | `ort` loading `libonnxruntime` at runtime via `ORT_DYLIB_PATH` (no build-time download) | ✓ | ✓ |
+| `tract` | Pure-Rust ONNX backend (WASM / Android), selected at runtime with `--backend tract` | ✓ | ✓ |
+| `download` | Runtime model download + cache from Hugging Face | ✓ | **default** |
+| `mcp` | MCP (`rmcp`) server surface | ✓ | ✓ |
+| `ort-coreml` / `ort-directml` / `ort-cuda` | Compile in the matching ONNX Runtime execution provider for `model.accelerator` | ✓ | ✓ |
+| `candle` | Reserved for a future pure-Rust native-tensor backend (see ADR 0009) | ✓ | — |
 
-Configuration (`OcrConfig`) layers as defaults < config file < environment < CLI flags, and is
-backend-agnostic.
+The library ships `default = []`. The CLI ships `default = ["ort-bundled", "download"]`, so
+`cargo install sceptre-cli` produces a self-contained binary; `--features ort-dynamic` overrides the
+provisioning strategy without `--no-default-features` (see [Install](#install)).
+
+Configuration (`OcrConfig`) is backend-agnostic. The CLI builds it from `OcrConfig::default()` plus
+flags — there is no config-file loader and no `SCEPTRE_*` environment variable. `cache_dir`,
+`registry_owner`, `detector_path`, and `recognizer_path` are library-only fields with no CLI flag.
 
 ## Development
 
