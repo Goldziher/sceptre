@@ -94,6 +94,15 @@ if ort_features --no-default-features --features tract,download; then
   fi
 fi
 
+# 5. Each execution-provider feature must reach the matching ort feature. Without it the ~keep
+#    EP struct is not compiled in and `--accelerator <ep>` can only ever fail. ~keep
+for ep in coreml directml cuda; do
+  ep_label="--features ort-${ep}"
+  if ort_features --features "ort-${ep}"; then
+    assert_has "${ep_label}" "${ep}" "${resolved}"
+  fi
+done
+
 printf '\n'
 if ((failures > 0)); then
   printf '%d feature-resolution expectation(s) failed.\n' "${failures}" >&2

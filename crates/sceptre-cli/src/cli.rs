@@ -96,6 +96,14 @@ enum Commands {
         #[command(subcommand)]
         action: ModelsAction,
     },
+    /// Report the runtime this build would execute on, plus the model pins.
+    Env {
+        #[command(flatten)]
+        overrides: OcrOverrides,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
     /// Print shell completions to stdout.
     Completions {
         /// Target shell.
@@ -251,6 +259,23 @@ fn run_models(action: ModelsAction) -> Result<()> {
     Ok(())
 }
 
+/// Report the runtime and the model pins for the overridden configuration.
+///
+/// Probing goes through the overridden configuration so `--accelerator coreml`
+/// answers for CoreML rather than for the default; with no overrides this is
+/// exactly [`sceptre::runtime_info`], which reads the same default configuration.
+///
+/// The model pins describe the binary rather than one run, so without an explicit
+/// `--lang` every supported language is listed: a report that records this block
+/// once may have exercised any of them.
+fn run_env(overrides: OcrOverrides, format: OutputFormat) -> Result<()> {
+    let config = models_config(&overrides, !overrides.has_languages());
+    let runtime = sceptre::runtime_info_for(&config.model).context("describing the runtime")?;
+    let models = sceptre::model_descriptors(&config).context("resolving the model registry")?;
+    output::render_environment(&runtime, &models, format, &mut stdout()).context("writing the environment report")?;
+    Ok(())
+}
+
 impl Cli {
     /// Initialize tracing to stderr from the configured log level.
     pub fn init_tracing(&self) {
@@ -283,6 +308,7 @@ impl Cli {
                 format,
             } => run_recognize(image, overrides, format),
             Commands::Models { action } => run_models(action),
+            Commands::Env { overrides, format } => run_env(overrides, format),
             Commands::Completions { shell } => {
                 let mut command = Cli::command();
                 clap_complete::generate(shell, &mut command, "sceptre", &mut std::io::stdout());

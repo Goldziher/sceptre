@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anstyle::Style;
 use clap::ValueEnum;
-use sceptre::{ModelInfo, ModelRole, OcrResult, Quad, TextLine};
+use sceptre::{ModelDescriptor, ModelInfo, ModelRole, OcrResult, OrtRuntimeInfo, Quad, RuntimeInfo, TextLine};
 
 use crate::style;
 
@@ -29,6 +29,115 @@ struct ModelReport {
     role: String,
     cached: bool,
     path: Option<String>,
+}
+
+/// Text-mode placeholder for a runtime fact that could not be determined.
+const UNKNOWN: &str = "unknown";
+
+/// Serializable environment report: which build, backend, runtime and model pins.
+///
+/// The key names are a compatibility contract with `python/sceptre_rs_tools/benchmark.py`,
+/// which stores this payload as a report's `metadata.environment` block. It reads
+/// `version`, `backend`, `accelerator`, `onnxruntime` (taking its `version` field when the
+/// value is an object), and `models[].{name, repo, sha256}`. Renaming any of those silently
+/// nulls the corresponding provenance field in every published benchmark report.
+#[derive(serde::Serialize)]
+struct EnvironmentReport<'a> {
+    version: &'a str,
+    os: &'a str,
+    arch: &'a str,
+    backend: &'a str,
+    /// The accelerator that actually registered, or `None` when it could not be
+    /// determined — never the requested one, which would overstate what ran.
+    accelerator: Option<&'a str>,
+    accelerator_requested: &'a str,
+    onnxruntime: Option<&'a OrtRuntimeInfo>,
+    models: Vec<ModelPin>,
+}
+
+/// Serializable projection of [`ModelDescriptor`] (which is not itself `Serialize`).
+#[derive(serde::Serialize)]
+struct ModelPin {
+    name: String,
+    repo: String,
+    revision: String,
+    file: String,
+    sha256: String,
+    role: String,
+}
+
+/// Render the runtime environment and model pins as text or JSON.
+pub fn render_environment(
+    runtime: &RuntimeInfo,
+    models: &[ModelDescriptor],
+    format: OutputFormat,
+    writer: &mut dyn Write,
+) -> io::Result<()> {
+    let report = environment_report(runtime, models);
+    match format {
+        OutputFormat::Json => write_json(&report, writer),
+        OutputFormat::Text => write_environment_text(&report, writer),
+    }
+}
+
+/// Project a [`RuntimeInfo`] and its model pins into the serializable report.
+fn environment_report<'a>(runtime: &'a RuntimeInfo, models: &[ModelDescriptor]) -> EnvironmentReport<'a> {
+    EnvironmentReport {
+        version: runtime.sceptre_version,
+        os: runtime.os,
+        arch: runtime.arch,
+        backend: runtime.backend.as_str(),
+        accelerator: runtime.accelerator_registered.map(|accelerator| accelerator.as_str()),
+        accelerator_requested: runtime.accelerator_requested.as_str(),
+        onnxruntime: runtime.ort.as_ref(),
+        models: models.iter().map(model_pin).collect(),
+    }
+}
+
+/// Write the environment report as human-readable tab-separated rows.
+fn write_environment_text(report: &EnvironmentReport<'_>, writer: &mut dyn Write) -> io::Result<()> {
+    writeln!(writer, "{}", styled("ENVIRONMENT", style::heading()))?;
+    writeln!(writer, "version\t{}", report.version)?;
+    writeln!(writer, "platform\t{}/{}", report.os, report.arch)?;
+    writeln!(writer, "backend\t{}", report.backend)?;
+    writeln!(
+        writer,
+        "accelerator\t{}\t{}",
+        report.accelerator.unwrap_or(UNKNOWN),
+        styled(&format!("(requested {})", report.accelerator_requested), style::dim())
+    )?;
+    match report.onnxruntime {
+        Some(ort) => {
+            writeln!(
+                writer,
+                "onnxruntime\t{}\t{}",
+                ort.version.as_deref().unwrap_or(UNKNOWN),
+                styled(&format!("({})", ort.provisioning), style::dim())
+            )?;
+            if let Some(path) = &ort.dylib_path {
+                writeln!(writer, "ort_dylib_path\t{path}")?;
+            }
+            writeln!(writer, "ort_build_info\t{}", ort.build_info)?;
+        }
+        None => writeln!(writer, "onnxruntime\t{}", styled(UNKNOWN, style::warning()))?,
+    }
+    writeln!(writer, "{}", styled("MODELS", style::heading()))?;
+    for pin in &report.models {
+        writeln!(writer, "{}\t{}\t{}\t{}", pin.name, pin.role, pin.sha256, pin.repo)?;
+    }
+    Ok(())
+}
+
+/// Project a [`ModelDescriptor`] into its serializable [`ModelPin`].
+fn model_pin(descriptor: &ModelDescriptor) -> ModelPin {
+    ModelPin {
+        name: descriptor.name.clone(),
+        repo: descriptor.repo.clone(),
+        revision: descriptor.revision.clone(),
+        file: descriptor.file.clone(),
+        sha256: descriptor.sha256.clone(),
+        role: role_label(&descriptor.role),
+    }
 }
 
 /// Render a full OCR result as text or JSON.

@@ -47,6 +47,13 @@ ort-dynamic = ["sceptre/ort-dynamic"]
 # Pairs with `--no-default-features` for targets that have neither a prebuilt ONNX Runtime
 # nor a system libonnxruntime. ~keep
 tract = ["sceptre/tract"]
+# Execution providers selectable with `--accelerator`. Each compiles the Rust-side EP
+# struct into the binary; the linked ONNX Runtime must also have been built with the
+# provider, which `sceptre env` reports. Without them `--accelerator coreml` fails loudly
+# rather than silently running on the CPU. ~keep
+ort-coreml = ["sceptre/ort-coreml"]
+ort-directml = ["sceptre/ort-directml"]
+ort-cuda = ["sceptre/ort-cuda"]
 # Runtime model download, caching, and sha256 verification from Hugging Face. ~keep
 download = ["sceptre/download"]
 # Expose the MCP server as the `mcp` subcommand. ~keep
