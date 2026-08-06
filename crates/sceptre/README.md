@@ -4,9 +4,10 @@
 
 A from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s OCR
 pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX.
-It matches EasyOCR's output across eight scripts (English, Latin, Chinese-simplified, Japanese,
-Korean, Cyrillic, Telugu, Kannada) on the CPU execution provider, with no Python runtime, and runs on
-native ONNX Runtime (`ort`) or a pure-Rust backend (`tract`) behind one seam.
+It agrees with EasyOCR's output across eight scripts (English, Latin, Chinese-simplified, Japanese,
+Korean, Cyrillic, Telugu, Kannada) on the `ort` backend's CPU execution provider — the `tract` backend
+uses a fixed detection canvas that can group text lines differently (see ADR 0027) — with no Python
+runtime, and runs on native ONNX Runtime (`ort`) or a pure-Rust backend (`tract`) behind one seam.
 
 Models download from Hugging Face on first use, cache locally, and are sha256-verified on download —
 every run after that reads the cache with no network.

@@ -7,9 +7,10 @@
 
 sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
 OCR pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX.
-It matches EasyOCR's output on every script it supports, runs **~2.8× faster on a fraction of the
-memory** (and a cold one-shot run is ~4.4× faster than EasyOCR warm), and ships as one self-contained
-binary with **no Python runtime**. Use it as a **library**, a **CLI**, or an **MCP server**.
+It agrees with EasyOCR's output across the scripts it supports, runs **~2.8× faster on a fraction of
+the memory** (and a cold one-shot run is ~4.4× faster than EasyOCR warm), and ships as one
+self-contained binary with **no Python runtime**. Use it as a **library**, a **CLI**, or an **MCP
+server**.
 
 8 scripts · CRAFT + gen2 CRNN · ONNX Runtime **or** pure-Rust · library · CLI · MCP · offline-first
 
@@ -32,10 +33,10 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 
 | | What you get | Why it matters |
 |---|---|---|
-| **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic, plus Telugu and Kannada — matching text (word/char-F1) and boxes (IoU), on the CPU execution provider. | A faithful reimplementation, not an approximation. What EasyOCR reads, sceptre reads. |
+| **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic, plus Telugu and Kannada — agreeing on text (word/char-F1) and boxes (IoU), on the `ort` backend's CPU execution provider. | A faithful reimplementation, held to a per-image word-F1 and box-IoU floor rather than character-for-character equality. |
 | **Substantially faster** | ~2.8× higher throughput than EasyOCR warm on the same corpus — and even a cold, one-shot CLI run (~4.4×) beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
 | **A fraction of the memory** | Peak RSS around **3× lower** than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
-| **One binary, no Python** | A single static executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
+| **One binary, no Python** | A single self-contained executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
 | **Three surfaces** | The same engine as a Rust **library**, a **CLI** (`sceptre`), and an **MCP server** for agents. | Drop it into a service, a shell pipeline, or an AI tool without re-plumbing. |
 | **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM / Android — behind one seam. | Portability when you need it, native performance when you don't. |
 
@@ -118,12 +119,13 @@ sceptre mcp --lang english
 
 ## Benchmarks
 
-Measured against upstream EasyOCR over a 43-image mixed corpus (documents, tables, rotated scans,
-scene text, receipts, five scripts), on CPU. Both engines are measured **identically** — each a fresh
-subprocess per language group under `/usr/bin/time`, at its native multi-threaded default, loading its
-model/reader once and processing every image — so peak RSS is a like-for-like whole-process figure
-(EasyOCR's legitimately includes the torch runtime). Numbers vary with hardware and load; the
-**ratios** are the point.
+Measured against upstream EasyOCR over a 43-entry mixed corpus — 40 measured (documents, tables,
+rotated scans, scene text, receipts, across five of the eight supported recognizer groups: English,
+Latin, Chinese-simplified, Japanese, Korean) plus 3 capability-format gaps — on CPU. Both engines are
+measured **identically** — each a fresh subprocess per language group under `/usr/bin/time`, at its
+native multi-threaded default, loading its model/reader once and processing every image — so peak RSS
+is a like-for-like whole-process figure (EasyOCR's legitimately includes the torch runtime). Numbers
+vary with hardware and load; the **ratios** are the point.
 
 | Engine | Throughput (img/s) | Peak RSS | Mean CER | Mean token-F1 |
 |---|---|---|---|---|
@@ -142,10 +144,11 @@ is a different measurement, not a faster one. Select a provider with `--accelera
 (`cpu` | `auto` | `coreml` | `directml` | `cuda`) or `model.accelerator`; the matching cargo feature
 (`ort-coreml`, `ort-directml`, `ort-cuda`) must also be compiled in, and the ONNX Runtime build has
 to carry the provider. An **explicitly requested** provider that cannot register is a hard error, not
-a silent fall back to CPU — only `auto` is allowed to settle for whatever it finds. No accelerated
-provider is covered by a published parity run today: CoreML, DirectML, CUDA and TensorRT are all
-**unvalidated**, so none of the numbers above should be assumed to transfer. Re-run the parity
-harness on your own target before relying on them.
+a silent fall back to CPU — only `auto` is allowed to settle for whatever it finds. The parity
+figures above cover only the `ort` backend's CPU execution provider, validated against the golden
+fixtures under [`crates/sceptre/tests/data/golden/`](crates/sceptre/tests/data/golden/): CoreML,
+DirectML and CUDA are all **unvalidated**, so none of the numbers above should be assumed to transfer.
+Re-run the parity harness on your own target before relying on them.
 
 `cargo bench` covers the internal hot paths; the head-to-head harness (`task python:benchmark`)
 reproduces the table above and writes `benchmark-results/comparison.{json,md}`. Use
@@ -189,14 +192,17 @@ Hugging Face org (Apache-2.0; see [`adrs/0025`](adrs/0025-first-party-onnx-expor
 | `mcp` | MCP (`rmcp`) server surface | ✓ | ✓ |
 | `ort-coreml` / `ort-directml` / `ort-cuda` | Compile in the matching ONNX Runtime execution provider for `model.accelerator` | ✓ | ✓ |
 | `candle` | Reserved for a future pure-Rust native-tensor backend (see ADR 0009) | ✓ | — |
+| `bench` | Exposes the crate's internal hot paths through a `bench` seam for criterion benchmarking (see ADR 0015) | ✓ | — |
 
 The library ships `default = []`. The CLI ships `default = ["ort-bundled", "download"]`, so
 `cargo install sceptre-cli` produces a self-contained binary; `--features ort-dynamic` overrides the
 provisioning strategy without `--no-default-features` (see [Install](#install)).
 
 Configuration (`OcrConfig`) is backend-agnostic. The CLI builds it from `OcrConfig::default()` plus
-flags — there is no config-file loader and no `SCEPTRE_*` environment variable. `cache_dir`,
-`registry_owner`, `detector_path`, and `recognizer_path` are library-only fields with no CLI flag.
+flags — there is no config-file loader and no `SCEPTRE_*` environment variable. The CLI does read one
+env var, `EASYOCR_LOG` (sets `--log-level`), a name kept from the project's EasyOCR lineage.
+`cache_dir`, `registry_owner`, `detector_path`, and `recognizer_path` are library-only fields with no
+CLI flag.
 
 ## Development
 
