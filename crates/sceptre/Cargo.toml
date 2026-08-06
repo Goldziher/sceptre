@@ -13,6 +13,13 @@ readme = "README.md"
 keywords = ["ocr", "text-recognition", "easyocr", "craft", "onnx"]
 categories = ["computer-vision", "text-processing"]
 
+# docs.rs has no network in the build sandbox, so the `ort-bundled` prebuilt download
+# cannot run there; document the dynamic + pure-Rust surface instead. ~keep
+[package.metadata.docs.rs]
+no-default-features = true
+features = ["ort-dynamic", "tract", "download", "mcp"]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lib]
 name = "sceptre"
 
@@ -34,6 +41,12 @@ download = ["dep:hf-hub"]
 mcp = ["dep:rmcp", "dep:schemars", "dep:tokio"]
 # Exposes the crate-internal hot paths through the `bench` seam module for criterion (ADR 0015). ~keep
 bench = []
+# Execution-provider support for `model.accelerator`. These compile in the Rust-side EP struct
+# only; the ONNX Runtime build must also carry the provider. The pyke prebuilt for
+# aarch64-apple-darwin is CoreML-enabled by construction, so on macOS `ort-coreml` is enough. ~keep
+ort-coreml = ["ort", "ort?/coreml"]
+ort-directml = ["ort", "ort?/directml"]
+ort-cuda = ["ort", "ort?/cuda"]
 
 [dependencies]
 hf-hub = { workspace = true, optional = true }

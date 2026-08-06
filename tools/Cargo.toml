@@ -23,6 +23,8 @@ ort = ["dep:sceptre", "dep:serde_json"]
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+# This ort-bundled pin now agrees with the sceptre-cli default, so a workspace-wide build
+# no longer unifies two ONNX Runtime provisioning strategies into one feature set. ~keep
 sceptre = { workspace = true, optional = true, features = ["ort-bundled", "download"] }
 serde_json = { workspace = true, optional = true }
 
