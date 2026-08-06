@@ -10,7 +10,9 @@
 //! the `download` feature is enabled, verifying the SHA-256 against the registry
 //! pin (every CRAFT and gen2 artifact is pinned; see the registry). A cached
 //! artifact is trusted (verified when first downloaded) and returned without a
-//! network round-trip.
+//! network round-trip, but only once it passes a cheap usability check that keeps
+//! a concurrently-downloading or interrupted cache entry from being handed back;
+//! an artifact that fails its pin is evicted so the next run re-downloads it.
 //!
 //! The registry host is re-pointable: the optional `registry_owner` override
 //! (see [`crate::config::ModelConfig`] and ADR 0003) swaps the owner segment of
@@ -58,7 +60,7 @@ pub fn ensure(entry: &ModelEntry, cache_dir_override: Option<&Path>, registry_ow
         .send()
         .map_err(|source| model_error(format!("could not download `{}` from `{repo}`", entry.file), source))?;
 
-    verify_sha256_file(&path, entry.sha256, entry.name)?;
+    verify_or_evict(&path, entry.sha256, entry.name)?;
     Ok(path)
 }
 
@@ -127,31 +129,45 @@ pub(crate) fn repo_cache_dir_name(repo_id: &str) -> String {
 
 /// Resolve a cached model file within the hub cache without touching the network.
 ///
-/// Under `<root>/<repo_cache_dir_name>/snapshots/`, returns the file inside the
-/// newest snapshot subdirectory (by modification time) that actually contains
-/// `file`, or `None` when the repo, the snapshots directory, or the file is
-/// absent. This is the offline "is it cached, and where" check.
+/// Under `<root>/<repo_cache_dir_name>/snapshots/`, returns the newest snapshot
+/// subdirectory (by modification time) holding a *usable* `file`, or `None` when
+/// the repo, the snapshots directory, or every candidate is absent or unusable.
+/// This is the offline "is it cached, and where" check.
+///
+/// A `None` here is not an error: the caller falls through to the hf-hub download
+/// path, which takes the hub's advisory per-file lock. Rejecting an unusable
+/// candidate is therefore how a concurrent or interrupted download is made safe —
+/// see [`is_usable_artifact`] for what "usable" means.
 pub(crate) fn resolve_cached(root: &Path, repo_id: &str, file: &str) -> Option<PathBuf> {
     let snapshots = root.join(repo_cache_dir_name(repo_id)).join("snapshots");
-    let mut candidates: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(&snapshots)
+    std::fs::read_dir(&snapshots)
         .ok()?
         .filter_map(std::result::Result::ok)
-        .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| {
             let candidate = entry.path().join(file);
-            if candidate.exists() {
-                let modified = entry
-                    .metadata()
-                    .and_then(|meta| meta.modified())
-                    .unwrap_or(SystemTime::UNIX_EPOCH);
-                Some((modified, candidate))
-            } else {
-                None
+            if !is_usable_artifact(&candidate) {
+                return None;
             }
+            let modified = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            Some((modified, candidate))
         })
-        .collect();
-    candidates.sort_by_key(|(modified, _)| *modified);
-    candidates.pop().map(|(_, path)| path)
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
+}
+
+/// Whether a snapshot path is a model artifact safe to hand back without a download.
+///
+/// Uses [`std::fs::metadata`], which follows symlinks — hf-hub exposes snapshot
+/// entries as symlinks into the content-addressed `blobs/` store, so a download
+/// still in flight can be observed as a dangling link or a zero-length placeholder.
+/// A path is usable only when it stats successfully (excluding dangling links and
+/// unreadable entries), is a regular file, and is non-empty. Anything else is
+/// treated as a cache miss so the caller re-enters hf-hub's locked download path.
+fn is_usable_artifact(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() > 0)
 }
 
 /// Number of hex characters emitted per byte when formatting a digest.
@@ -183,6 +199,94 @@ fn verify_sha256_file(path: &Path, expected_sha256: &str, model_name: &str) -> R
         Err(OcrError::model(format!(
             "sha256 mismatch for `{model_name}`: expected {expected_sha256}, got {actual}"
         )))
+    }
+}
+
+/// Verify an artifact against its pin, deleting it from the cache on mismatch.
+///
+/// Without eviction a corrupt artifact is permanently sticky: [`resolve_cached`]
+/// would keep returning it on every subsequent run and the error would never clear
+/// without manual cache surgery. Removing it turns the mismatch into a cache miss,
+/// so the next run re-downloads through hf-hub's locked path and self-heals.
+///
+/// Both the snapshot entry and — when the entry is a symlink — its `blobs/` target
+/// are removed. Removing only the symlink would leave hf-hub free to re-link the
+/// same corrupt content-addressed blob; removing only the blob would leave a
+/// dangling link behind. Deletion is scoped to exactly those two paths: the link
+/// target is followed only when it resolves to a regular file directly inside a
+/// directory named `blobs`, so nothing outside the hub cache layout is touched.
+/// A failed deletion is logged and the original mismatch error is still returned.
+#[cfg(feature = "download")]
+fn verify_or_evict(path: &Path, expected_sha256: &str, model_name: &str) -> Result<()> {
+    let error = match verify_sha256_file(path, expected_sha256, model_name) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    evict_artifact(path, model_name);
+    Err(error)
+}
+
+/// The hub cache directory holding content-addressed blobs.
+#[cfg(feature = "download")]
+const BLOBS_DIR_NAME: &str = "blobs";
+
+/// Remove a corrupt artifact and its backing blob from the hub cache.
+///
+/// See [`verify_or_evict`] for why both are removed and how the blob is scoped.
+#[cfg(feature = "download")]
+fn evict_artifact(path: &Path, model_name: &str) {
+    let blob = backing_blob(path);
+    if let Err(source) = std::fs::remove_file(path) {
+        tracing::warn!(
+            model = model_name,
+            path = %path.display(),
+            error = %source,
+            "could not evict the corrupt model artifact; clear the cache entry manually"
+        );
+    } else {
+        tracing::warn!(
+            model = model_name,
+            path = %path.display(),
+            "evicted a corrupt model artifact from the cache; it will be re-downloaded"
+        );
+    }
+    let Some(blob) = blob else { return };
+    if let Err(source) = std::fs::remove_file(&blob) {
+        tracing::warn!(
+            model = model_name,
+            path = %blob.display(),
+            error = %source,
+            "could not evict the corrupt model blob; clear the cache entry manually"
+        );
+    } else {
+        tracing::warn!(
+            model = model_name,
+            path = %blob.display(),
+            "evicted the corrupt model blob backing the cached artifact"
+        );
+    }
+}
+
+/// The `blobs/` file a snapshot symlink points at, when it is one.
+///
+/// Returns `None` for a regular file, an unresolvable link, or any target that is
+/// not a regular file living directly inside a `blobs` directory — the guard that
+/// keeps eviction inside the hub cache layout.
+#[cfg(feature = "download")]
+fn backing_blob(path: &Path) -> Option<PathBuf> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_symlink() {
+        return None;
+    }
+    let target = std::fs::canonicalize(path).ok()?;
+    let parent_is_blobs = target
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == BLOBS_DIR_NAME);
+    if parent_is_blobs && target.is_file() {
+        Some(target)
+    } else {
+        None
     }
 }
 
@@ -355,6 +459,86 @@ mod tests {
 
         std::fs::remove_dir_all(&root).ok();
     }
+
+    /// A unique, per-test temporary directory path so tests stay order-independent
+    /// and safely parallel.
+    pub(super) fn unique_temp_dir(label: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("sceptre-{label}-{}-{unique}", std::process::id()))
+    }
+
+    /// Create `<root>/<repo cache dir>/snapshots/<revision>` and return it.
+    pub(super) fn snapshot_dir(root: &Path, repo: &str, revision: &str) -> PathBuf {
+        let snapshot = root.join(repo_cache_dir_name(repo)).join("snapshots").join(revision);
+        std::fs::create_dir_all(&snapshot).expect("snapshot directory should be creatable");
+        snapshot
+    }
+
+    const TEST_REPO: &str = "sceptre-ocr/english_g2";
+    const TEST_FILE: &str = "english_g2.onnx";
+
+    #[test]
+    fn resolve_cached_returns_none_for_a_dangling_symlink() {
+        #[cfg(unix)]
+        {
+            let root = unique_temp_dir("resolve-dangling");
+            let snapshot = snapshot_dir(&root, TEST_REPO, "rev0");
+            let blobs = root.join(repo_cache_dir_name(TEST_REPO)).join("blobs");
+            std::fs::create_dir_all(&blobs).unwrap();
+            std::os::unix::fs::symlink(blobs.join("missing-etag"), snapshot.join(TEST_FILE)).unwrap();
+
+            assert_eq!(
+                resolve_cached(&root, TEST_REPO, TEST_FILE),
+                None,
+                "a dangling snapshot symlink must not be reported as cached"
+            );
+
+            std::fs::remove_dir_all(&root).ok();
+        }
+    }
+
+    #[test]
+    fn resolve_cached_returns_none_for_a_zero_length_file() {
+        let root = unique_temp_dir("resolve-empty-file");
+        let snapshot = snapshot_dir(&root, TEST_REPO, "rev0");
+        std::fs::write(snapshot.join(TEST_FILE), b"").unwrap();
+
+        assert_eq!(
+            resolve_cached(&root, TEST_REPO, TEST_FILE),
+            None,
+            "a zero-length artifact must not be reported as cached"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resolve_cached_returns_the_path_for_a_healthy_file() {
+        let root = unique_temp_dir("resolve-healthy");
+        let snapshot = snapshot_dir(&root, TEST_REPO, "rev0");
+        let planted = snapshot.join(TEST_FILE);
+        std::fs::write(&planted, b"onnx-bytes").unwrap();
+
+        assert_eq!(resolve_cached(&root, TEST_REPO, TEST_FILE), Some(planted));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resolve_cached_prefers_a_healthy_snapshot_over_a_broken_newer_one() {
+        let root = unique_temp_dir("resolve-mixed");
+        let healthy = snapshot_dir(&root, TEST_REPO, "rev-old").join(TEST_FILE);
+        std::fs::write(&healthy, b"onnx-bytes").unwrap();
+        let broken = snapshot_dir(&root, TEST_REPO, "rev-new").join(TEST_FILE);
+        std::fs::write(&broken, b"").unwrap();
+
+        assert_eq!(resolve_cached(&root, TEST_REPO, TEST_FILE), Some(healthy));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
 }
 
 #[cfg(all(test, feature = "download"))]
@@ -433,6 +617,72 @@ mod download_tests {
         // Resolves from the planted cache with no Hub client built and no network. ~keep
         let path = ensure(&entry, Some(root.as_path()), None).expect("cached artifact resolves offline");
         assert_eq!(path, planted);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn verify_or_evict_removes_a_corrupt_artifact_and_leaves_the_cache_a_miss() {
+        use super::tests::{snapshot_dir, unique_temp_dir};
+
+        let root = unique_temp_dir("evict-plain");
+        let repo = "sceptre-ocr/english_g2";
+        let file = "english_g2.onnx";
+        let planted = snapshot_dir(&root, repo, "rev0").join(file);
+        std::fs::write(&planted, b"corrupt").unwrap();
+
+        let error = verify_or_evict(&planted, ABC_SHA256, "english_g2").expect_err("a mismatched pin must error");
+        assert!(matches!(error, OcrError::Model { .. }), "expected OcrError::Model");
+        assert!(!planted.exists(), "the corrupt artifact must be evicted");
+        assert_eq!(
+            resolve_cached(&root, repo, file),
+            None,
+            "the next run must see a cache miss and re-download"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn verify_or_evict_removes_both_the_snapshot_symlink_and_its_blob() {
+        #[cfg(unix)]
+        {
+            use super::tests::{snapshot_dir, unique_temp_dir};
+
+            let root = unique_temp_dir("evict-symlink");
+            let repo = "sceptre-ocr/english_g2";
+            let file = "english_g2.onnx";
+            let snapshot = snapshot_dir(&root, repo, "rev0");
+            let blobs = root.join(repo_cache_dir_name(repo)).join("blobs");
+            std::fs::create_dir_all(&blobs).unwrap();
+            let blob = blobs.join("etag0");
+            std::fs::write(&blob, b"corrupt").unwrap();
+            let link = snapshot.join(file);
+            std::os::unix::fs::symlink(&blob, &link).unwrap();
+
+            let error = verify_or_evict(&link, ABC_SHA256, "english_g2").expect_err("a mismatched pin must error");
+            assert!(matches!(error, OcrError::Model { .. }), "expected OcrError::Model");
+            assert!(!blob.exists(), "the corrupt blob must be evicted");
+            assert!(
+                std::fs::symlink_metadata(&link).is_err(),
+                "the snapshot symlink must be evicted"
+            );
+            assert_eq!(resolve_cached(&root, repo, file), None, "the cache must read as a miss");
+
+            std::fs::remove_dir_all(&root).ok();
+        }
+    }
+
+    #[test]
+    fn verify_or_evict_keeps_a_matching_artifact() {
+        use super::tests::{snapshot_dir, unique_temp_dir};
+
+        let root = unique_temp_dir("evict-ok");
+        let planted = snapshot_dir(&root, "sceptre-ocr/english_g2", "rev0").join("english_g2.onnx");
+        std::fs::write(&planted, b"abc").unwrap();
+
+        verify_or_evict(&planted, ABC_SHA256, "english_g2").expect("a matching pin must pass");
+        assert!(planted.exists(), "a healthy artifact must be left in place");
 
         std::fs::remove_dir_all(&root).ok();
     }

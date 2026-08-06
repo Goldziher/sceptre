@@ -129,6 +129,58 @@ fn should_strip_color_when_no_color_set() {
         .stdout(predicate::str::contains("\u{1b}").not());
 }
 
+/// Every gen2 recognizer artifact, i.e. what `--all` must expand to.
+const ALL_RECOGNIZERS: [&str; 8] = [
+    "english_g2",
+    "latin_g2",
+    "zh_sim_g2",
+    "japanese_g2",
+    "korean_g2",
+    "cyrillic_g2",
+    "telugu_g2",
+    "kannada_g2",
+];
+
+#[test]
+fn should_list_every_language_when_all_is_set() {
+    let mut assertion = sceptre()
+        .args(["models", "list", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("craft_mlt_25k"));
+    for model in ALL_RECOGNIZERS {
+        assertion = assertion.stdout(predicate::str::contains(model));
+    }
+}
+
+#[test]
+fn should_list_only_the_selected_language_without_all() {
+    sceptre()
+        .args(["models", "list", "--lang", "korean"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("korean_g2"))
+        .stdout(predicate::str::contains("kannada_g2").not());
+}
+
+#[test]
+fn should_reject_all_combined_with_an_explicit_language() {
+    sceptre()
+        .args(["models", "list", "--all", "--lang", "korean"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn should_document_all_in_models_download_help() {
+    sceptre()
+        .args(["models", "download", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--all"));
+}
+
 #[test]
 fn should_reject_out_of_range_link_threshold_at_parse() {
     sceptre()

@@ -25,7 +25,10 @@ fn parse_probability(raw: &str) -> core::result::Result<f32, String> {
 #[derive(Debug, Default, Args)]
 pub struct OcrOverrides {
     /// Recognition languages (repeatable), e.g. `--lang english --lang latin`.
-    #[arg(long = "lang", value_enum)]
+    ///
+    /// The explicit `id` lets sibling flags name this argument in a
+    /// `conflicts_with` relation by its user-facing spelling.
+    #[arg(id = "lang", long = "lang", value_enum)]
     languages: Vec<LanguageArg>,
 
     /// Maximum number of worker threads.
@@ -82,6 +85,16 @@ pub enum BackendArg {
     Candle,
 }
 
+/// Every supported recognition language, in the order declared by [`LanguageArg`].
+///
+/// Derived from the `ValueEnum` variant list, so a new language is picked up
+/// without a second place to update.
+pub fn every_language() -> Vec<sceptre::Language> {
+    use clap::ValueEnum as _;
+
+    LanguageArg::value_variants().iter().copied().map(Into::into).collect()
+}
+
 impl From<LanguageArg> for sceptre::Language {
     fn from(value: LanguageArg) -> Self {
         use sceptre::Language;
@@ -135,7 +148,21 @@ impl OcrOverrides {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_probability;
+    use super::{LanguageArg, every_language, parse_probability};
+
+    #[test]
+    fn should_expand_every_language_to_all_value_enum_variants() {
+        use clap::ValueEnum as _;
+
+        let languages = every_language();
+        assert_eq!(languages.len(), LanguageArg::value_variants().len());
+        assert!(languages.contains(&sceptre::Language::English));
+        assert!(languages.contains(&sceptre::Language::Kannada));
+
+        let mut deduplicated = languages.clone();
+        deduplicated.dedup();
+        assert_eq!(deduplicated.len(), languages.len(), "no language may repeat");
+    }
 
     #[test]
     fn should_accept_probabilities_within_the_unit_interval() {

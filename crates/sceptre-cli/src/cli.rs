@@ -32,6 +32,9 @@ pub enum ModelsAction {
     List {
         #[command(flatten)]
         overrides: OcrOverrides,
+        /// Cover every supported language instead of the configured ones.
+        #[arg(long, conflicts_with = "lang")]
+        all: bool,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
@@ -40,6 +43,9 @@ pub enum ModelsAction {
     Download {
         #[command(flatten)]
         overrides: OcrOverrides,
+        /// Download every supported language, not just the configured ones.
+        #[arg(long, conflicts_with = "lang")]
+        all: bool,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
@@ -219,16 +225,25 @@ fn run_recognize(image: PathBuf, overrides: OcrOverrides, format: OutputFormat) 
     Ok(())
 }
 
+/// Build the `models` config, expanding `--all` to every supported language.
+fn models_config(overrides: &OcrOverrides, all: bool) -> OcrConfig {
+    let mut config = config_from(overrides);
+    if all {
+        config.model.languages = crate::overrides::every_language();
+    }
+    config
+}
+
 /// Dispatch a `models` subcommand.
 fn run_models(action: ModelsAction) -> Result<()> {
     match action {
-        ModelsAction::List { overrides, format } => {
-            let config = config_from(&overrides);
+        ModelsAction::List { overrides, all, format } => {
+            let config = models_config(&overrides, all);
             let models = sceptre::model_manifest(&config).context("building the model manifest")?;
             output::render_models(&models, format, &mut stdout()).context("writing the model list")?;
         }
-        ModelsAction::Download { overrides, format } => {
-            let config = config_from(&overrides);
+        ModelsAction::Download { overrides, all, format } => {
+            let config = models_config(&overrides, all);
             let models = sceptre::download_models(&config).context("downloading models")?;
             output::render_models(&models, format, &mut stdout()).context("writing the model list")?;
         }
