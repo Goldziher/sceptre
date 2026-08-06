@@ -7,6 +7,11 @@ and baseline deltas), and the regression gate.
 
 from __future__ import annotations
 
+import os
+import platform
+from pathlib import Path
+
+import pytest
 from sceptre_rs_tools import benchmark as b
 
 # -- text/box metrics (mirror crates/sceptre/tests/helpers/mod.rs) ----------------------
@@ -85,10 +90,17 @@ def test_parse_easyocr_runner_json_reads_detections_and_build() -> None:
         '{"reader_build_seconds": 1.5, "images": [{"image": "a.png", "seconds": 0.2, '
         '"detections": [{"text": "HI", "quad": [[0,0],[1,0],[1,1],[0,1]]}]}]}'
     )
-    build, per_image = b._parse_easyocr_runner_json(payload)
+    build, versions, per_image = b._parse_easyocr_runner_json(payload)
     assert build == 1.5
+    assert versions == {}
     assert per_image["a.png"].seconds == 0.2
     assert per_image["a.png"].text == "HI"
+
+
+def test_parse_easyocr_runner_json_reads_reference_versions() -> None:
+    payload = '{"reader_build_seconds": 1.5, "versions": {"easyocr": "1.7.2", "torch": "2.5.1"}, "images": []}'
+    _, versions, _ = b._parse_easyocr_runner_json(payload)
+    assert versions == {"easyocr": "1.7.2", "torch": "2.5.1"}
 
 
 def test_merge_per_image_flattens_batches() -> None:
@@ -162,3 +174,74 @@ def test_check_thresholds_flags_quality_regression() -> None:
     # sceptre token-F1 0.5 is far below EasyOCR 0.8 - 0.05.
     breaches = b.check_thresholds(_report(0.5, 0.8, 500.0, 11000.0))
     assert any("token-F1" in breach for breach in breaches)
+
+
+# -- environment provenance -------------------------------------------------------------
+
+
+def test_environment_metadata_records_host_and_reference_versions(tmp_path: Path) -> None:
+    missing_binary = tmp_path / "sceptre"
+    environment = b.environment_metadata(
+        missing_binary, tmp_path, ["english"], {"easyocr": "1.7.2", "torch": "2.5.1", "python": "3.11.9"}
+    )
+    assert environment["os"] == platform.system()
+    assert environment["arch"] == platform.machine()
+    assert environment["cpu_count"] == os.cpu_count()
+    assert environment["sceptre_binary"] == str(missing_binary)
+    assert environment["reference"] == {
+        "easyocr_version": "1.7.2",
+        "torch_version": "2.5.1",
+        "python": "3.11.9",
+    }
+
+
+@pytest.mark.skipif(os.name != "posix", reason="the stub binary is a POSIX shell script")
+def test_environment_metadata_prefers_the_env_subcommand(tmp_path: Path) -> None:
+    payload = (
+        '{"version": "0.4.0", "backend": "ort", "accelerator": "coreml", '
+        '"onnxruntime": {"version": "1.22.0"}, '
+        '"models": [{"name": "craft_mlt_25k", "repo": "sceptre-ocr/craft_mlt_25k", "sha256": "159f5f"}]}'
+    )
+    binary = tmp_path / "sceptre"
+    binary.write_text(f"#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n", encoding="utf-8")
+    binary.chmod(0o755)
+
+    environment = b.environment_metadata(binary, tmp_path, ["english"], {})
+
+    assert environment["sceptre_version"] == "0.4.0"
+    assert environment["backend"] == "ort"
+    assert environment["accelerator"] == "coreml"
+    assert environment["onnxruntime"] == {"version": "1.22.0"}
+    assert environment["models"][0]["sha256"] == "159f5f"
+    assert environment["probe"] == "sceptre env --format json"
+
+
+def test_environment_metadata_leaves_unprobeable_fields_none(tmp_path: Path) -> None:
+    environment = b.environment_metadata(tmp_path / "sceptre", tmp_path, ["english"], {})
+    assert environment["sceptre_version"] is None
+    assert environment["backend"] is None
+    assert environment["accelerator"] is None
+    assert environment["onnxruntime"] is None
+    assert environment["models"] == []
+
+
+def test_render_markdown_reports_the_runtime_line() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.metadata["environment"] = {
+        "sceptre_version": "0.3.0",
+        "backend": "ort",
+        "accelerator": "cpu",
+        "onnxruntime": {"version": "1.22.0"},
+        "os": "Darwin",
+        "arch": "arm64",
+        "cpu_count": 10,
+        "reference": {"easyocr_version": "1.7.2", "torch_version": "2.5.1"},
+    }
+    markdown = b.render_markdown(report)
+    assert "- Runtime: sceptre 0.3.0 (ort/cpu, ONNX Runtime 1.22.0) on Darwin/arm64, 10 cores" in markdown
+    assert "reference: EasyOCR 1.7.2, torch 2.5.1" in markdown
+
+
+def test_render_markdown_omits_the_runtime_line_without_an_environment() -> None:
+    markdown = b.render_markdown(_report(0.9, 0.8, 500.0, 11000.0))
+    assert "- Runtime:" not in markdown

@@ -6,6 +6,11 @@ iteration (fast ``--group`` / ``--limit`` subsets, ``--repeats`` for stable numb
 ``--baseline`` delta view, and a ``--assert`` regression gate). Results are written to
 ``benchmark-results/comparison.{json,md}``.
 
+Provenance — every report records the runtimes that produced it in ``metadata.environment``:
+the sceptre binary's version, backend, accelerator, ONNX Runtime and model pins (probed from
+the binary under test, not from this checkout), plus the reference EasyOCR/torch/Python
+versions reported by the runner. A published number without its runtime is not reproducible.
+
 Fairness — both engines are measured identically (see the benchmark-methodology ADR):
   * Each engine runs as a FRESH SUBPROCESS per language group, under ``/usr/bin/time``, so
     peak RSS is a whole-process figure captured the same way for both. The EasyOCR RSS
@@ -29,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import re
 import statistics
@@ -252,6 +258,8 @@ class BatchResult:
     rss_mb: float | None
     build_seconds: float | None
     per_image: dict[str, ImageDetections]
+    versions: dict[str, str] = field(default_factory=dict)
+    """Runtime versions reported by the engine's driver (EasyOCR only); provenance for the report."""
 
     def warm_per_image(self) -> float | None:
         """Amortized warm inner seconds per image: (total - build) / image_count."""
@@ -476,10 +484,12 @@ def _easyocr_runner_command(images: list[Path], easyocr_codes: list[str], thread
     return command
 
 
-def _parse_easyocr_runner_json(payload: str) -> tuple[float | None, dict[str, ImageDetections]]:
-    """Parse ``_easyocr_runner`` stdout into (reader_build_seconds, per_image)."""
+def _parse_easyocr_runner_json(payload: str) -> tuple[float | None, dict[str, str], dict[str, ImageDetections]]:
+    """Parse ``_easyocr_runner`` stdout into (reader_build_seconds, versions, per_image)."""
     data = json.loads(payload)
     build_seconds = data.get("reader_build_seconds")
+    raw_versions = data.get("versions", {})
+    versions = {str(key): str(value) for key, value in raw_versions.items()} if isinstance(raw_versions, dict) else {}
     per_image: dict[str, ImageDetections] = {}
     for element in data.get("images", []):
         key = str(element.get("image", ""))
@@ -491,24 +501,24 @@ def _parse_easyocr_runner_json(payload: str) -> tuple[float | None, dict[str, Im
             continue
         detections = [Detection(text=str(d["text"]), quad=d["quad"]) for d in element.get("detections", [])]
         per_image[key] = ImageDetections(detections=detections, seconds=element.get("seconds"))
-    return (float(build_seconds) if isinstance(build_seconds, (int, float)) else None, per_image)
+    return (float(build_seconds) if isinstance(build_seconds, (int, float)) else None, versions, per_image)
 
 
 def _run_easyocr_batch_once(
     images: list[Path], easyocr_codes: list[str], root: Path, threads: int | None
-) -> tuple[float, float | None, float | None, dict[str, ImageDetections]]:
-    """One warm ``_easyocr_runner`` subprocess over a group; (seconds, rss, build, per_image)."""
+) -> tuple[float, float | None, float | None, dict[str, str], dict[str, ImageDetections]]:
+    """One warm ``_easyocr_runner`` subprocess; (seconds, rss, build, versions, per_image)."""
     wrapped = _time_wrapper() + _easyocr_runner_command(images, easyocr_codes, threads)
     start = perf_counter()
     completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
     seconds = perf_counter() - start
     rss = _parse_child_rss(completed.stderr)
     try:
-        build_seconds, per_image = _parse_easyocr_runner_json(completed.stdout)
+        build_seconds, versions, per_image = _parse_easyocr_runner_json(completed.stdout)
     except json.JSONDecodeError as error:
         clean = _strip_time_stats(completed.stderr)[-300:]
         raise RuntimeError(f"easyocr runner produced no JSON (exit {completed.returncode}): {clean}") from error
-    return seconds, rss, build_seconds, per_image
+    return seconds, rss, build_seconds, versions, per_image
 
 
 def run_easyocr_batch(
@@ -519,8 +529,9 @@ def run_easyocr_batch(
     rss_values: list[float] = []
     build_values: list[float] = []
     per_image: dict[str, ImageDetections] = {}
+    versions: dict[str, str] = {}
     for _ in range(max(repeats, 1)):
-        seconds, rss, build_seconds, per_image = _run_easyocr_batch_once(images, easyocr_codes, root, threads)
+        seconds, rss, build_seconds, versions, per_image = _run_easyocr_batch_once(images, easyocr_codes, root, threads)
         times.append(seconds)
         if rss is not None:
             rss_values.append(rss)
@@ -534,7 +545,129 @@ def run_easyocr_batch(
         rss_mb=max(rss_values) if rss_values else None,
         build_seconds=_median(build_values) if build_values else None,
         per_image=per_image,
+        versions=versions,
     )
+
+
+# --------------------------------------------------------------------------------------
+# Environment provenance
+#
+# A published parity/benchmark number describes a runtime, so the report has to record
+# which one. The sceptre side is probed from the binary under test rather than from this
+# checkout's sources, because the binary is what produced the numbers.
+# --------------------------------------------------------------------------------------
+
+# Preferred probe: a single subcommand that reports version, backend, accelerator, ONNX
+# Runtime build info and the model pins. Older binaries do not have it, so the probe
+# degrades to `--version` plus `models list`. ~keep
+SCEPTRE_ENV_ARGS = ("env", "--format", "json")
+UNKNOWN = "unknown"
+
+
+def _binary_json(binary: Path, args: list[str], root: Path) -> object | None:
+    """Run the sceptre binary with ``args`` and parse stdout as JSON, or ``None`` on failure."""
+    try:
+        completed = subprocess.run(
+            [str(binary), *args], capture_output=True, text=True, cwd=root, check=False, timeout=60
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def _binary_version(binary: Path, root: Path) -> str | None:
+    """The version string from ``sceptre --version`` (``sceptre 0.3.0`` -> ``0.3.0``)."""
+    try:
+        completed = subprocess.run(
+            [str(binary), "--version"], capture_output=True, text=True, cwd=root, check=False, timeout=60
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    parts = completed.stdout.strip().split()
+    return parts[-1] if parts else None
+
+
+def _models_from_list(binary: Path, root: Path, languages: list[str]) -> list[dict[str, object]]:
+    """Model repos for ``languages`` from ``sceptre models list --format json``.
+
+    This fallback cannot report the sha256 pins — ``models list`` does not emit them — so
+    they are recorded as ``None`` rather than copied out of this checkout's registry, which
+    may not be the registry the binary was built from.
+    """
+    args = ["models", "list", "--format", "json"]
+    for language in languages:
+        args += ["--lang", language]
+    payload = _binary_json(binary, args, root)
+    if not isinstance(payload, list):
+        return []
+    return [
+        {"name": entry.get("name"), "repo": entry.get("repo"), "sha256": entry.get("sha256")}
+        for entry in payload
+        if isinstance(entry, dict)
+    ]
+
+
+def _sceptre_environment(binary: Path, root: Path, languages: list[str]) -> dict[str, object]:
+    """Probe the sceptre binary under test for its build and runtime identity.
+
+    Prefers ``sceptre env --format json``; falls back to ``--version`` plus
+    ``models list --format json`` when the binary predates that subcommand. Fields the
+    fallback cannot observe (backend, accelerator, ONNX Runtime version, model sha256)
+    stay ``None`` rather than being guessed.
+    """
+    payload = _binary_json(binary, list(SCEPTRE_ENV_ARGS), root)
+    if isinstance(payload, dict):
+        onnxruntime = payload.get("onnxruntime")
+        return {
+            "sceptre_version": payload.get("version") or payload.get("sceptre_version"),
+            "backend": payload.get("backend"),
+            "accelerator": payload.get("accelerator"),
+            "onnxruntime": onnxruntime if onnxruntime is not None else payload.get("onnxruntime_version"),
+            "models": payload.get("models") or [],
+            "probe": "sceptre env --format json",
+        }
+    return {
+        "sceptre_version": _binary_version(binary, root),
+        "backend": None,
+        "accelerator": None,
+        "onnxruntime": None,
+        "models": _models_from_list(binary, root, languages),
+        "probe": "sceptre --version + models list",
+    }
+
+
+def _reference_environment(versions: dict[str, str]) -> dict[str, object]:
+    """The EasyOCR reference half of the environment block, from the runner's payload."""
+    return {
+        "easyocr_version": versions.get("easyocr"),
+        "torch_version": versions.get("torch"),
+        "python": versions.get("python"),
+    }
+
+
+def environment_metadata(
+    binary: Path, root: Path, languages: list[str], reference_versions: dict[str, str]
+) -> dict[str, object]:
+    """The ``metadata.environment`` block: which runtimes produced this report."""
+    environment = _sceptre_environment(binary, root, languages)
+    environment.update(
+        {
+            "sceptre_binary": str(binary),
+            "os": platform.system(),
+            "arch": platform.machine(),
+            "platform": platform.platform(),
+            "cpu_count": os.cpu_count(),
+            "reference": _reference_environment(reference_versions),
+        }
+    )
+    return environment
 
 
 # --------------------------------------------------------------------------------------
@@ -998,6 +1131,27 @@ def per_image_rows(records: list[ImageRecord], baseline: dict[str, dict[str, obj
     return rows
 
 
+def _environment_lines(meta: dict[str, object]) -> list[str]:
+    """One Markdown provenance line naming both runtimes, or nothing when unrecorded."""
+    environment = meta.get("environment")
+    if not isinstance(environment, dict):
+        return []
+    reference = environment.get("reference")
+    reference = reference if isinstance(reference, dict) else {}
+    onnxruntime = environment.get("onnxruntime")
+    onnxruntime = onnxruntime.get("version") if isinstance(onnxruntime, dict) else onnxruntime
+    return [
+        (
+            f"- Runtime: sceptre {environment.get('sceptre_version') or UNKNOWN} "
+            f"({environment.get('backend') or UNKNOWN}/{environment.get('accelerator') or UNKNOWN}, "
+            f"ONNX Runtime {onnxruntime or UNKNOWN}) on {environment.get('os') or UNKNOWN}/"
+            f"{environment.get('arch') or UNKNOWN}, {environment.get('cpu_count') or UNKNOWN} cores "
+            f"| reference: EasyOCR {reference.get('easyocr_version') or UNKNOWN}, "
+            f"torch {reference.get('torch_version') or UNKNOWN}"
+        )
+    ]
+
+
 def render_markdown(report: RunReport, baseline: dict[str, object] | None = None) -> str:
     """Render the full scannable Markdown report."""
     meta = report.metadata
@@ -1007,6 +1161,7 @@ def render_markdown(report: RunReport, baseline: dict[str, object] | None = None
         "# sceptre vs EasyOCR benchmark",
         "",
         f"- Platform: `{meta['platform']}` | sceptre binary: `{meta['sceptre_binary']}`",
+        *_environment_lines(meta),
         (
             f"- Corpus: {meta['corpus_total']} entries "
             f"({meta['labeled_scored']} labeled scored, {meta['breadth_scored']} breadth scored, "
@@ -1185,9 +1340,12 @@ def run_benchmark(
 
     labeled = [record for record in records if record.group == "labeled"]
     scored = [record for record in records if record.skipped is None]
+    reference_versions = next((batch.versions for batch in easyocr_results.values() if batch.versions), {})
+    languages = sorted({language for entry in measured for language in entry.sceptre_langs})
     metadata = {
         "platform": platform.platform(),
         "sceptre_binary": str(SCEPTRE_BIN),
+        "environment": environment_metadata(binary, root, languages, reference_versions),
         "group": group,
         "repeats": repeats,
         "threads": threads if threads is not None else "engine default (all cores)",
