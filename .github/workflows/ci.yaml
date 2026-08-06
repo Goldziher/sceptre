@@ -111,10 +111,11 @@ jobs:
 
   parity:
     name: Parity (${{ matrix.accelerator }} on ${{ matrix.os }})
-    # Heavy: downloads the real models and runs real inference, so it is workflow_dispatch
-    # ONLY, mirroring the `benchmark` job's opt-in discipline — never on every PR or push.
-    # The light `test` lanes already compile and skip the model-gated tests. ~keep
-    if: github.event_name == 'workflow_dispatch'
+    # Heavy: downloads the real models and runs real inference. Kept off pull requests —
+    # the light `test` lanes already compile and skip the model-gated tests — but run on
+    # main and on demand. A parity gate that only fires when someone remembers to dispatch
+    # it does not defend the parity claim; the model cache makes repeat runs cheap. ~keep
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
