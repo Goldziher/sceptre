@@ -64,9 +64,11 @@ pub enum Accelerator {
     /// Run on the CPU.
     ///
     /// The default. The same ONNX graph produces different numeric output on
-    /// different accelerators, and sceptre's published parity figures are CPU
-    /// figures; defaulting to anything else would silently change a user's
-    /// results on upgrade. Opting into an accelerator is therefore explicit.
+    /// different accelerators, and the only parity evidence this repository
+    /// carries — the golden fixtures under `crates/sceptre/tests/data/golden/` —
+    /// is CPU-generated. No accelerator has been validated against them, so
+    /// defaulting to anything else would silently change a user's results on
+    /// upgrade. Opting into an accelerator is therefore explicit.
     #[default]
     Cpu,
     /// Use the best accelerator available on this platform, falling back to CPU.

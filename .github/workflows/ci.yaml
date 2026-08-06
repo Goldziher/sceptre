@@ -140,9 +140,12 @@ jobs:
           - os: macos-latest
             accelerator: coreml
             features: "ort-bundled,ort-coreml,download"
-            # The CLI does not re-export the accelerator features, so reach through to the
-            # library. This is additive on top of the CLI default (ort-bundled + download);
-            # ort-coreml alone would enable `ort` with no prebuilt runtime to link. ~keep
+            # Named through the library (`sceptre/ort-coreml`) rather than the CLI's own
+            # `ort-coreml` passthrough so this lane keeps working if the CLI's feature
+            # aliases are renamed. Cargo features are additive, so this lands on top of the
+            # CLI default (ort-bundled + download) rather than replacing it — which matters,
+            # because ort-coreml alone would enable `ort` with no prebuilt runtime to
+            # link. ~keep
             cli_features: "sceptre/ort-coreml"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
