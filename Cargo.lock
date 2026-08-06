@@ -2898,7 +2898,7 @@ dependencies = [
 
 [[package]]
 name = "sceptre"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "hf-hub",
@@ -2922,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "sceptre-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2939,7 +2939,7 @@ dependencies = [
 
 [[package]]
 name = "sceptre-tools"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",

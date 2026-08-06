@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-06
+
+### Changed
+
+- **`cargo install sceptre-cli` now produces a self-contained binary.** The CLI's default features
+  are `["ort-bundled", "download"]` instead of `["ort-dynamic", "download"]`, so the documented
+  install path no longer requires a system `libonnxruntime`. To keep loading ONNX Runtime at runtime,
+  install with `cargo install sceptre-cli --features ort-dynamic` — that override is additive and
+  needs no `--no-default-features`. On targets with no prebuilt ONNX Runtime (Intel macOS, musl,
+  armv7, riscv64, FreeBSD) the default now fails at build time; use `--features ort-dynamic` or
+  `--no-default-features --features tract,download`.
+- `deny.toml` audits every feature (`all-features = true`); previously only the default graph was
+  checked, so the `ort-bundled` dependency tree had never been reviewed.
+
+### Added
+
+- `model.accelerator` / `--accelerator` selects the execution provider (`cpu`, `auto`, `coreml`,
+  `directml`, `cuda`), with the `ort-coreml`, `ort-directml`, and `ort-cuda` features. An explicitly
+  requested provider that cannot register is a hard error rather than a silent fall back to CPU.
+- `sceptre env` reports the runtime behind a result — sceptre and ONNX Runtime versions, provisioning
+  strategy, requested and registered accelerator, architecture, and the model digests.
+- `sceptre models download --all` (and `models list --all`) covers every language, so pre-seeding a
+  cache no longer needs eight `--lang` flags.
+- A `tract` feature on the CLI. `--backend tract` was previously accepted but never compiled in.
+- CI verifies the real `cargo install` paths end to end, runs parity per execution provider, and
+  uploads the reports it used to discard.
+
+### Fixed
+
+- The cache fast path no longer returns unreadable or zero-length artifacts, and a SHA-256 mismatch
+  now evicts the artifact and its backing blob so a corrupt download self-heals instead of being
+  served from cache forever.
+
 ## [0.3.0] - 2026-08-04
 
 ### Added

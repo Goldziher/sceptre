@@ -99,7 +99,7 @@ for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.li
 ```
 
 The library ships `default = []`, so enable a backend and model download:
-`sceptre = { version = "0.3", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
+`sceptre = { version = "0.4", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
 
 WASM and mobile hosts can avoid filesystem and network assumptions by calling `model_descriptors`,
 fetching the selected artifacts, constructing a `VerifiedModelProvider`, and passing it to
