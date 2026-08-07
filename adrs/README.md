@@ -48,3 +48,4 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0027](0027-tract-fixed-canvas-craft.md) | Fixed-canvas CRAFT detection on the tract backend | Accepted |
 | [0028](0028-host-supplied-model-artifacts-and-wasm-execution.md) | Host-supplied model artifacts and sequential browser-WASM execution | Accepted |
 | [0029](0029-cli-provisioning-default-and-runtime-scoped-parity.md) | CLI provisioning default and runtime-scoped parity | Accepted |
+| [0030](0030-published-benchmark-artifact-and-drift-gate.md) | Published benchmark artifact and drift gate | Accepted |

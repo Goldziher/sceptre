@@ -9,15 +9,26 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## Headline
 
-Measured against upstream EasyOCR over a 43-image mixed corpus (documents, tables, rotated scans,
-scene text, receipts) spanning five scripts, on CPU, both engines at their native multi-threaded
-default:
+Measured against upstream EasyOCR over a mixed corpus (documents, tables, rotated scans, scene text,
+receipts) spanning five recognizer groups, on CPU, both engines at their native multi-threaded
+default.
+
+The table below is generated from the committed `benchmarks/published/latest.json` by
+`task python:publish`, and CI fails if the two drift apart — it is measured output, not prose.
+
+{/* generated:benchmark-headline:start */}
 
 | Engine | Throughput (img/s) | Peak RSS (MB) | Mean CER | Mean token-F1 |
 |---|---|---|---|---|
-| EasyOCR (warm/batch) | 0.14 | 22,626.2 | 0.554 | 0.348 |
-| **sceptre (warm/batch)** | **0.39** (~2.8× faster) | **6,624.1** (~3× lower) | 0.568 | 0.356 |
-| **sceptre (cold CLI run)** | **0.60** (~4.4× faster) | 6,624.1 | 0.568 | 0.356 |
+| EasyOCR (warm/batch) | 0.47 | 20,691.3 | 0.554 | 0.348 |
+| **sceptre** (warm/batch) | **1.07** (~2.3×) | **6,654.8** (~3× lower) | 0.570 | 0.361 |
+| sceptre (cold CLI run) | 1.12 (~2.4×) | 6,654.8 | 0.570 | 0.361 |
+
+Measured with sceptre 0.4.0 (ort/cpu, ONNX Runtime 1.28.0) against EasyOCR 1.7.2 (torch 2.13.0) on
+Darwin/arm64, over 40 of 43 corpus entries. Regenerate with `task python:benchmark` then `task
+python:publish`.
+
+{/* generated:benchmark-headline:end */}
 
 "Warm/batch" is a fresh subprocess per language group that loads its model/`Reader` once and
 processes every image in that group — the fairest like-for-like comparison. "Cold CLI run" is
@@ -25,8 +36,8 @@ sceptre's per-invocation cost: a fresh process per image, paying model load ever
 beats EasyOCR's warm, already-loaded reader.
 
 Quality (CER, WER, token-F1) is averaged over the labeled subset of the corpus only, scored against
-ground truth. sceptre matches EasyOCR's accuracy at these numbers — not a regression, a genuine
-reimplementation.
+ground truth. The accuracy columns are the parity check: sceptre reads the corpus the same way
+EasyOCR does, so the speed and memory columns are the actual difference.
 
 ## Methodology
 
@@ -50,13 +61,28 @@ signal, is recorded in
 task python:benchmark
 ```
 
-reproduces the table above and writes `benchmark-results/comparison.{json,md}`. Useful flags:
+re-measures and writes `benchmark-results/comparison.{json,md}`, which is gitignored and
+machine-local. Useful flags:
 
 | Flag | Purpose |
 |---|---|
 | `--group labeled --limit 3 --repeats 1` | A fast inner-loop run over a small subset. |
 | `--baseline <prior.json>` | See per-image deltas against a previous run. |
 | `--assert` | Enforce the regression gate (see below). |
+
+Measuring and publishing are separate steps. To turn a run into the numbers shown above:
+
+```sh
+task python:publish
+```
+
+distils the report into the committed `benchmarks/published/latest.json` — headline figures plus
+the provenance block naming the sceptre, ONNX Runtime, EasyOCR and torch versions behind them — and
+regenerates the marked table regions in the README and on this page. A report with no provenance
+block is refused rather than published. `task python:publish:check` re-renders without writing and
+fails if the committed tables have drifted from the artifact; CI runs it on every pull request, and
+it needs neither torch nor a built binary. See
+[ADR 0030](https://github.com/Goldziher/sceptre/blob/main/adrs/0030-published-benchmark-artifact-and-drift-gate.md).
 
 `cargo bench` covers internal hot paths (criterion microbenchmarks); the head-to-head harness above
 measures end-to-end OCR against EasyOCR. Parity fixtures backing the quality signal live under

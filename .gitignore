@@ -27,7 +27,9 @@ __pycache__/
 *.safetensors
 *.pth
 
-# comparative benchmark output (machine- and load-specific; reproduce via `task py:benchmark`)
+# Raw comparative benchmark output (machine- and load-specific; reproduce via
+# `task python:benchmark`). The distilled, published numbers ARE committed, under
+# benchmarks/published/ — see ADR 0030.
 /benchmark-results
 
 # BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)

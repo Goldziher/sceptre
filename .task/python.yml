@@ -31,8 +31,8 @@ tasks:
 
   golden:
     desc: >-
-      Generate golden JSON fixtures for parity testing (currently stubbed); requires
-      the opt-in export/torch dependency group to produce real output
+      Regenerate the EasyOCR reference half of the golden parity fixtures, with its
+      provenance block; requires the opt-in export/torch dependency group
     cmds:
       - uv run python -m sceptre_rs_tools.golden
 
@@ -51,3 +51,18 @@ tasks:
       in benchmark.py
     cmds:
       - uv run python -m sceptre_rs_tools.benchmark --assert {{.CLI_ARGS}}
+
+  publish:
+    desc: >-
+      Publish the measured numbers from benchmark-results/comparison.json into
+      benchmarks/published/latest.json and the generated tables in the README and docs
+      site; needs no torch and no release binary
+    cmds:
+      - uv run python -m sceptre_rs_tools.publish {{.CLI_ARGS}}
+
+  publish:check:
+    desc: >-
+      Fail if the committed benchmark tables no longer match benchmarks/published/latest.json;
+      the drift gate CI runs on every pull request
+    cmds:
+      - uv run python -m sceptre_rs_tools.publish --check {{.CLI_ARGS}}

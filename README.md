@@ -7,10 +7,10 @@
 
 sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
 OCR pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX.
-It agrees with EasyOCR's output across the scripts it supports, runs **~2.8× faster on a fraction of
-the memory** (and a cold one-shot run is ~4.4× faster than EasyOCR warm), and ships as one
-self-contained binary with **no Python runtime**. Use it as a **library**, a **CLI**, or an **MCP
-server**.
+It agrees with EasyOCR's output across the scripts it supports, runs **several times faster on a
+fraction of the memory** — even a cold one-shot run beats EasyOCR warm ([measured
+figures](#benchmarks)) — and ships as one self-contained binary with **no Python runtime**. Use it
+as a **library**, a **CLI**, or an **MCP server**.
 
 8 scripts · CRAFT + gen2 CRNN · ONNX Runtime **or** pure-Rust · library · CLI · MCP · offline-first
 
@@ -34,8 +34,8 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 | | What you get | Why it matters |
 |---|---|---|
 | **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic, plus Telugu and Kannada — agreeing on text (word/char-F1) and boxes (IoU), on the `ort` backend's CPU execution provider. | A faithful reimplementation, held to a per-image word-F1 and box-IoU floor rather than character-for-character equality. |
-| **Substantially faster** | ~2.8× higher throughput than EasyOCR warm on the same corpus — and even a cold, one-shot CLI run (~4.4×) beats EasyOCR's warm, already-loaded reader. | More pages per second, less waiting, cheaper batch jobs. |
-| **A fraction of the memory** | Peak RSS around **3× lower** than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
+| **Substantially faster** | Several times the throughput of EasyOCR warm on the same corpus — and even a cold, one-shot CLI run beats EasyOCR's warm, already-loaded reader ([measured figures](#benchmarks)). | More pages per second, less waiting, cheaper batch jobs. |
+| **A fraction of the memory** | Peak RSS several times lower than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
 | **One binary, no Python** | A single self-contained executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
 | **Three surfaces** | The same engine as a Rust **library**, a **CLI** (`sceptre`), and an **MCP server** for agents. | Drop it into a service, a shell pipeline, or an AI tool without re-plumbing. |
 | **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM / Android — behind one seam. | Portability when you need it, native performance when you don't. |
@@ -119,23 +119,33 @@ sceptre mcp --lang english
 
 ## Benchmarks
 
-Measured against upstream EasyOCR over a 43-entry mixed corpus — 40 measured (documents, tables,
-rotated scans, scene text, receipts, across five of the eight supported recognizer groups: English,
-Latin, Chinese-simplified, Japanese, Korean) plus 3 capability-format gaps — on CPU. Both engines are
-measured **identically** — each a fresh subprocess per language group under `/usr/bin/time`, at its
-native multi-threaded default, loading its model/reader once and processing every image — so peak RSS
-is a like-for-like whole-process figure (EasyOCR's legitimately includes the torch runtime). Numbers
-vary with hardware and load; the **ratios** are the point.
+Measured against upstream EasyOCR over a mixed corpus — documents, tables, rotated scans, scene
+text and receipts, across the English, Latin, Chinese-simplified, Japanese and Korean recognizer
+groups — on CPU. Both engines are measured **identically**: each a fresh subprocess per language
+group under `/usr/bin/time`, at its native multi-threaded default, loading its model/reader once and
+processing every image — so peak RSS is a like-for-like whole-process figure (EasyOCR's legitimately
+includes the torch runtime). Numbers vary with hardware and load; the **ratios** are the point.
+
+The table below is generated from [`benchmarks/published/latest.json`](benchmarks/published/latest.json)
+by `task python:publish`; CI fails if the two drift apart. Do not edit it by hand.
+
+<!-- generated:benchmark-headline:start -->
 
 | Engine | Throughput (img/s) | Peak RSS | Mean CER | Mean token-F1 |
 |---|---|---|---|---|
-| EasyOCR (warm/batch) | 0.14 | 22.6 GB | 0.554 | 0.348 |
-| **sceptre** (warm/batch) | **0.39** (~2.8×) | **6.6 GB** (~3× lower) | 0.568 | **0.356** |
-| sceptre (cold CLI run) | 0.60 (~4.4×) | 6.6 GB | 0.568 | 0.356 |
+| EasyOCR (warm/batch) | 0.47 | 20.2 GB | 0.554 | 0.348 |
+| **sceptre** (warm/batch) | **1.07** (~2.3×) | **6.5 GB** (~3× lower) | 0.570 | 0.361 |
+| sceptre (cold CLI run) | 1.12 (~2.4×) | 6.5 GB | 0.570 | 0.361 |
 
-CER and token-F1 are at parity (sceptre is marginally ahead on token-F1); the win is speed and memory.
-Even a cold, one-shot CLI run — which pays model load every invocation — is ~4.4× faster than
-EasyOCR's already-warm reader.
+Measured with sceptre 0.4.0 (ort/cpu, ONNX Runtime 1.28.0) against EasyOCR 1.7.2 (torch 2.13.0) on
+Darwin/arm64, over 40 of 43 corpus entries. Regenerate with `task python:benchmark` then `task
+python:publish`.
+
+<!-- generated:benchmark-headline:end -->
+
+The accuracy columns are the parity check — sceptre and EasyOCR land on the same reading of the
+corpus; the win is speed and memory. Even a cold, one-shot CLI run, which pays model load on every
+invocation, still beats EasyOCR's already-warm reader.
 
 **Runtime scope.** Every figure above — speed, memory, and the parity claim — was produced on the
 `ort` backend running the **CPU execution provider**, which is what `model.accelerator` defaults to.
@@ -151,10 +161,13 @@ DirectML and CUDA are all **unvalidated**, so none of the numbers above should b
 Re-run the parity harness on your own target before relying on them.
 
 `cargo bench` covers the internal hot paths; the head-to-head harness (`task python:benchmark`)
-reproduces the table above and writes `benchmark-results/comparison.{json,md}`. Use
+re-measures and writes the gitignored `benchmark-results/comparison.{json,md}`. Use
 `--group labeled --limit 3 --repeats 1` for a fast inner-loop run, `--baseline <prior.json>` to see
 per-image deltas, and `--assert` for the regression gate (see
-[ADR 0021](adrs/0021-benchmark-methodology-and-gate.md)). Parity fixtures live under
+[ADR 0021](adrs/0021-benchmark-methodology-and-gate.md)). `task python:publish` then distils that
+report into the committed artifact and regenerates the table above; `task python:publish:check` is
+the drift gate CI runs (see [ADR 0030](adrs/0030-published-benchmark-artifact-and-drift-gate.md)).
+Parity fixtures live under
 [`crates/sceptre/tests/data/golden/`](crates/sceptre/tests/data/golden/).
 
 ## How it works

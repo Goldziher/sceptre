@@ -265,6 +265,22 @@ jobs:
         # and the regression gate without torch/easyocr or the release binary. ~keep
         run: uv run pytest python/tests -q
 
+  # Guards the published benchmark numbers (ADR 0030): the README and docs tables must
+  # still match benchmarks/published/latest.json. Deliberately a separate job from
+  # `python` — it reads only JSON and Markdown, so it needs no submodule, no LFS, no
+  # torch and no release binary, and keeps working when those are unavailable. ~keep
+  benchmark-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync Python dev environment
+        run: uv sync
+      - name: Published benchmark numbers match the committed artifact
+        run: uv run python -m sceptre_rs_tools.publish --check
+
   # Opt-in head-to-head regression gate. Heavy (torch + easyocr + models + a release
   # binary) and its numbers are only comparable when the machine is not otherwise busy,
   # so it is workflow_dispatch ONLY — no schedule. Mirrors the SCEPTRE_REQUIRE_MODELS
