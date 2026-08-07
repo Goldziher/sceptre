@@ -1,25 +1,43 @@
 version: "3"
 
-dir: website
+dir: docs-site
 
 tasks:
   dev:
     desc: Run the docs site in dev mode
     cmds:
-      - npm run dev
+      - pnpm --dir docs-site install
+      - pnpm --dir docs-site dev
+
+  serve:
+    desc: Serve the docs site locally with live reload
+    cmds:
+      - pnpm --dir docs-site install
+      - pnpm --dir docs-site dev
 
   build:
     desc: Install dependencies and build the docs site
     cmds:
-      - npm ci
-      - npm run build
+      - pnpm --dir docs-site install --frozen-lockfile
+      - pnpm --dir docs-site build
+
+  build:strict:
+    desc: Build the docs site the way CI does (astro build fails on errors)
+    cmds:
+      - pnpm --dir docs-site install --frozen-lockfile
+      - pnpm --dir docs-site build
 
   preview:
     desc: Preview the built docs site
     cmds:
-      - npm run preview
+      - pnpm --dir docs-site preview
 
-  assets:
-    desc: Render docs site assets
+  lint:links:
+    desc: Check links with lychee
     cmds:
-      - npm run assets
+      - lychee --offline docs-site/src/content/docs README.md
+
+  lint:prose:
+    desc: Lint prose with textlint
+    cmds:
+      - npx textlint 'docs-site/src/content/docs/**/*.{md,mdx}'

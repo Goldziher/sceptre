@@ -42,7 +42,7 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0021](0021-benchmark-methodology-and-gate.md) | Head-to-head benchmark methodology and regression gate | Accepted |
 | [0022](0022-input-image-format-coverage.md) | Input image format coverage: pure-Rust decoders only | Accepted |
 | [0023](0023-publish-to-crates-io-via-trusted-publishing.md) | Publish to crates.io for real, via GitHub Actions trusted publishing | Accepted |
-| [0024](0024-documentation-site-and-web-presence.md) | Documentation site, social assets, and CI docs deployment | Accepted |
+| [0024](0024-documentation-site-and-web-presence.md) | Documentation site, social assets, and CI docs deployment | Superseded by 0033 |
 | [0025](0025-first-party-onnx-exports.md) | First-party ONNX exports on the `sceptre-ocr` Hugging Face org | Accepted |
 | [0026](0026-extend-gen2-scope-telugu-kannada.md) | Extend gen2 scope to Telugu and Kannada | Accepted |
 | [0027](0027-tract-fixed-canvas-craft.md) | Fixed-canvas CRAFT detection on the tract backend | Accepted |
@@ -51,3 +51,4 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0030](0030-published-benchmark-artifact-and-drift-gate.md) | Published benchmark artifact and drift gate | Accepted |
 | [0031](0031-hand-written-candle-networks.md) | Hand-written `candle` networks as the GPU and no-C++-runtime backend | Accepted |
 | [0032](0032-per-backend-accelerator-support.md) | Per-backend accelerator support (amends ADR 0029) | Accepted |
+| [0033](0033-org-migration-docs-domain-and-shared-theme.md) | Docs on `docs.sceptre.xberg.io` with the shared `@xberg-io/docs-theme` | Accepted |

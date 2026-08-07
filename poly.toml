@@ -17,10 +17,10 @@ exclude = [
   "vendor/**",
   "**/assets/**",
   "**/tests/data/**",
-  "website/dist/**",
-  "website/node_modules/**",
-  "website/.astro/**",
-  "**/package-lock.json",
+  "docs-site/dist/**",
+  "docs-site/node_modules/**",
+  "docs-site/.astro/**",
+  "**/pnpm-lock.yaml",
 ]
 
 [lint.markdown.rumdl]
@@ -76,7 +76,7 @@ preserve_patterns = [
 # Python uses `#` comments idiomatically; the uncomment hook targets Rust/TOML. ~keep
 "python/**" = ["comment", "doc-comment"]
 # The docs site is JS/CSS/MDX; comments there are idiomatic, not stray Rust/TOML cruft. ~keep
-"website/**" = ["comment", "doc-comment"]
+"docs-site/**" = ["comment", "doc-comment"]
 
 [hooks]
 stages = ["pre-commit"]
@@ -89,10 +89,10 @@ lint = { exclude = [
   "target/**",
   "**/assets/**",
   "**/tests/data/**",
-  "website/dist/**",
-  "website/node_modules/**",
-  "website/.astro/**",
-  "**/package-lock.json",
+  "docs-site/dist/**",
+  "docs-site/node_modules/**",
+  "docs-site/.astro/**",
+  "**/pnpm-lock.yaml",
 ] }
 fmt = { exclude = [
   "**/*.lock",
@@ -101,10 +101,10 @@ fmt = { exclude = [
   "target/**",
   "**/assets/**",
   "**/tests/data/**",
-  "website/dist/**",
-  "website/node_modules/**",
-  "website/.astro/**",
-  "**/package-lock.json",
+  "docs-site/dist/**",
+  "docs-site/node_modules/**",
+  "docs-site/.astro/**",
+  "**/pnpm-lock.yaml",
 ] }
 commit = { stages = ["commit-msg"] }
 file_safety = { exclude = [
@@ -114,10 +114,10 @@ file_safety = { exclude = [
   "target/**",
   "**/assets/**",
   "**/tests/data/**",
-  "website/dist/**",
-  "website/node_modules/**",
-  "website/.astro/**",
-  "**/package-lock.json",
+  "docs-site/dist/**",
+  "docs-site/node_modules/**",
+  "docs-site/.astro/**",
+  "**/pnpm-lock.yaml",
 ] }
 cargo = true
 

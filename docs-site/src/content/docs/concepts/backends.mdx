@@ -16,7 +16,7 @@ entirely backend-agnostic, so a config or result type is never conditionally com
 
 This keeps the backend choice non-load-bearing: a new backend implements the trait and slots in
 without touching the pipeline. See
-[ADR 0004](https://github.com/Goldziher/sceptre/blob/main/adrs/0004-inference-backend-seam.md).
+[ADR 0004](https://github.com/xberg-io/sceptre/blob/main/adrs/0004-inference-backend-seam.md).
 
 ## Choosing a backend
 
@@ -30,11 +30,11 @@ Pick `ort` for CPU/RSS-optimized execution on desktop or server; pick `tract` wh
 pure-Rust build with no native dependency — WASM, Android, or any target ONNX Runtime ships no
 prebuilt for; pick `candle` when you want a GPU without provisioning a provider-specific ONNX
 Runtime, or a native build with no ONNX Runtime at all. See
-[ADR 0012](https://github.com/Goldziher/sceptre/blob/main/adrs/0012-ort-runtime-provisioning.md) for
+[ADR 0012](https://github.com/xberg-io/sceptre/blob/main/adrs/0012-ort-runtime-provisioning.md) for
 the `ort-bundled`/`ort-dynamic` provisioning tradeoff,
-[ADR 0029](https://github.com/Goldziher/sceptre/blob/main/adrs/0029-cli-provisioning-default-and-runtime-scoped-parity.md)
+[ADR 0029](https://github.com/xberg-io/sceptre/blob/main/adrs/0029-cli-provisioning-default-and-runtime-scoped-parity.md)
 for why the CLI defaults to `ort-bundled` and how the accelerator is selected, and
-[ADR 0031](https://github.com/Goldziher/sceptre/blob/main/adrs/0031-hand-written-candle-networks.md)
+[ADR 0031](https://github.com/xberg-io/sceptre/blob/main/adrs/0031-hand-written-candle-networks.md)
 for how `candle` runs these models and what it costs.
 
 The active backend is selected through `ModelConfig::backend` (`Backend::Ort` / `Backend::Tract` /
@@ -57,7 +57,7 @@ reaches hardware through ONNX Runtime execution providers while `candle` address
 `metal` are *not* interchangeable: both drive the same Apple GPU, but through different frameworks
 with different numerics, so each belongs to one backend. Any other pairing is rejected at
 config-validation time, with the equivalent on your backend named in the error. See
-[ADR 0032](https://github.com/Goldziher/sceptre/blob/main/adrs/0032-per-backend-accelerator-support.md).
+[ADR 0032](https://github.com/xberg-io/sceptre/blob/main/adrs/0032-per-backend-accelerator-support.md).
 
 The default is `cpu` rather than `auto` deliberately. The same ONNX graph produces different numeric
 output on different providers, and sceptre's published parity and benchmark figures are CPU figures;

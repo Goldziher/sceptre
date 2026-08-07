@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by 0033
 date: 2026-08-03
 deciders: Na'aman Hirschfeld
 ---

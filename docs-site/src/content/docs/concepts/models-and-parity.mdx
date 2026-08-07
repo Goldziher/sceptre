@@ -25,7 +25,7 @@ language group:
 | Kannada | `kannada_g2` | `kannada` |
 
 All eight of EasyOCR's gen2 (`*_g2`) recognizers are supported — the complete gen2 family — see
-[ADR 0002](https://github.com/Goldziher/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md).
+[ADR 0002](https://github.com/xberg-io/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md).
 
 ## Source, verification, and caching
 
@@ -81,7 +81,7 @@ sceptre's test suite compares its output against two goldens for every image in 
 Real-model parity tests are opt-in, gated on `SCEPTRE_REQUIRE_MODELS`: unset (or the models absent)
 skips the test; set and the models are missing, the test panics so CI surfaces a misconfigured
 cache rather than silently passing. See
-[ADR 0016](https://github.com/Goldziher/sceptre/blob/main/adrs/0016-parity-harness-and-test-corpus.md).
+[ADR 0016](https://github.com/xberg-io/sceptre/blob/main/adrs/0016-parity-harness-and-test-corpus.md).
 
 The same corpus and parity signal (char/word-F1, box-IoU) back the head-to-head performance
 benchmark — see [Benchmarks](/reference/benchmarks/).

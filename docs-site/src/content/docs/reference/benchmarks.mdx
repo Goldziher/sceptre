@@ -53,7 +53,7 @@ so a fast-failing decode never inflates sceptre's numbers. See
 
 Full methodology, including the RSS-measurement rationale, threading choice, and the quality
 signal, is recorded in
-[ADR 0021](https://github.com/Goldziher/sceptre/blob/main/adrs/0021-benchmark-methodology-and-gate.md).
+[ADR 0021](https://github.com/xberg-io/sceptre/blob/main/adrs/0021-benchmark-methodology-and-gate.md).
 
 ## Reproducing the numbers
 
@@ -82,11 +82,11 @@ regenerates the marked table regions in the README and on this page. A report wi
 block is refused rather than published. `task python:publish:check` re-renders without writing and
 fails if the committed tables have drifted from the artifact; CI runs it on every pull request, and
 it needs neither torch nor a built binary. See
-[ADR 0030](https://github.com/Goldziher/sceptre/blob/main/adrs/0030-published-benchmark-artifact-and-drift-gate.md).
+[ADR 0030](https://github.com/xberg-io/sceptre/blob/main/adrs/0030-published-benchmark-artifact-and-drift-gate.md).
 
 `cargo bench` covers internal hot paths (criterion microbenchmarks); the head-to-head harness above
 measures end-to-end OCR against EasyOCR. Parity fixtures backing the quality signal live under
-[`crates/sceptre/tests/data/golden/`](https://github.com/Goldziher/sceptre/tree/main/crates/sceptre/tests/data/golden).
+[`crates/sceptre/tests/data/golden/`](https://github.com/xberg-io/sceptre/tree/main/crates/sceptre/tests/data/golden).
 
 <Aside type="note">
   The regression gate (`--assert`) enforces three floors — warm speedup ≥ 2.0×, peak-RSS ratio ≥ 3×,

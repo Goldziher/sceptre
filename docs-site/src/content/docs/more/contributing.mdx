@@ -1,0 +1,40 @@
+---
+title: "Contributing"
+description: How to set up the repository, run the check gate, and open a pull request.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+The full guide lives in the repository, next to the code it describes.
+
+<LinkCard
+  title="CONTRIBUTING.md"
+  href="https://github.com/xberg-io/sceptre/blob/main/CONTRIBUTING.md"
+  description="Setup, the check gate, code conventions, commit format, and the pull-request process."
+/>
+
+## The short version
+
+Clone the repository and run the setup task:
+
+```sh
+git clone https://github.com/xberg-io/sceptre.git
+cd sceptre
+task setup
+```
+
+Run the same gate CI enforces before every push:
+
+```sh
+task check
+```
+
+That runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --tests -- -D warnings`,
+`cargo test --workspace`, and `poly lint .`.
+
+Commits use Conventional Commit prefixes (`feat:`, `fix:`, `perf:`, `chore:`, `refactor:`, `docs:`,
+`test:`). Architecturally significant choices are recorded as ADRs — see
+[Decision records](/reference/decision-records/).
+
+Report bugs and request features on the
+[issue tracker](https://github.com/xberg-io/sceptre/issues).

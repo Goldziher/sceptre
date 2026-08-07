@@ -7,15 +7,19 @@ template: splash
 hero:
   tagline: EasyOCR's accuracy. Rust's speed and footprint.
   image:
-    file: ../../assets/mark.svg
-    alt: sceptre
+    dark: ../../assets/hero-logo.svg
+    light: ../../assets/hero-logo-light.svg
   actions:
     - text: Quickstart
-      link: /sceptre/start/quickstart/
+      link: /start/quickstart/
       icon: right-arrow
       variant: primary
+    - text: Installation
+      link: /start/installation/
+      icon: download
+      variant: minimal
     - text: View on GitHub
-      link: https://github.com/Goldziher/sceptre
+      link: https://github.com/xberg-io/sceptre
       icon: external
       variant: minimal
 ---
@@ -70,7 +74,7 @@ memory**, and ships as one self-contained binary with **no Python runtime**. Use
   <TabItem label="Library">
     ```toml
     # Cargo.toml — the library ships no default features; enable a backend + model download.
-    sceptre = { version = "0.4", features = ["ort-bundled", "download"] }
+    sceptre = { version = "0.5", features = ["ort-bundled", "download"] }
     ```
   </TabItem>
   <TabItem label="MCP server">
@@ -83,13 +87,26 @@ memory**, and ships as one self-contained binary with **no Python runtime**. Use
 Models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached under the
 standard HF cache, and sha256-verified. Every run after that is offline.
 
-## Explore
+## Part of Xberg.io
 
 <CardGrid>
-  <LinkCard title="Introduction" href={`${import.meta.env.BASE_URL}start/introduction/`} description="What sceptre is and why it exists." />
-  <LinkCard title="Quickstart" href={`${import.meta.env.BASE_URL}start/quickstart/`} description="Run your first OCR from the CLI or the library." />
-  <LinkCard title="How it works" href={`${import.meta.env.BASE_URL}concepts/how-it-works/`} description="Detect → Recognize → Inference, mirroring EasyOCR's pipeline." />
-  <LinkCard title="CLI guide" href={`${import.meta.env.BASE_URL}guides/cli/`} description="Every subcommand and flag." />
-  <LinkCard title="Benchmarks" href={`${import.meta.env.BASE_URL}reference/benchmarks/`} description="The head-to-head numbers vs EasyOCR." />
-  <LinkCard title="Configuration" href={`${import.meta.env.BASE_URL}guides/configuration/`} description="OcrConfig, defaults, and precedence." />
+  <LinkCard title="Xberg" href="https://github.com/xberg-io/xberg" description="The open-source content-intelligence engine: text, tables, and metadata from 101 formats (115 file extensions), with OCR, transcription, and code intelligence." />
+  <LinkCard title="Xberg Pro" href="https://xberg.io" description="A complete self-hosted content-intelligence backend in a single container. Commercial." />
+  <LinkCard title="Xberg Enterprise" href="https://xberg.io" description="The distributed, governed content-intelligence platform, scaled on Kubernetes with team governance and support. Commercial." />
+  <LinkCard title="crawlberg" href="https://github.com/xberg-io/crawlberg" description="Web crawling and scraping with HTML→Markdown and headless-Chrome fallback." />
+  <LinkCard title="html-to-markdown" href="https://github.com/xberg-io/html-to-markdown" description="Fast, lossless HTML→Markdown engine." />
+  <LinkCard title="liter-llm" href="https://github.com/xberg-io/liter-llm" description="Universal LLM API client with native bindings for 14 languages and 165 providers." />
+  <LinkCard title="tree-sitter-language-pack" href="https://github.com/xberg-io/tree-sitter-language-pack" description="Tree-sitter grammars and code-intelligence primitives." />
+  <LinkCard title="alef" href="https://github.com/xberg-io/alef" description="The polyglot binding generator that produces every per-language binding across the 5 polyglot repos." />
+</CardGrid>
+
+## Explore the docs
+
+<CardGrid>
+  <LinkCard title="Introduction" href="/start/introduction/" description="What sceptre is and why it exists." />
+  <LinkCard title="Quickstart" href="/start/quickstart/" description="Run your first OCR from the CLI or the library." />
+  <LinkCard title="How it works" href="/concepts/how-it-works/" description="Detect → Recognize → Inference, mirroring EasyOCR's pipeline." />
+  <LinkCard title="CLI guide" href="/guides/cli/" description="Every subcommand and flag." />
+  <LinkCard title="Benchmarks" href="/reference/benchmarks/" description="The head-to-head numbers vs EasyOCR." />
+  <LinkCard title="Configuration" href="/guides/configuration/" description="OcrConfig, defaults, and precedence." />
 </CardGrid>

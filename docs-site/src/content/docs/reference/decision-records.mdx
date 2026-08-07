@@ -7,42 +7,43 @@ description: >-
 Architecturally significant decisions — a dependency or backend choice, a pipeline algorithm, a
 public API shape, a model source, a build/target strategy — are recorded as
 [MADR](https://adr.github.io/madr/)-format Architecture Decision Records under
-[`adrs/`](https://github.com/Goldziher/sceptre/tree/main/adrs) in the repository. Each ADR carries a
+[`adrs/`](https://github.com/xberg-io/sceptre/tree/main/adrs) in the repository. Each ADR carries a
 `status`, a `date`, and `deciders`. ADRs are immutable once accepted: reversing a decision means
 adding a new ADR that supersedes the old one, not rewriting it.
 
 | ADR | Title | Status |
 |---|---|---|
-| [0000](https://github.com/Goldziher/sceptre/blob/main/adrs/0000-use-madr-for-adrs.md) | Record decisions as MADR ADRs | Accepted |
-| [0001](https://github.com/Goldziher/sceptre/blob/main/adrs/0001-cargo-workspace-rlib-core-thin-cli.md) | Cargo workspace: rlib core + thin CLI | Accepted |
-| [0002](https://github.com/Goldziher/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md) | Scope to gen2 recognizers + CRAFT | Superseded by 0026 |
-| [0003](https://github.com/Goldziher/sceptre/blob/main/adrs/0003-model-source-itext-onnx-runtime-download.md) | Model source: iText ONNX, runtime download | Superseded by 0025 |
-| [0004](https://github.com/Goldziher/sceptre/blob/main/adrs/0004-inference-backend-seam.md) | Inference backend seam: ort / tract / candle | Accepted |
-| [0005](https://github.com/Goldziher/sceptre/blob/main/adrs/0005-mcp-as-feature-module-and-subcommand.md) | MCP as a feature-gated module + subcommand | Accepted |
-| [0006](https://github.com/Goldziher/sceptre/blob/main/adrs/0006-ai-rulez-for-agent-config.md) | Generate agent config with ai-rulez | Accepted |
-| [0007](https://github.com/Goldziher/sceptre/blob/main/adrs/0007-tooling-scaffolding-from-basemind.md) | Tooling scaffolding adapted from basemind | Accepted |
-| [0008](https://github.com/Goldziher/sceptre/blob/main/adrs/0008-uv-taskfile-tools-infra.md) | In-repo dev tooling: uv Python fallback + Rust `tools/` for model export | Accepted |
-| [0009](https://github.com/Goldziher/sceptre/blob/main/adrs/0009-candle-evaluation-ort-primary.md) | Backend evaluation: `ort` primary, `candle` deferred off the critical path | Superseded by 0031 |
-| [0010](https://github.com/Goldziher/sceptre/blob/main/adrs/0010-ocr-engine-seam-and-encapsulation-lockdown.md) | Public `OcrEngine` seam, internal DTO boundaries, and encapsulation lockdown | Accepted |
-| [0011](https://github.com/Goldziher/sceptre/blob/main/adrs/0011-repointable-registry-owner.md) | Re-pointable model registry via a `registry_owner` override | Accepted |
-| [0012](https://github.com/Goldziher/sceptre/blob/main/adrs/0012-ort-runtime-provisioning.md) | ONNX Runtime provisioning: `ort-bundled` + `ort-dynamic` (xberg pattern) | Accepted |
-| [0013](https://github.com/Goldziher/sceptre/blob/main/adrs/0013-imageproc-craft-postprocess-geometry.md) | `imageproc` for CRAFT postprocess geometry | Accepted |
-| [0014](https://github.com/Goldziher/sceptre/blob/main/adrs/0014-public-detect-recognize-line-and-model-provisioning.md) | Public detect / recognize-line methods and a model-provisioning surface | Accepted |
-| [0015](https://github.com/Goldziher/sceptre/blob/main/adrs/0015-bench-seam-and-criterion.md) | Criterion microbenchmarks behind a `bench` feature seam | Accepted |
-| [0016](https://github.com/Goldziher/sceptre/blob/main/adrs/0016-parity-harness-and-test-corpus.md) | Parity harness: dual golden fixtures, HF-cache model resolution, and the test corpus | Accepted |
-| [0017](https://github.com/Goldziher/sceptre/blob/main/adrs/0017-hf-hub-native-cache.md) | Resolve models through the Hugging Face hub's native on-disk cache | Accepted |
-| [0018](https://github.com/Goldziher/sceptre/blob/main/adrs/0018-cv2-exact-craft-dilation.md) | cv2-exact CRAFT dilation (amends ADR 0013) | Accepted |
-| [0019](https://github.com/Goldziher/sceptre/blob/main/adrs/0019-parity-safe-perf-and-simd.md) | Parity-safe performance optimization and SIMD | Accepted |
-| [0020](https://github.com/Goldziher/sceptre/blob/main/adrs/0020-release-strategy.md) | Release strategy: tag-triggered multi-platform build with crates.io dry-run | Superseded by 0023 |
-| [0021](https://github.com/Goldziher/sceptre/blob/main/adrs/0021-benchmark-methodology-and-gate.md) | Head-to-head benchmark methodology and regression gate | Accepted |
-| [0022](https://github.com/Goldziher/sceptre/blob/main/adrs/0022-input-image-format-coverage.md) | Input image format coverage: pure-Rust decoders only | Accepted |
-| [0023](https://github.com/Goldziher/sceptre/blob/main/adrs/0023-publish-to-crates-io-via-trusted-publishing.md) | Publish to crates.io for real, via GitHub Actions trusted publishing | Accepted |
-| [0024](https://github.com/Goldziher/sceptre/blob/main/adrs/0024-documentation-site-and-web-presence.md) | Documentation site, social assets, and CI docs deployment | Accepted |
-| [0025](https://github.com/Goldziher/sceptre/blob/main/adrs/0025-first-party-onnx-exports.md) | First-party ONNX exports on the `sceptre-ocr` Hugging Face org | Accepted |
-| [0026](https://github.com/Goldziher/sceptre/blob/main/adrs/0026-extend-gen2-scope-telugu-kannada.md) | Extend gen2 scope to Telugu and Kannada | Accepted |
-| [0027](https://github.com/Goldziher/sceptre/blob/main/adrs/0027-tract-fixed-canvas-craft.md) | Fixed-canvas CRAFT detection on the tract backend | Accepted |
-| [0028](https://github.com/Goldziher/sceptre/blob/main/adrs/0028-host-supplied-model-artifacts-and-wasm-execution.md) | Host-supplied model artifacts and sequential browser-WASM execution | Accepted |
-| [0029](https://github.com/Goldziher/sceptre/blob/main/adrs/0029-cli-provisioning-default-and-runtime-scoped-parity.md) | CLI provisioning default and runtime-scoped parity | Accepted |
-| [0030](https://github.com/Goldziher/sceptre/blob/main/adrs/0030-published-benchmark-artifact-and-drift-gate.md) | Published benchmark artifact and drift gate | Accepted |
-| [0031](https://github.com/Goldziher/sceptre/blob/main/adrs/0031-hand-written-candle-networks.md) | Hand-written `candle` networks as the GPU and no-C++-runtime backend | Accepted |
-| [0032](https://github.com/Goldziher/sceptre/blob/main/adrs/0032-per-backend-accelerator-support.md) | Per-backend accelerator support (amends ADR 0029) | Accepted |
+| [0000](https://github.com/xberg-io/sceptre/blob/main/adrs/0000-use-madr-for-adrs.md) | Record decisions as MADR ADRs | Accepted |
+| [0001](https://github.com/xberg-io/sceptre/blob/main/adrs/0001-cargo-workspace-rlib-core-thin-cli.md) | Cargo workspace: rlib core + thin CLI | Accepted |
+| [0002](https://github.com/xberg-io/sceptre/blob/main/adrs/0002-scope-gen2-recognizers-and-craft.md) | Scope to gen2 recognizers + CRAFT | Superseded by 0026 |
+| [0003](https://github.com/xberg-io/sceptre/blob/main/adrs/0003-model-source-itext-onnx-runtime-download.md) | Model source: iText ONNX, runtime download | Superseded by 0025 |
+| [0004](https://github.com/xberg-io/sceptre/blob/main/adrs/0004-inference-backend-seam.md) | Inference backend seam: ort / tract / candle | Accepted |
+| [0005](https://github.com/xberg-io/sceptre/blob/main/adrs/0005-mcp-as-feature-module-and-subcommand.md) | MCP as a feature-gated module + subcommand | Accepted |
+| [0006](https://github.com/xberg-io/sceptre/blob/main/adrs/0006-ai-rulez-for-agent-config.md) | Generate agent config with ai-rulez | Accepted |
+| [0007](https://github.com/xberg-io/sceptre/blob/main/adrs/0007-tooling-scaffolding-from-basemind.md) | Tooling scaffolding adapted from basemind | Accepted |
+| [0008](https://github.com/xberg-io/sceptre/blob/main/adrs/0008-uv-taskfile-tools-infra.md) | In-repo dev tooling: uv Python fallback + Rust `tools/` for model export | Accepted |
+| [0009](https://github.com/xberg-io/sceptre/blob/main/adrs/0009-candle-evaluation-ort-primary.md) | Backend evaluation: `ort` primary, `candle` deferred off the critical path | Superseded by 0031 |
+| [0010](https://github.com/xberg-io/sceptre/blob/main/adrs/0010-ocr-engine-seam-and-encapsulation-lockdown.md) | Public `OcrEngine` seam, internal DTO boundaries, and encapsulation lockdown | Accepted |
+| [0011](https://github.com/xberg-io/sceptre/blob/main/adrs/0011-repointable-registry-owner.md) | Re-pointable model registry via a `registry_owner` override | Accepted |
+| [0012](https://github.com/xberg-io/sceptre/blob/main/adrs/0012-ort-runtime-provisioning.md) | ONNX Runtime provisioning: `ort-bundled` + `ort-dynamic` (xberg pattern) | Accepted |
+| [0013](https://github.com/xberg-io/sceptre/blob/main/adrs/0013-imageproc-craft-postprocess-geometry.md) | `imageproc` for CRAFT postprocess geometry | Accepted |
+| [0014](https://github.com/xberg-io/sceptre/blob/main/adrs/0014-public-detect-recognize-line-and-model-provisioning.md) | Public detect / recognize-line methods and a model-provisioning surface | Accepted |
+| [0015](https://github.com/xberg-io/sceptre/blob/main/adrs/0015-bench-seam-and-criterion.md) | Criterion microbenchmarks behind a `bench` feature seam | Accepted |
+| [0016](https://github.com/xberg-io/sceptre/blob/main/adrs/0016-parity-harness-and-test-corpus.md) | Parity harness: dual golden fixtures, HF-cache model resolution, and the test corpus | Accepted |
+| [0017](https://github.com/xberg-io/sceptre/blob/main/adrs/0017-hf-hub-native-cache.md) | Resolve models through the Hugging Face hub's native on-disk cache | Accepted |
+| [0018](https://github.com/xberg-io/sceptre/blob/main/adrs/0018-cv2-exact-craft-dilation.md) | cv2-exact CRAFT dilation (amends ADR 0013) | Accepted |
+| [0019](https://github.com/xberg-io/sceptre/blob/main/adrs/0019-parity-safe-perf-and-simd.md) | Parity-safe performance optimization and SIMD | Accepted |
+| [0020](https://github.com/xberg-io/sceptre/blob/main/adrs/0020-release-strategy.md) | Release strategy: tag-triggered multi-platform build with crates.io dry-run | Superseded by 0023 |
+| [0021](https://github.com/xberg-io/sceptre/blob/main/adrs/0021-benchmark-methodology-and-gate.md) | Head-to-head benchmark methodology and regression gate | Accepted |
+| [0022](https://github.com/xberg-io/sceptre/blob/main/adrs/0022-input-image-format-coverage.md) | Input image format coverage: pure-Rust decoders only | Accepted |
+| [0023](https://github.com/xberg-io/sceptre/blob/main/adrs/0023-publish-to-crates-io-via-trusted-publishing.md) | Publish to crates.io for real, via GitHub Actions trusted publishing | Accepted |
+| [0024](https://github.com/xberg-io/sceptre/blob/main/adrs/0024-documentation-site-and-web-presence.md) | Documentation site, social assets, and CI docs deployment | Superseded by 0033 |
+| [0025](https://github.com/xberg-io/sceptre/blob/main/adrs/0025-first-party-onnx-exports.md) | First-party ONNX exports on the `sceptre-ocr` Hugging Face org | Accepted |
+| [0026](https://github.com/xberg-io/sceptre/blob/main/adrs/0026-extend-gen2-scope-telugu-kannada.md) | Extend gen2 scope to Telugu and Kannada | Accepted |
+| [0027](https://github.com/xberg-io/sceptre/blob/main/adrs/0027-tract-fixed-canvas-craft.md) | Fixed-canvas CRAFT detection on the tract backend | Accepted |
+| [0028](https://github.com/xberg-io/sceptre/blob/main/adrs/0028-host-supplied-model-artifacts-and-wasm-execution.md) | Host-supplied model artifacts and sequential browser-WASM execution | Accepted |
+| [0029](https://github.com/xberg-io/sceptre/blob/main/adrs/0029-cli-provisioning-default-and-runtime-scoped-parity.md) | CLI provisioning default and runtime-scoped parity | Accepted |
+| [0030](https://github.com/xberg-io/sceptre/blob/main/adrs/0030-published-benchmark-artifact-and-drift-gate.md) | Published benchmark artifact and drift gate | Accepted |
+| [0031](https://github.com/xberg-io/sceptre/blob/main/adrs/0031-hand-written-candle-networks.md) | Hand-written `candle` networks as the GPU and no-C++-runtime backend | Accepted |
+| [0032](https://github.com/xberg-io/sceptre/blob/main/adrs/0032-per-backend-accelerator-support.md) | Per-backend accelerator support (amends ADR 0029) | Accepted |
+| [0033](https://github.com/xberg-io/sceptre/blob/main/adrs/0033-org-migration-docs-domain-and-shared-theme.md) | Docs on `docs.sceptre.xberg.io` with the shared `@xberg-io/docs-theme` | Accepted |

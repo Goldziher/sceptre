@@ -1,6 +1,11 @@
 /target
 /dist
 
+# Astro docs site build output, generated types, and dependencies
+docs-site/dist/
+docs-site/.astro/
+docs-site/node_modules/
+
 # poly (polylint) local cache
 /.polylint
 # poly local hook-channel preferences (per-machine; not shared)
