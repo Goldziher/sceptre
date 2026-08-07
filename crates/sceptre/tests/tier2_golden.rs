@@ -1,9 +1,9 @@
 //! Tier-2 golden parity harness.
 //!
-//! Each committed example image (`tests/data/images/*`) is replayed through the
-//! real, default-engine `Reader` and compared against a dual golden fixture in
-//! `tests/data/golden/*.json` — an authoritative Python EasyOCR reference and a
-//! sceptre snapshot (see `tests/data/golden/README.md`). Availability is gated via
+//! Each example image, resolved from the `test_documents` corpus (see [`images_dir`]),
+//! is replayed through the real, default-engine `Reader` and compared against a dual
+//! golden fixture in `tests/data/golden/*.json` — an authoritative Python EasyOCR
+//! reference and a sceptre snapshot (see `tests/data/golden/README.md`). Availability is gated via
 //! the library's own `model_manifest`, and the reader is built with the default
 //! provider, which resolves models from the shared Hugging Face hub cache (ADR
 //! 0017); the test only builds a reader once the manifest reports every model
@@ -19,7 +19,7 @@
 mod helpers;
 
 #[cfg(feature = "ort")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "ort")]
 use sceptre::{Language, OcrConfig, ReadOptions, Reader};
@@ -44,10 +44,31 @@ fn require_models() -> bool {
     }
 }
 
-/// Absolute path to `tests/data/` in this crate.
+/// The repository root, two levels up from this crate's manifest directory
+/// (`<root>/crates/sceptre`).
 #[cfg(feature = "ort")]
-fn data_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Directory holding the corpus images: `TEST_DOCUMENTS_DIR` when set, otherwise the
+/// `test_documents` submodule checked out at the repository root.
+#[cfg(feature = "ort")]
+fn images_dir() -> PathBuf {
+    std::env::var_os("TEST_DOCUMENTS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("test_documents"))
+        .join("images")
+}
+
+/// Absolute path to the crate-local golden fixtures (not part of the `test_documents` corpus).
+#[cfg(feature = "ort")]
+fn golden_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/golden")
 }
 
 /// Whether every model `config` needs is already cached, per the library's own
@@ -104,7 +125,7 @@ fn run_dual_golden_parity(image_file: &str, golden_stem: &str, language: Languag
         .build()
         .expect("building the reader with the default Hugging Face cache model provider");
 
-    let image_path = data_dir().join("images").join(image_file);
+    let image_path = images_dir().join(image_file);
     let result = reader
         .readtext(&image_path, &ReadOptions::default())
         .unwrap_or_else(|err| panic!("the real engine runs end to end over {image_file}: {err}"));
@@ -114,7 +135,7 @@ fn run_dual_golden_parity(image_file: &str, golden_stem: &str, language: Languag
         "the real engine should detect and recognize at least one line in {image_file}"
     );
 
-    let golden_path = data_dir().join("golden").join(format!("{golden_stem}.json"));
+    let golden_path = golden_dir().join(format!("{golden_stem}.json"));
     let golden_json =
         std::fs::read_to_string(&golden_path).unwrap_or_else(|err| panic!("reading {}: {err}", golden_path.display()));
     let golden = helpers::DualGolden::parse(&golden_json);

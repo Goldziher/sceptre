@@ -12,6 +12,7 @@ mapped to both engines' language codes. Entries fall into three groups:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,20 +38,34 @@ SCEPTRE_LANGS: dict[str, str] = {
 # Image extensions both engines can decode, tried in order when resolving a stem.
 IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff")
 
-# Base directories, keyed by a short manifest tag, relative to the repo root. Both tags
-# resolve to the same vendored directory; "documents" and "examples" remain distinct keys
-# because they group manifest records by provenance, not by location (see ATTRIBUTIONS.md
-# in that directory for the "documents" entries' upstream licenses).
+# Base directories, keyed by a short manifest tag, relative to the `test_documents` corpus
+# root (see `test_documents_dir`). Both tags resolve to the same flat directory; "documents"
+# and "examples" remain distinct keys because they group manifest records by provenance, not
+# by location (see ATTRIBUTIONS.md in that directory for the "documents" entries' upstream
+# licenses).
 IMAGE_BASES: dict[str, Path] = {
-    "documents": Path("crates/sceptre/tests/data/images"),
-    "examples": Path("crates/sceptre/tests/data/images"),
+    "documents": Path("images"),
+    "examples": Path("images"),
 }
 
-# Transcripts for the `labeled` records, vendored alongside the images they describe. Upstream
-# `test_documents` split these across four directories by source extension; manifest stems are
-# unique, so one flat directory holds them without collision.
-GROUND_TRUTH_BASES: tuple[Path, ...] = (Path("crates/sceptre/tests/data/ground_truth"),)
+# Ground-truth transcripts, partitioned by upstream `test_documents` into one directory per
+# source extension. Manifest stems are unique across the corpus, so trying each base in order
+# resolves every labeled record without collision.
+GROUND_TRUTH_BASES: tuple[Path, ...] = (
+    Path("ground_truth/images"),
+    Path("ground_truth/jpg"),
+    Path("ground_truth/png"),
+    Path("ground_truth/jpeg"),
+)
 GROUND_TRUTH_EXTENSIONS: tuple[str, ...] = (".md", ".txt")
+
+
+def test_documents_dir(root: Path) -> Path:
+    """Root of the `test_documents` corpus: `TEST_DOCUMENTS_DIR` when set, otherwise the
+    submodule checked out at the repository root (`root`).
+    """
+    override = os.environ.get("TEST_DOCUMENTS_DIR")
+    return Path(override) if override else root / "test_documents"
 
 
 @dataclass(frozen=True)
@@ -167,9 +182,10 @@ def _resolve_image(root: Path, record: ManifestRecord) -> Path | None:
     """Find the on-disk image for a manifest record.
 
     A pinned ``extension`` resolves exactly; otherwise the known decodable extensions are
-    tried in order.
+    tried in order. Returns ``None`` (never a substitute image) when nothing matches, so an
+    absent or unfetched corpus is reported as a skip rather than passing silently.
     """
-    base = root / IMAGE_BASES[record.base]
+    base = test_documents_dir(root) / IMAGE_BASES[record.base]
     extensions = (record.extension,) if record.extension else IMAGE_EXTENSIONS
     for extension in extensions:
         candidate = base / f"{record.stem}{extension}"
@@ -179,12 +195,15 @@ def _resolve_image(root: Path, record: ManifestRecord) -> Path | None:
 
 
 def _resolve_ground_truth(root: Path, record: ManifestRecord) -> Path | None:
-    """Find the ground-truth transcript for a labeled record across the GT bases, if any."""
+    """Find the ground-truth transcript for a labeled record across the partitioned GT
+    bases, if any.
+    """
     if record.group != "labeled":
         return None
+    documents = test_documents_dir(root)
     for base in GROUND_TRUTH_BASES:
         for extension in GROUND_TRUTH_EXTENSIONS:
-            candidate = root / base / f"{record.stem}{extension}"
+            candidate = documents / base / f"{record.stem}{extension}"
             if candidate.exists():
                 return candidate
     return None

@@ -11,7 +11,7 @@
 //! ADR 0015.
 
 use std::hint::black_box;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use image::GrayImage;
 use ndarray::Array2;
@@ -20,8 +20,26 @@ use crate::config::{DetectionConfig, Language};
 use crate::recognize::Charset;
 use crate::types::Image;
 
-/// Directory holding the committed benchmark corpus images, relative to the crate manifest.
-const CORPUS_IMAGE_DIR: &str = "tests/data/images";
+/// Subdirectory of the `test_documents` corpus holding benchmark images.
+const CORPUS_IMAGE_SUBDIR: &str = "images";
+
+/// The repository root, two levels up from this crate's manifest directory
+/// (`<root>/crates/sceptre`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Directory holding the `test_documents` corpus: `TEST_DOCUMENTS_DIR` when set, otherwise
+/// the `test_documents` submodule checked out at the repository root.
+fn test_documents_dir() -> PathBuf {
+    std::env::var_os("TEST_DOCUMENTS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("test_documents"))
+}
 
 /// Region-score value written into synthetic heat-map blobs; above the default
 /// `text_threshold` (0.7) and `low_text` (0.4).
@@ -47,11 +65,11 @@ const LOGIT_SLOPE: f32 = 0.5;
 /// step; any positive scale exercises the same work.
 const BENCH_INV_RATIO: f32 = 2.0;
 
-/// Load a corpus image by filename from the committed [`CORPUS_IMAGE_DIR`] fixtures.
+/// Load a corpus image by filename from the `test_documents` corpus (see
+/// [`test_documents_dir`]). Fails loudly rather than falling back to a substitute image when
+/// the corpus is absent or the file is missing.
 pub fn load_corpus_image(filename: &str) -> Image {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(CORPUS_IMAGE_DIR)
-        .join(filename);
+    let path = test_documents_dir().join(CORPUS_IMAGE_SUBDIR).join(filename);
     Image::from_path(&path).unwrap_or_else(|error| panic!("failed to decode corpus image {}: {error}", path.display()))
 }
 
@@ -197,6 +215,13 @@ mod tests {
 
     #[test]
     fn should_load_a_committed_corpus_image() {
+        // Skip (rather than fail) when the corpus is absent or this particular fixture has
+        // not been fetched/published yet; `should_panic_loading_a_missing_corpus_image`
+        // below still proves a genuinely wrong filename fails loudly. ~keep
+        let path = test_documents_dir().join(CORPUS_IMAGE_SUBDIR).join("english.png");
+        if !path.exists() {
+            return;
+        }
         let image = load_corpus_image("english.png");
         assert!(image.width() > 0, "corpus image has non-zero width");
         assert!(image.height() > 0, "corpus image has non-zero height");

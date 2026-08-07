@@ -3,15 +3,37 @@
 //!
 //! These exercise the frozen public surface of [`sceptre::mcp::tools::SceptreServer`]
 //! against a test-local fake [`sceptre::OcrEngine`], so they need no models, ONNX, or
-//! network access. The happy path still decodes a real committed image from disk, since
-//! the tool runs `Image::from_path` before invoking the engine.
+//! network access. The happy path still decodes a real image from disk (the `test_documents`
+//! corpus, see [`image_path`]), since the tool runs `Image::from_path` before invoking the
+//! engine; those tests skip when the corpus has not been fetched.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rmcp::handler::server::wrapper::Parameters;
 use sceptre::mcp::tools::SceptreServer;
 use sceptre::mcp::types::ReadTextRequest;
 use sceptre::{Image, OcrResult, Point, Quad, ReadOptions, Reader, TextLine};
+
+/// The repository root, two levels up from this crate's manifest directory
+/// (`<root>/crates/sceptre`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Absolute path to `english.png` in the `test_documents` corpus: `TEST_DOCUMENTS_DIR`
+/// when set, otherwise the submodule checked out at the repository root.
+fn image_path() -> PathBuf {
+    std::env::var_os("TEST_DOCUMENTS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("test_documents"))
+        .join("images")
+        .join("english.png")
+}
 
 /// A test-local `OcrEngine` that always returns a single canned line, so the tool's
 /// output is fully controlled by the test rather than by any real recognizer.
@@ -45,12 +67,17 @@ fn fake_reader() -> Reader {
 
 #[tokio::test]
 async fn readtext_returns_recognized_text_for_a_decodable_image() {
+    let path = image_path();
+    if !path.exists() {
+        // The test_documents submodule is present but the corpus binaries have not been
+        // fetched (see test_documents/scripts/fetch_corpus.py); skip rather than fail. ~keep
+        return;
+    }
     let server = SceptreServer::new(fake_reader());
-    let image_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/images/english.png").to_string();
 
     let result = server
         .readtext(Parameters(ReadTextRequest {
-            image_path,
+            image_path: path.to_string_lossy().into_owned(),
             detail: None,
         }))
         .await
@@ -96,12 +123,16 @@ async fn readtext_reports_a_tool_error_for_a_missing_image() {
 
 #[tokio::test]
 async fn readtext_without_detail_returns_only_line_text() {
+    let path = image_path();
+    if !path.exists() {
+        // See the skip note in `readtext_returns_recognized_text_for_a_decodable_image`. ~keep
+        return;
+    }
     let server = SceptreServer::new(fake_reader());
-    let image_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/images/english.png").to_string();
 
     let result = server
         .readtext(Parameters(ReadTextRequest {
-            image_path,
+            image_path: path.to_string_lossy().into_owned(),
             detail: Some(false),
         }))
         .await

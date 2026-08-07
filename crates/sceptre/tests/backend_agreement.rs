@@ -11,7 +11,7 @@
 //! `ort`. Each pairing compiles only when both of its backends are available.
 #![cfg(feature = "ort")]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sceptre::{Accelerator, Backend, Language, OcrConfig, ReadOptions, Reader};
 
@@ -23,8 +23,23 @@ fn require_models() -> bool {
     }
 }
 
-fn data_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")
+/// The repository root, two levels up from this crate's manifest directory
+/// (`<root>/crates/sceptre`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Directory holding the corpus images: `TEST_DOCUMENTS_DIR` when set, otherwise the
+/// `test_documents` submodule checked out at the repository root.
+fn images_dir() -> PathBuf {
+    std::env::var_os("TEST_DOCUMENTS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("test_documents"))
+        .join("images")
 }
 
 /// A single-language config on `backend`, with a modest detection canvas so the fixed
@@ -55,7 +70,7 @@ fn recognize_text(image_file: &str, language: Language, backend: Backend, accele
         "SCEPTRE_REQUIRE_MODELS is set but the models for {image_file} are not cached"
     );
     let reader = Reader::builder().config(config).build().expect("build the reader");
-    let image_path = data_dir().join("images").join(image_file);
+    let image_path = images_dir().join(image_file);
     let result = reader
         .readtext(&image_path, &ReadOptions::default())
         .unwrap_or_else(|err| panic!("{backend:?} runs end to end over {image_file}: {err}"));

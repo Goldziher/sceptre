@@ -1,10 +1,10 @@
 """Generate the EasyOCR-reference side of the golden fixtures.
 
-Runs upstream Python EasyOCR (torch) over the committed example images and writes the
-recognized text plus per-line quad into ``crates/sceptre/tests/data/golden/<image>.json``.
-Only the ``easyocr`` side of each dual golden is written, together with its
-``metadata.easyocr`` provenance block; any existing ``sceptre`` snapshot side and its
-``metadata.sceptre`` block are preserved (see
+Runs upstream Python EasyOCR (torch) over the example images from the ``test_documents``
+corpus and writes the recognized text plus per-line quad into
+``crates/sceptre/tests/data/golden/<image>.json``. Only the ``easyocr`` side of each dual
+golden is written, together with its ``metadata.easyocr`` provenance block; any existing
+``sceptre`` snapshot side and its ``metadata.sceptre`` block are preserved (see
 ``crates/sceptre/tests/data/golden/README.md`` and ADR 0016). The heavy ``easyocr``/``torch`` dependencies live in the opt-in ``export``
 group; without them this exits cleanly with an explanatory message.
 """
@@ -12,6 +12,7 @@ group; without them this exits cleanly with an explanatory message.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import sys
 from datetime import UTC, datetime
@@ -38,8 +39,12 @@ def repo_root() -> Path:
 
 
 def images_dir() -> Path:
-    """Directory holding the committed example images."""
-    return repo_root() / "crates" / "sceptre" / "tests" / "data" / "images"
+    """Directory holding the example images: ``TEST_DOCUMENTS_DIR`` when set, otherwise the
+    ``test_documents`` submodule checked out at the repository root.
+    """
+    override = os.environ.get("TEST_DOCUMENTS_DIR")
+    root = Path(override) if override else repo_root() / "test_documents"
+    return root / "images"
 
 
 def golden_dir() -> Path:

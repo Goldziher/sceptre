@@ -52,11 +52,13 @@ own detection stage.
 
 ## Test fixtures
 
-The test images and their ground-truth transcripts carry their own, per-dataset licenses and
-citations — NDL PDM OCR, CORD, TextOCR, DocLayNet, and libheif-rs fixtures among them. Those
-obligations are recorded next to the files they cover and are not duplicated here:
+The test images and their ground-truth transcripts come from the shared `test_documents`
+submodule and carry their own, per-dataset licenses and citations — NDL PDM OCR, CORD,
+TextOCR, DocLayNet, and libheif-rs fixtures among them. Those obligations are recorded next
+to the files they cover and are not duplicated here:
 
-- [`crates/sceptre/tests/data/images/ATTRIBUTIONS.md`](crates/sceptre/tests/data/images/ATTRIBUTIONS.md)
+- [`test_documents/ATTRIBUTIONS.md`](test_documents/ATTRIBUTIONS.md)
+- [`test_documents/LICENSES.md`](test_documents/LICENSES.md)
 
 ## Dependencies
 

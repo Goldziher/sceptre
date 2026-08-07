@@ -1,8 +1,9 @@
 # Golden fixtures
 
 Each `<image>.json` here is the expected parity result for the matching image
-under `tests/data/images/<image>.{png,jpg}`, consumed by the tier-2 parity tests
-in `crates/sceptre/tests/tier2_golden.rs`.
+`<image>.{png,jpg}` in the `test_documents` corpus (`test_documents/images/`, fetched via
+the git submodule), consumed by the tier-2 parity tests in
+`crates/sceptre/tests/tier2_golden.rs`.
 
 ## Dual golden scheme
 
@@ -97,7 +98,7 @@ so a broken model cache is visible.
 ## Regenerating
 
 The fixtures are regenerated in two independent steps, then committed. Do this
-whenever a new image is added under `tests/data/images/`, the reference EasyOCR
+whenever a new image is added to the `test_documents` corpus, the reference EasyOCR
 version changes, or the sceptre pipeline output intentionally changes.
 
 1. Populate the models (opt-in, heavy — deferred by default):

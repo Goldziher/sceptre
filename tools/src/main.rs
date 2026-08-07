@@ -45,9 +45,10 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(feature = "ort")]
 mod snapshot {
-    //! The `snapshot` subcommand: run the sceptre pipeline over the committed example
-    //! images and write the `sceptre` side of each dual golden fixture, preserving any
-    //! existing `easyocr` reference side. See `crates/sceptre/tests/data/golden/README.md`.
+    //! The `snapshot` subcommand: run the sceptre pipeline over the example images from
+    //! the `test_documents` corpus and write the `sceptre` side of each dual golden
+    //! fixture, preserving any existing `easyocr` reference side. See
+    //! `crates/sceptre/tests/data/golden/README.md`.
 
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -238,8 +239,16 @@ mod snapshot {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
+    /// Directory holding the `test_documents` corpus: `TEST_DOCUMENTS_DIR` when set,
+    /// otherwise the `test_documents` submodule checked out at the repository root.
+    fn test_documents_dir() -> PathBuf {
+        std::env::var_os("TEST_DOCUMENTS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| repo_root().join("test_documents"))
+    }
+
     fn images_dir() -> PathBuf {
-        repo_root().join("crates/sceptre/tests/data/images")
+        test_documents_dir().join("images")
     }
 
     fn golden_dir() -> PathBuf {

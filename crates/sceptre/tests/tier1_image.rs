@@ -2,14 +2,32 @@
 //!
 //! These exercise only the frozen public surface (`Image::from_rgb8`,
 //! `Image::from_path`, `Image::from_bytes`) with no model dependency, so they
-//! run as part of the default `cargo test` invocation.
+//! run as part of the default `cargo test` invocation. The two tests that decode a real
+//! fixture resolve it from the `test_documents` corpus and skip (rather than fail) when
+//! that corpus has not been fetched; see [`image_path`].
+
+use std::path::{Path, PathBuf};
 
 use sceptre::{Image, OcrError};
 
-/// Absolute path to a committed fixture under `tests/data/images/`.
-fn image_path(name: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data/images")
+/// The repository root, two levels up from this crate's manifest directory
+/// (`<root>/crates/sceptre`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Absolute path to a corpus fixture under the `test_documents` submodule's `images/`
+/// directory: `TEST_DOCUMENTS_DIR` when set, otherwise the submodule checked out at the
+/// repository root.
+fn image_path(name: &str) -> PathBuf {
+    std::env::var_os("TEST_DOCUMENTS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("test_documents"))
+        .join("images")
         .join(name)
 }
 
@@ -48,7 +66,13 @@ fn should_return_error_when_rgb8_length_does_not_match_dimensions() {
 
 #[test]
 fn should_decode_real_png_from_path_with_positive_dimensions_and_matching_buffer_length() {
-    let image = Image::from_path(image_path("english.png")).expect("decoding the committed english.png fixture");
+    let path = image_path("english.png");
+    if !path.exists() {
+        // The test_documents submodule is present but the corpus binaries have not been
+        // fetched (see test_documents/scripts/fetch_corpus.py); skip rather than fail. ~keep
+        return;
+    }
+    let image = Image::from_path(&path).expect("decoding the english.png corpus fixture");
 
     assert!(
         image.width() > 0,
@@ -70,6 +94,10 @@ fn should_decode_real_png_from_path_with_positive_dimensions_and_matching_buffer
 #[test]
 fn should_decode_identical_image_from_bytes_and_from_path() {
     let path = image_path("english.png");
+    if !path.exists() {
+        // See the skip note in `should_decode_real_png_from_path_with_positive_dimensions_and_matching_buffer_length`. ~keep
+        return;
+    }
     let bytes = std::fs::read(&path).expect("reading english.png bytes from disk");
 
     let from_path = Image::from_path(&path).expect("decoding english.png via from_path");
