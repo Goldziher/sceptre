@@ -5,15 +5,15 @@
 //! the `custom_mean` formula from `recognition.py`.
 
 #[cfg(any(test, feature = "bench"))]
-use ndarray::{Array2, ArrayViewMut1};
-use ndarray::{ArrayView1, ArrayView2};
+use ndarray::ArrayViewMut1;
+use ndarray::{Array2, ArrayView1, ArrayView2};
 
 use super::charset::Charset;
 use super::recognizer::RecognizedText;
 
 /// CTC blank class index. EasyOCR builds its class list as `['[blank]'] + chars`,
 /// so class 0 is the blank symbol.
-const BLANK_CLASS: usize = 0;
+pub(super) const BLANK_CLASS: usize = 0;
 
 /// Numerator of the `custom_mean` exponent `2.0 / sqrt(n)`, from EasyOCR
 /// `recognition.py::custom_mean`.
@@ -73,6 +73,38 @@ impl IgnoreMask {
     }
 }
 
+/// Build the full ignore-masked, renormalized probability matrix `[T, num_classes]`.
+///
+/// Beam search (unlike greedy) needs every class's probability at each timestep, not
+/// just the row argmax, so this mirrors [`decode_row`]'s per-row softmax + `ignore`
+/// suppression + renormalization exactly, keeping the whole row instead of collapsing
+/// it to `(class, probability)`.
+pub(super) fn probability_matrix(logits: ArrayView2<f32>, ignore_mask: &IgnoreMask) -> Array2<f32> {
+    let mut probs = Array2::<f32>::zeros(logits.raw_dim());
+    for (mut out_row, in_row) in probs.rows_mut().into_iter().zip(logits.rows()) {
+        let max = in_row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut sum = 0.0f32;
+        for (cell, &value) in out_row.iter_mut().zip(in_row.iter()) {
+            let weight = (value - max).exp();
+            *cell = weight;
+            sum += weight;
+        }
+        if sum > 0.0 {
+            out_row.iter_mut().for_each(|cell| *cell /= sum);
+        }
+        for (class, cell) in out_row.iter_mut().enumerate() {
+            if ignore_mask.contains(class) {
+                *cell = 0.0;
+            }
+        }
+        let renorm: f32 = out_row.iter().sum();
+        if renorm > 0.0 {
+            out_row.iter_mut().for_each(|cell| *cell /= renorm);
+        }
+    }
+    probs
+}
+
 /// Fused softmax + `ignore` suppression + renormalization + argmax for one timestep
 /// row, returning the same `(class, probability)` the reference produces at that
 /// cell without materializing the probability row.
@@ -86,7 +118,7 @@ impl IgnoreMask {
 /// reported probability is the same `(weight / sum) / renorm` the reference stores.
 /// `weights` is a caller-owned scratch buffer reused across timesteps so a single
 /// exp is computed per cell and no `Array2` is allocated.
-fn decode_row(input: ArrayView1<f32>, ignore_mask: &IgnoreMask, weights: &mut Vec<f32>) -> (usize, f32) {
+pub(super) fn decode_row(input: ArrayView1<f32>, ignore_mask: &IgnoreMask, weights: &mut Vec<f32>) -> (usize, f32) {
     let max = input.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     weights.clear();
     let mut sum = 0.0f32;
@@ -188,7 +220,7 @@ pub(crate) fn decode_greedy_reference(logits: ArrayView2<f32>, charset: &Charset
 
 /// The argmax probability at every non-blank timestep, collected before collapsing
 /// repeats. An all-blank sequence yields `[0.0]`, matching `recognizer_predict`.
-fn collect_max_probs(per_timestep: &[(usize, f32)]) -> Vec<f32> {
+pub(super) fn collect_max_probs(per_timestep: &[(usize, f32)]) -> Vec<f32> {
     let max_probs: Vec<f32> = per_timestep
         .iter()
         .filter(|(class, _)| *class != BLANK_CLASS)
@@ -200,9 +232,17 @@ fn collect_max_probs(per_timestep: &[(usize, f32)]) -> Vec<f32> {
 /// Greedy CTC collapse: keep a timestep iff its class differs from the previous one
 /// and is not the blank, then map each kept class through `charset`.
 fn collapse(per_timestep: &[(usize, f32)], charset: &Charset) -> String {
+    collapse_classes(per_timestep.iter().map(|&(class, _)| class), charset)
+}
+
+/// CTC collapse over a bare class sequence: keep a class iff it differs from the
+/// previous one and is not the blank, then map each kept class through `charset`.
+/// Shared by greedy decoding ([`collapse`], over `(class, probability)` pairs) and
+/// beam search (over a beam's raw labeling, which carries no per-step probability).
+pub(super) fn collapse_classes(classes: impl IntoIterator<Item = usize>, charset: &Charset) -> String {
     let mut text = String::new();
     let mut previous: Option<usize> = None;
-    for &(class, _) in per_timestep {
+    for class in classes {
         let is_new = previous != Some(class);
         previous = Some(class);
         if is_new && class != BLANK_CLASS {
@@ -215,7 +255,7 @@ fn collapse(per_timestep: &[(usize, f32)], charset: &Charset) -> String {
 }
 
 /// EasyOCR's confidence: `product(values).powf(2.0 / sqrt(values.len()))`.
-fn custom_mean(values: &[f32]) -> f32 {
+pub(super) fn custom_mean(values: &[f32]) -> f32 {
     let product: f32 = values.iter().product();
     let exponent = CUSTOM_MEAN_EXPONENT_NUMERATOR / (values.len() as f32).sqrt();
     product.powf(exponent)

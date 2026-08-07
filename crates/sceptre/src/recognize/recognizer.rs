@@ -79,11 +79,7 @@ impl CrnnRecognizer {
             let tensor = super::preprocess::prepare_batch(chunk)?;
             let logits = super::crnn::run_crnn(self.backend.as_ref(), tensor)?;
             if chunk.len() == 1 {
-                results.push(super::ctc::decode_greedy_with_mask(
-                    logits.index_axis(Axis(0), 0),
-                    &self.charset,
-                    &self.ignore_mask,
-                ));
+                results.push(self.decode_row(logits.index_axis(Axis(0), 0)));
                 continue;
             }
             // Native targets use the reader's Rayon pool; browser WASM uses the sequential range. ~keep
@@ -93,17 +89,26 @@ impl CrnnRecognizer {
             #[cfg(target_arch = "wasm32")]
             let rows = 0..chunk.len();
             let decoded: Vec<RecognizedText> = rows
-                .map(|row| {
-                    super::ctc::decode_greedy_with_mask(
-                        logits.index_axis(Axis(0), row),
-                        &self.charset,
-                        &self.ignore_mask,
-                    )
-                })
+                .map(|row| self.decode_row(logits.index_axis(Axis(0), row)))
                 .collect();
             results.extend(decoded);
         }
         Ok(results)
+    }
+
+    /// Decode one crop's logits with the configured decoder. Confidence is identical
+    /// across decoders (EasyOCR always computes it from the greedy argmax); only the
+    /// text-production strategy changes.
+    fn decode_row(&self, logits: ndarray::ArrayView2<f32>) -> RecognizedText {
+        match self.config.decoder {
+            Decoder::Greedy => super::ctc::decode_greedy_with_mask(logits, &self.charset, &self.ignore_mask),
+            Decoder::BeamSearch => {
+                super::beam::decode_beam_search(logits, &self.charset, &self.ignore_mask, self.config.beam_width)
+            }
+            Decoder::WordBeamSearch => {
+                unreachable!("word-beam-search is rejected in `recognize` before any pass runs")
+            }
+        }
     }
 
     /// Re-run the low-confidence crops with contrast adjustment, replacing a result
@@ -163,9 +168,9 @@ fn build_ignore(charset: &Charset, config: &RecognitionConfig) -> Vec<usize> {
 
 impl TextRecognizer for CrnnRecognizer {
     fn recognize(&self, crops: &[RegionCrop]) -> Result<Vec<RecognizedText>> {
-        if self.config.decoder != Decoder::Greedy {
+        if self.config.decoder == Decoder::WordBeamSearch {
             return Err(OcrError::config(
-                "only greedy CTC decoding is implemented; set decoder = \"greedy\"",
+                "word-beam-search CTC decoding is not implemented; set decoder = \"greedy\" or \"beamsearch\"",
             ));
         }
         let mut results = self.run_pass(crops)?;
@@ -371,18 +376,44 @@ mod tests {
     }
 
     #[test]
-    fn should_reject_non_greedy_decoder() {
+    fn should_reject_word_beam_search_decoder() {
         let backend = Arc::new(ScriptedBackend::new(vec![logits([0.0, 5.0, 0.0])]));
         let config = RecognitionConfig {
-            decoder: crate::config::Decoder::BeamSearch,
+            decoder: crate::config::Decoder::WordBeamSearch,
             ..RecognitionConfig::default()
         };
         let recognizer = english_recognizer(backend, config);
         let result = recognizer.recognize(&[sample_crop()]);
         assert!(
             matches!(result, Err(OcrError::Config { .. })),
-            "non-greedy decoding must be rejected with a config error"
+            "word-beam-search decoding must be rejected with a config error"
         );
+    }
+
+    #[test]
+    fn should_decode_via_beam_search_when_configured() {
+        // Same fixture as should_decode_single_crop_to_expected_text, but routed ~keep
+        // through the beam-search decoder: an unambiguous single-path input decodes ~keep
+        // the same way regardless of decoder. ~keep
+        let backend = Arc::new(ScriptedBackend::new(vec![logits([0.0, 5.0, 0.0])]));
+        let config = RecognitionConfig {
+            decoder: crate::config::Decoder::BeamSearch,
+            contrast_ths: 0.0,
+            ..RecognitionConfig::default()
+        };
+        let recognizer = english_recognizer(backend, config);
+
+        let results = recognizer
+            .recognize(&[sample_crop()])
+            .expect("beam search decoding succeeds");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].text, "0");
+    }
+
+    #[test]
+    fn should_default_to_greedy_decoding() {
+        assert_eq!(RecognitionConfig::default().decoder, crate::config::Decoder::Greedy);
     }
 
     /// End-to-end recognition over a real gen2 recognizer ONNX model.

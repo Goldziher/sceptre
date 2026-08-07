@@ -10,6 +10,7 @@
 //! stages are module-private helpers wired together by
 //! [`recognizer::CrnnRecognizer`].
 
+mod beam;
 mod charset;
 mod contrast;
 mod crnn;

@@ -11,9 +11,15 @@ pub enum Decoder {
     /// Greedy (best-path) CTC decoding.
     #[default]
     Greedy,
-    /// Beam-search CTC decoding.
+    /// Beam-search CTC decoding (EasyOCR `decoder='beamsearch'`, `beamWidth` from
+    /// [`RecognitionConfig::beam_width`]). Not a general accuracy win: measured on the
+    /// tier-2 corpus it gained word-F1 on Japanese but lost it on English and Korean by
+    /// dropping characters mid-word, a known failure mode of CTC beam search without a
+    /// language model. Opt in only where it is measured to help (see ADR 0036).
     BeamSearch,
-    /// Dictionary-constrained word-beam-search.
+    /// Dictionary-constrained word-beam-search. Not implemented: EasyOCR's variant needs
+    /// per-language dictionaries and, for non-Latin separators, word segmentation that
+    /// sceptre has no equivalent of; selecting it is a config error (ADR 0036).
     WordBeamSearch,
 }
 
@@ -49,6 +55,9 @@ impl RecognitionConfig {
                 "recognition.filter_ths must be finite and within [0, 1], got {}",
                 self.filter_ths
             )));
+        }
+        if self.beam_width == 0 {
+            return Err(OcrError::config("recognition.beam_width must be at least 1, got 0"));
         }
         Ok(())
     }
@@ -103,5 +112,22 @@ mod tests {
             let error = config.validate().expect_err("invalid filter threshold should fail");
             assert!(matches!(error, OcrError::Config { .. }));
         }
+    }
+
+    #[test]
+    fn should_default_to_greedy_decoding_with_easyocr_beam_width() {
+        let config = RecognitionConfig::default();
+        assert_eq!(config.decoder, Decoder::Greedy);
+        assert_eq!(config.beam_width, 5);
+    }
+
+    #[test]
+    fn should_reject_a_zero_beam_width() {
+        let config = RecognitionConfig {
+            beam_width: 0,
+            ..RecognitionConfig::default()
+        };
+        let error = config.validate().expect_err("a zero beam width should fail");
+        assert!(matches!(error, OcrError::Config { .. }));
     }
 }
