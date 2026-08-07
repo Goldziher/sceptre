@@ -68,3 +68,12 @@ The library adopted Hugging Face hub-cache resolution (ADR 0017), so the bespoke
 `tests/helpers`. Real-model tests now gate availability via the library's
 `model_manifest` and build the reader with the default provider; the dual-golden
 comparison and `SCEPTRE_REQUIRE_MODELS` gating are unchanged.
+
+## Status update (2026-08-07)
+
+The **Corpus** decision above (the `test_documents` Git-LFS submodule) was reversed by
+commit `36c64e3`, which vendored a 38-image/27-transcript subset directly into
+`crates/sceptre/tests/data/` without recording a new ADR. [ADR 0034](0034-test-documents-corpus-via-content-addressed-fetch.md)
+now reverses that vendoring in turn, re-adopting a `test_documents` submodule — this time
+the LFS-free, content-addressed one every other repo in the polyrepo uses. The
+model-resolution and dual-golden decisions above are unaffected.
