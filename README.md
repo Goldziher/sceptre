@@ -1,60 +1,81 @@
-<!-- markdownlint-disable MD033 MD041 -->
-<div align="center">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://cdn.jsdelivr.net/gh/xberg-io/assets@v1/banner/readme-banner-dark.svg">
+    <img alt="Xberg" width="420" src="https://cdn.jsdelivr.net/gh/xberg-io/assets@v1/banner/readme-banner-light.svg">
+  </picture>
+</p>
 
-<img src="https://raw.githubusercontent.com/Goldziher/sceptre/main/docs/assets/banner.svg" alt="sceptre" width="820">
+# sceptre
 
-**EasyOCR's accuracy. Rust's speed and footprint.**
-
-sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
-OCR pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX.
-It agrees with EasyOCR's output across the scripts it supports, runs **several times faster on a
-fraction of the memory** — even a cold one-shot run beats EasyOCR warm ([measured
-figures](#benchmarks)) — and ships as one self-contained binary with **no Python runtime**. Use it
-as a **library**, a **CLI**, or an **MCP server**.
-
-8 scripts · CRAFT + gen2 CRNN · ONNX Runtime **or** pure-Rust · library · CLI · MCP · offline-first
-
-[![crates.io](https://img.shields.io/crates/v/sceptre?color=f5b301&style=flat-square)](https://crates.io/crates/sceptre)
-[![CI](https://img.shields.io/github/actions/workflow/status/Goldziher/sceptre/ci.yaml?style=flat-square&color=f5b301)](https://github.com/Goldziher/sceptre/actions/workflows/ci.yaml)
-[![docs.rs](https://img.shields.io/docsrs/sceptre?style=flat-square&color=f5b301)](https://docs.rs/sceptre)
-[![Documentation](https://img.shields.io/badge/docs-goldziher.github.io%2Fsceptre-f5b301?style=flat-square)](https://goldziher.github.io/sceptre)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-
-[Documentation](https://goldziher.github.io/sceptre) · [Install](#install) · [Quickstart](#quickstart) · [Why sceptre](#why-sceptre) · [Benchmarks](#benchmarks) · [How it works](#how-it-works) · [Contributing](CONTRIBUTING.md)
-
+<div align="center" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 20px 0;">
+  <a href="https://crates.io/crates/sceptre">
+    <img src="https://img.shields.io/crates/v/sceptre?label=Rust&color=007ec6" alt="Rust">
+  </a>
+  <a href="https://github.com/xberg-io/sceptre/actions/workflows/ci-rust.yaml">
+    <img src="https://img.shields.io/github/actions/workflow/status/xberg-io/sceptre/ci-rust.yaml?label=CI&color=007ec6" alt="CI">
+  </a>
+  <a href="https://docs.rs/sceptre">
+    <img src="https://img.shields.io/docsrs/sceptre?label=docs.rs&color=007ec6" alt="docs.rs">
+  </a>
+  <a href="https://github.com/xberg-io/sceptre/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-007ec6" alt="License">
+  </a>
+  <a href="https://docs.sceptre.xberg.io">
+    <img src="https://img.shields.io/badge/Docs-sceptre-007ec6" alt="Documentation">
+  </a>
 </div>
 
----
+<div align="center" style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 28px 0 24px;">
+  <a href="https://discord.gg/xt9WY3GnKR">
+    <img height="22" src="https://img.shields.io/badge/Discord-Chat-007ec6?logo=discord&logoColor=white" alt="Join Discord">
+  </a>
+</div>
 
-## Why sceptre
+EasyOCR's accuracy in a single Rust binary — CRAFT text detection and gen2 CRNN recognition over ONNX, with no Python
+runtime.
 
-EasyOCR is excellent and accurate — but it's a PyTorch stack: a Python interpreter, a multi-gigabyte
-runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops all of that.
+## What and Why?
 
-| | What you get | Why it matters |
-|---|---|---|
-| **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Chinese (simplified), Japanese, Korean, Cyrillic, plus Telugu and Kannada — agreeing on text (word/char-F1) and boxes (IoU), on the `ort` backend's CPU execution provider. | A faithful reimplementation, held to a per-image word-F1 and box-IoU floor rather than character-for-character equality. |
-| **Substantially faster** | Several times the throughput of EasyOCR warm on the same corpus — and even a cold, one-shot CLI run beats EasyOCR's warm, already-loaded reader ([measured figures](#benchmarks)). | More pages per second, less waiting, cheaper batch jobs. |
-| **A fraction of the memory** | Peak RSS several times lower than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
-| **One binary, no Python** | A single self-contained executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
-| **Three surfaces** | The same engine as a Rust **library**, a **CLI** (`sceptre`), and an **MCP server** for agents. | Drop it into a service, a shell pipeline, or an AI tool without re-plumbing. |
-| **Three backends, one seam** | ONNX Runtime (`ort`) for native speed, pure-Rust ONNX (`tract`) for WASM / Android, and `candle` for a GPU or a build with no ONNX Runtime at all. | Portability when you need it, native performance when you don't. |
+EasyOCR is accurate, but it is a PyTorch stack: a Python interpreter, a multi-gigabyte runtime, and a heavy process to
+keep warm. sceptre is a from-scratch Rust reimplementation of the same pipeline — **CRAFT** text detection then **gen2
+CRNN** recognition with CTC decoding, over ONNX — that keeps the accuracy and drops all of that.
 
----
+It agrees with [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s output across the scripts it supports, runs several
+times faster on a fraction of the memory — even a cold one-shot run beats EasyOCR warm ([measured
+figures](#benchmarks)) — and ships as one self-contained executable. Models download once, cache locally, and run
+offline thereafter. Use it as a Rust library, a CLI, or an MCP server.
 
-## Install
+Every model call goes through one backend seam, so the deployment target is a build-time choice rather than a rewrite:
+ONNX Runtime for native speed, pure-Rust ONNX for WASM and Android, and `candle` for GPU devices or a build that links
+no ONNX Runtime at all.
+
+### Features
+
+| Feature | Description |
+| ------- | ----------- |
+| **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Simplified Chinese, Japanese, Korean, Cyrillic, Telugu, Kannada — on text (word/char-F1) and boxes (IoU), held to a per-image floor rather than character-for-character equality |
+| **Several times faster** | Higher throughput than EasyOCR warm on the same corpus; even a cold, one-shot CLI run beats EasyOCR's already-loaded reader ([measured figures](#benchmarks)) |
+| **A fraction of the memory** | Peak RSS several times lower than the Python + torch process, measured like-for-like as whole-process peaks |
+| **One binary, no Python** | A single self-contained executable. Models download once, cache locally, and run offline thereafter — nothing to `pip install`, no interpreter to ship |
+| **Three surfaces** | The same engine as a Rust library, a CLI (`sceptre`), and an MCP server for agents |
+| **Three backends, one seam** | ONNX Runtime (`ort`) for native speed, pure-Rust ONNX (`tract`) for WASM / Android, and `candle` for a GPU or a build with no ONNX Runtime at all |
+| **Pure-Rust image decoding** | PNG, JPEG, BMP, GIF, TIFF, WebP, and NetPBM |
+
+<p align="center"><strong>⭐ Star this repo to show your support — it helps others discover sceptre.</strong></p>
+
+## Quick Start
+
+### Install
 
 ```sh
 cargo install sceptre-cli
 ```
 
-That default build is self-contained: it links a prebuilt ONNX Runtime fetched at build time
-(`ort-bundled`) and enables model download (`download`), so the binary needs no `ORT_DYLIB_PATH` and
-no separately installed `libonnxruntime`.
+That default build is self-contained: it links a prebuilt ONNX Runtime fetched at build time (`ort-bundled`) and enables
+model download (`download`), so the binary needs no `ORT_DYLIB_PATH` and no separately installed `libonnxruntime`.
 
-The models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached
-under the standard HF cache, and sha256-verified as they download. Every run after that reads the
-cached models with no network.
+The models — CRAFT plus the gen2 recognizers — are fetched from Hugging Face on first use, cached under the standard HF
+cache, and sha256-verified as they download. Every run after that reads the cached models with no network.
 
 > **Targets with no prebuilt ONNX Runtime.** `ort` publishes prebuilts for a fixed target list.
 > `x86_64-apple-darwin` (Intel macOS), every `*-unknown-linux-musl` (Alpine),
@@ -72,9 +93,9 @@ cached models with no network.
 > branch. So switching ONNX Runtime provisioning never needs `--no-default-features` — only the
 > pure-Rust path does, because it has to drop `ort` from the graph entirely.
 
-## Quickstart
+### CLI
 
-**CLI** — one image or many in a single warm process:
+One image or many in a single warm process:
 
 ```sh
 sceptre run receipt.png --lang english --format json
@@ -87,7 +108,7 @@ sceptre run huge-scan.png --canvas-size 1600         # trade some accuracy for l
 Decodes PNG, JPEG, BMP, GIF, TIFF, WebP, and NetPBM (all pure-Rust; HEIF/AVIF/JPEG-2000
 are out of scope — see [`adrs/0022`](adrs/0022-input-image-format-coverage.md)).
 
-**Library:**
+### Library
 
 ```rust
 use sceptre::{Reader, ReadOptions};
@@ -100,7 +121,7 @@ for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.li
 ```
 
 The library ships `default = []`, so enable a backend and model download:
-`sceptre = { version = "0.4", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
+`sceptre = { version = "0.5", features = ["ort-bundled", "download"] }` (see [Feature flags](#feature-flags)).
 
 WASM and mobile hosts can avoid filesystem and network assumptions by calling `model_descriptors`,
 fetching the selected artifacts, constructing a `VerifiedModelProvider`, and passing it to
@@ -109,8 +130,9 @@ fetching the selected artifacts, constructing a `VerifiedModelProvider`, and pas
 Android and iOS hosts that package ONNX assets as real files may instead set both
 `model.detector_path` and `model.recognizer_path`; the default provider then bypasses Hugging Face.
 
-**MCP server** — expose a `readtext` tool to an agent. The `mcp` subcommand is behind the `mcp`
-cargo feature, which is off by default:
+### MCP server
+
+Expose a `readtext` tool to an agent. The `mcp` subcommand is behind the `mcp` cargo feature, which is off by default:
 
 ```sh
 cargo install sceptre-cli --features mcp
@@ -240,7 +262,28 @@ task bench    # criterion microbenchmarks (--features bench)
 Coding conventions are generated from `.ai-rulez/` into `CLAUDE.md` / `AGENTS.md` — edit the source,
 then run `ai-rulez generate`.
 
+## Documentation
+
+Full guides, the configuration reference, backend and accelerator selection, and the benchmark
+methodology live at **[docs.sceptre.xberg.io](https://docs.sceptre.xberg.io)**. The Rust API
+reference is on [docs.rs](https://docs.rs/sceptre).
+
+## Part of Xberg.io
+
+- [Xberg](https://github.com/xberg-io/xberg) — the open-source content-intelligence engine: text, tables, and metadata from 101 formats (115 file extensions), with OCR, transcription, and code intelligence. MIT.
+- [Xberg Pro](https://xberg.io) — a complete self-hosted content-intelligence backend in a single container. Commercial.
+- [Xberg Enterprise](https://xberg.io) — the distributed, governed content-intelligence platform, scaled on Kubernetes with team governance and support. Commercial.
+- [crawlberg](https://github.com/xberg-io/crawlberg) — web crawling and scraping with HTML→Markdown and headless-Chrome fallback.
+- [html-to-markdown](https://github.com/xberg-io/html-to-markdown) — fast, lossless HTML→Markdown engine.
+- [liter-llm](https://github.com/xberg-io/liter-llm) — universal LLM API client with native bindings for 14 languages and 165 providers.
+- [tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-language-pack) — tree-sitter grammars and code-intelligence primitives.
+- [alef](https://github.com/xberg-io/alef) — the polyglot binding generator that produces every per-language binding across the 5 polyglot repos.
+
+## Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
+
 ## License
 
-MIT. Model weights are distributed by third parties under their own licenses (the gen2 EasyOCR models
-and the iText ONNX exports are Apache-2.0).
+[MIT License](LICENSE). Model weights are distributed by third parties under their own licenses (the
+gen2 EasyOCR models and the iText ONNX exports are Apache-2.0).
