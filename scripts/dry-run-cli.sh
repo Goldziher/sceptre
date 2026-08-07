@@ -27,7 +27,7 @@ fi
 # "not published" for every version. Distinguish the three answers rather than treating any ~keep
 # non-200 as absent: a 403 or a network failure must not masquerade as a skippable release. ~keep
 status="$(curl -sS -o /dev/null -w '%{http_code}' \
-	-H 'User-Agent: sceptre release check (https://github.com/Goldziher/sceptre)' \
+	-H 'User-Agent: sceptre release check (https://github.com/xberg-io/sceptre)' \
 	"https://crates.io/api/v1/crates/sceptre/${version}" || echo 000)"
 
 case "$status" in

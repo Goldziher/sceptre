@@ -78,7 +78,7 @@ jobs:
           # reads as "absent" for every version, so identify the caller and match on 200. ~keep
           # A 403/5xx/timeout leaves this false, which only costs an idempotent re-publish. ~keep
           status="$(curl -sS -o /dev/null -w '%{http_code}' \
-            -H 'User-Agent: sceptre release workflow (https://github.com/Goldziher/sceptre)' \
+            -H 'User-Agent: sceptre release workflow (https://github.com/xberg-io/sceptre)' \
             "https://crates.io/api/v1/crates/sceptre-cli/${version}" || echo 000)"
           echo "crates.io HTTP $status for sceptre-cli ${version}"
           if [ "$status" = "200" ]; then

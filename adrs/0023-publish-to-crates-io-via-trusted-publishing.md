@@ -57,3 +57,11 @@ workspace version already equals the tag (`meta` verifies this). The local
   `publish-crates` job fails at the auth step (the binary release still succeeds).
 - Supersedes ADR 0020's dry-run-only stance; the multi-platform build, versioning, and
   release-promotion mechanics from 0020 are retained unchanged.
+
+## Status update (2026-08-07)
+
+The repository moved from the `Goldziher` GitHub account to the `xberg-io` organisation. Because a
+crates.io trusted publisher is bound to a specific owner/repo/workflow triple, the publishers for
+both `sceptre` and `sceptre-cli` were re-registered under owner `xberg-io` (repo `sceptre`, workflow
+`publish.yaml` — unchanged). The decision itself is unaffected: trusted publishing over OIDC, no
+stored registry token, library before CLI, idempotent re-runs.

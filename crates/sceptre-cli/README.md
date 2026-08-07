@@ -28,7 +28,7 @@ sceptre mcp --lang english                           # expose a readtext MCP too
 Subcommands: `run`, `detect`, `models`, `mcp`, `completions`.
 
 Full documentation, benchmarks, and design notes live at the
-[project repository](https://github.com/Goldziher/sceptre).
+[project repository](https://github.com/xberg-io/sceptre).
 
 ## License
 

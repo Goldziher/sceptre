@@ -9,8 +9,8 @@ edition = "2024"
 rust-version = "1.85"
 authors = ["Na'aman Hirschfeld <nhirschfeld@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/Goldziher/sceptre"
-homepage = "https://github.com/Goldziher/sceptre"
+repository = "https://github.com/xberg-io/sceptre"
+homepage = "https://github.com/xberg-io/sceptre"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

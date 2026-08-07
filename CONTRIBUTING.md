@@ -7,7 +7,7 @@ the check gate, our conventions, and how we review pull requests.
 ## Getting started
 
 ```sh
-git clone https://github.com/Goldziher/sceptre.git
+git clone https://github.com/xberg-io/sceptre.git
 cd sceptre
 task setup    # cargo fetch + poly hooks install + uv sync
 ```
