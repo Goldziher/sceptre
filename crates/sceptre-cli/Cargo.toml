@@ -43,6 +43,11 @@ ort-bundled = ["sceptre/ort-bundled"]
 # build script returns before its download branch when linking is disabled. So
 # `--features ort-dynamic` alone is enough; `--no-default-features` is not required. ~keep
 ort-dynamic = ["sceptre/ort-dynamic"]
+# Pure-Rust native-tensor backend (candle), selected at runtime with `--backend candle`.
+# Not in the default set: it carries its own kernels rather than an ONNX runtime, and is
+# slower than ort on the CPU, so it is opt-in. Without this feature `--backend candle`
+# parses and then fails at load with "not compiled in". ~keep
+candle = ["sceptre/candle"]
 # Pure-Rust ONNX backend (tract), selected at runtime with `--backend tract`.
 # Pairs with `--no-default-features` for targets that have neither a prebuilt ONNX Runtime
 # nor a system libonnxruntime. ~keep

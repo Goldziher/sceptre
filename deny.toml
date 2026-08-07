@@ -12,7 +12,11 @@ no-default-features = false
 feature-depth = 1
 
 [advisories]
-ignore = []
+# RUSTSEC-2024-0436: `paste` is unmaintained, not vulnerable — its author retired it and
+# points at forks. It reaches this workspace only through candle-core -> gemm, is a
+# compile-time proc-macro with no runtime surface, and nothing here depends on it directly.
+# Drop this entry when gemm migrates to a maintained fork. ~keep
+ignore = ["RUSTSEC-2024-0436"]
 
 [licenses]
 allow = [

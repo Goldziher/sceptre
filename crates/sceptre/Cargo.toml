@@ -39,7 +39,7 @@ ort-dynamic = ["ort", "ort?/load-dynamic"]
 # Pure-Rust ONNX backend for WASM and Android. ~keep
 tract = ["dep:tract-onnx"]
 # Pure-Rust native-tensor backend. ~keep
-candle = []
+candle = ["dep:candle-core", "dep:candle-nn", "dep:prost"]
 # Runtime model download, caching, and sha256 verification from Hugging Face. ~keep
 download = ["dep:hf-hub"]
 # MCP (rmcp) server surface. ~keep
@@ -54,12 +54,15 @@ ort-directml = ["ort", "ort?/directml"]
 ort-cuda = ["ort", "ort?/cuda"]
 
 [dependencies]
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
 hf-hub = { workspace = true, optional = true }
 image = { workspace = true }
 imageproc = { workspace = true }
 ndarray = { workspace = true }
 once_cell = { workspace = true }
 ort = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
 rmcp = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true }

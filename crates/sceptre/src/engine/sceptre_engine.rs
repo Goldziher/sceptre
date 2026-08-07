@@ -11,7 +11,7 @@ use crate::config::{Backend, Language, OcrConfig, resolve_thread_budget};
 use crate::detect::{CraftDetector, DetectedRegions, DetectorInput, TextDetector};
 use crate::error::{OcrError, Result};
 use crate::imaging::to_grayscale;
-use crate::inference::{BackendOptions, ModelBackend, ModelRole, load_backend};
+use crate::inference::{BackendOptions, ModelBackend, NetworkKind, load_backend};
 use crate::recognize::{Charset, CrnnRecognizer, RecognizedText, RegionCrop, TextRecognizer, crop_region};
 use crate::types::{Image, OcrResult, Point, QUAD_CORNERS, Quad, TextLine};
 
@@ -67,14 +67,14 @@ impl SceptreEngine {
     /// Read a model file resolved by the provider and load it into the configured
     /// backend, capped to the shared thread budget.
     ///
-    /// `role` states which network the bytes hold, for backends that run a hand-written
+    /// `network` states which network the bytes hold, for backends that run a hand-written
     /// forward pass rather than interpreting the graph. `fixed_input` pins the model
     /// input to a concrete shape (see [`load_backend`]); the CRAFT detector passes its
     /// fixed square canvas on the tract backend, and the recognizer always passes `None`.
     fn load(
         &self,
         artifact: ModelArtifact,
-        role: ModelRole,
+        network: NetworkKind,
         fixed_input: Option<&[usize]>,
     ) -> Result<Arc<dyn ModelBackend>> {
         let (bytes, source) = match artifact {
@@ -91,7 +91,7 @@ impl SceptreEngine {
             threads: resolve_thread_budget(Some(&self.config.concurrency)),
             fixed_input,
             accelerator: self.config.model.accelerator,
-            role,
+            network,
         };
         let backend: Arc<dyn ModelBackend> = Arc::from(load_backend(self.config.model.backend, &bytes, options)?);
         tracing::debug!(backend = backend.name(), %source, "loaded inference backend");
@@ -137,7 +137,7 @@ impl SceptreEngine {
                 .map(|canvas| [1, 3, canvas as usize, canvas as usize]);
             self.load(
                 self.model_provider()?.detector()?,
-                ModelRole::Detector,
+                NetworkKind::Detector,
                 fixed_shape.as_ref().map(|shape| shape.as_slice()),
             )
         })?;
@@ -152,7 +152,7 @@ impl SceptreEngine {
             Ok::<Arc<CrnnRecognizer>, OcrError>(Arc::new(CrnnRecognizer::new(
                 self.load(
                     self.model_provider()?.recognizer(language)?,
-                    ModelRole::Recognizer,
+                    NetworkKind::Recognizer,
                     None,
                 )?,
                 Charset::for_language(language),
