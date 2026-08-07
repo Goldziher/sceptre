@@ -58,6 +58,6 @@ tasks:
     cmds:
       # ort-dynamic (not ort-bundled) avoids downloading the ONNX Runtime during the check. ~keep
       - cargo publish --dry-run -p sceptre --no-default-features --features ort-dynamic,download
-      # sceptre-cli resolves its `sceptre` dependency from crates.io, so this only works
-      # once the matching library version is published there. ~keep
-      - cargo publish --dry-run -p sceptre-cli --no-default-features --features ort-dynamic,download
+      # sceptre-cli resolves `sceptre` from the index, so its dry-run is only possible once the ~keep
+      # matching library version is published; the script skips that case loudly. ~keep
+      - bash scripts/dry-run-cli.sh
