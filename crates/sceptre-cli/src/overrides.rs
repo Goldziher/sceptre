@@ -55,6 +55,22 @@ pub struct OcrOverrides {
     /// time on large pages at some accuracy cost; the default (2560) matches EasyOCR.
     #[arg(long)]
     canvas_size: Option<u32>,
+
+    /// Enable a whole-page orientation pre-pass before detection: probe 0/90/180/270°
+    /// rotations and run detection on the best-scoring one. Off by default (see
+    /// `sceptre::DetectionConfig::detect_orientation`).
+    #[arg(long)]
+    detect_orientation: bool,
+
+    /// Canvas size (px) for each orientation probe pass. Only applies when
+    /// `--detect-orientation` is set.
+    #[arg(long)]
+    orientation_probe_canvas_size: Option<u32>,
+
+    /// Minimum relative improvement a rotation must have over 0° before the orientation
+    /// pre-pass switches to it. Only applies when `--detect-orientation` is set.
+    #[arg(long)]
+    orientation_margin: Option<f32>,
 }
 
 /// Language choices exposed on the command line.
@@ -189,12 +205,21 @@ impl OcrOverrides {
         if let Some(canvas_size) = self.canvas_size {
             config.detection.canvas_size = canvas_size;
         }
+        if self.detect_orientation {
+            config.detection.detect_orientation = true;
+        }
+        if let Some(orientation_probe_canvas_size) = self.orientation_probe_canvas_size {
+            config.detection.orientation_probe_canvas_size = orientation_probe_canvas_size;
+        }
+        if let Some(orientation_margin) = self.orientation_margin {
+            config.detection.orientation_margin = orientation_margin;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AcceleratorArg, LanguageArg, every_language, parse_probability};
+    use super::{AcceleratorArg, LanguageArg, OcrOverrides, every_language, parse_probability};
 
     #[test]
     fn should_map_every_accelerator_arg_to_its_library_wire_name() {
@@ -235,5 +260,34 @@ mod tests {
         assert!(parse_probability("1.1").is_err(), "a value above one is rejected");
         assert!(parse_probability("nan").is_err(), "NaN is rejected");
         assert!(parse_probability("abc").is_err(), "a non-numeric value is rejected");
+    }
+
+    #[test]
+    fn should_leave_orientation_settings_at_their_default_when_unset() {
+        let overrides = OcrOverrides::default();
+        let mut config = sceptre::OcrConfig::default();
+
+        overrides.apply(&mut config);
+
+        assert!(!config.detection.detect_orientation);
+        assert_eq!(config.detection.orientation_probe_canvas_size, 1280);
+        assert_eq!(config.detection.orientation_margin, 0.05);
+    }
+
+    #[test]
+    fn should_apply_orientation_overrides_when_set() {
+        let overrides = OcrOverrides {
+            detect_orientation: true,
+            orientation_probe_canvas_size: Some(640),
+            orientation_margin: Some(0.1),
+            ..OcrOverrides::default()
+        };
+        let mut config = sceptre::OcrConfig::default();
+
+        overrides.apply(&mut config);
+
+        assert!(config.detection.detect_orientation);
+        assert_eq!(config.detection.orientation_probe_canvas_size, 640);
+        assert_eq!(config.detection.orientation_margin, 0.1);
     }
 }

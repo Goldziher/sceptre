@@ -156,3 +156,42 @@ async fn readtext_without_detail_returns_only_line_text() {
         "detail=false must omit the bounding box, got {serialized}"
     );
 }
+
+/// The orientation pre-pass (`DetectionConfig::detect_orientation`) is a
+/// `Reader`-construction-time setting, exactly like `--lang`/`--backend`: it has no
+/// per-call `readtext` parameter, so `sceptre mcp` picks it up only through the
+/// `OcrConfig` a `Reader` is built with. This proves that building a `Reader` with
+/// the flag enabled neither breaks the tool call nor gets silently dropped before
+/// reaching the server.
+#[tokio::test]
+async fn readtext_serves_a_reader_built_with_orientation_detection_enabled() {
+    let path = image_path();
+    if !path.exists() {
+        // See the skip note in `readtext_returns_recognized_text_for_a_decodable_image`. ~keep
+        return;
+    }
+    let mut config = sceptre::OcrConfig::default();
+    config.detection.detect_orientation = true;
+    config.detection.orientation_probe_canvas_size = 640;
+    config.detection.orientation_margin = 0.1;
+    let reader = Reader::builder()
+        .config(config)
+        .engine(Arc::new(FakeEngine))
+        .build()
+        .expect("building a reader with orientation detection enabled");
+    assert!(reader.config().detection.detect_orientation);
+
+    let server = SceptreServer::new(reader);
+    let result = server
+        .readtext(Parameters(ReadTextRequest {
+            image_path: path.to_string_lossy().into_owned(),
+            detail: None,
+        }))
+        .await
+        .expect("readtext must not fail at the protocol level for a decodable image");
+
+    assert!(
+        !result.is_error.unwrap_or(false),
+        "an orientation-enabled reader must serve the tool call normally, got {result:?}"
+    );
+}

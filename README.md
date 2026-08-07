@@ -137,7 +137,17 @@ Expose a `readtext` tool to an agent. The `mcp` subcommand is behind the `mcp` c
 ```sh
 cargo install sceptre-cli --features mcp
 sceptre mcp --lang english
+sceptre mcp --lang english --detect-orientation   # whole-page orientation pre-pass for rotated scans
 ```
+
+| Tool | Parameter | Type | Description |
+| --- | --- | --- | --- |
+| `readtext` | `image_path` | string (required) | Filesystem path to the image to run OCR over. |
+| `readtext` | `detail` | bool (optional, default `true`) | When `false`, only line text is returned (no box/confidence). |
+
+`--lang`, `--backend`, `--threads`, and `--detect-orientation` (plus its `--orientation-probe-canvas-size`
+/ `--orientation-margin` knobs) configure the `Reader` the server is started with — they are not
+per-call `readtext` parameters, so every call made to one `sceptre mcp` process shares them.
 
 ## Benchmarks
 
