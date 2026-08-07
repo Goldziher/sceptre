@@ -13,9 +13,10 @@ This module closes that loop:
   ``environment`` provenance block naming the runtimes that produced them.
 * It then renders the headline table from that artifact into every marked region in the
   README and the docs site, so the published tables are generated output, not prose.
-* ``--check`` re-renders without writing and fails if the committed files disagree with
-  the artifact. It reads only JSON and Markdown, so it needs neither torch nor a built
-  binary and is cheap enough to run on every pull request.
+* ``--check`` re-renders from the *committed artifact* and fails if the committed tables
+  disagree with it. It never reads the gitignored measurement report, so it works on a
+  fresh clone with no benchmark run behind it — no torch, no models, no release binary —
+  and is cheap enough to run on every pull request.
 
 A published number is only as good as its provenance: a report with no ``environment``
 block is rejected rather than published, because the resulting table could not be
@@ -327,8 +328,48 @@ def apply_to_docs(root: Path, payload: dict, *, check: bool) -> list[Path]:
     return drifted
 
 
+def check_docs(root: Path) -> int:
+    """Verify the committed tables still match the committed artifact.
+
+    Reads only files that are in git — never the gitignored measurement report — so this
+    runs on a fresh clone with no benchmark run behind it.
+    """
+    artifact = root / PUBLISHED_RELATIVE_PATH
+    if not artifact.is_file():
+        print(
+            f"sceptre_rs_tools.publish: no published artifact at {PUBLISHED_RELATIVE_PATH}. "
+            "Run `task python:benchmark` then `task python:publish` and commit the result.",
+            file=sys.stderr,
+        )
+        return 1
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    version = payload.get("schema_version")
+    if version != SCHEMA_VERSION:
+        print(
+            f"sceptre_rs_tools.publish: {PUBLISHED_RELATIVE_PATH} declares schema_version "
+            f"{version!r}, but this tool writes {SCHEMA_VERSION}. Re-publish to migrate it.",
+            file=sys.stderr,
+        )
+        return 1
+    drifted = apply_to_docs(root, payload, check=True)
+    if drifted:
+        for path in drifted:
+            print(f"sceptre_rs_tools.publish: {path.relative_to(root)} is out of date", file=sys.stderr)
+        print(
+            f"\nThe committed benchmark tables no longer match {PUBLISHED_RELATIVE_PATH}. "
+            "Run `task python:publish` and commit the result.",
+            file=sys.stderr,
+        )
+        return 1
+    print("sceptre_rs_tools.publish: published benchmark numbers are up to date.", file=sys.stderr)
+    return 0
+
+
 def publish(root: Path, source: Path, *, check: bool) -> int:
-    """Publish or verify. Returns a process exit code."""
+    """Publish from a measured report, or verify the committed state. Returns an exit code."""
+    if check:
+        return check_docs(root)
+
     if not source.is_file():
         print(
             f"sceptre_rs_tools.publish: no benchmark report at {source}. Run `task python:benchmark` first.",
@@ -343,31 +384,10 @@ def publish(root: Path, source: Path, *, check: bool) -> int:
         return 1
 
     artifact = root / PUBLISHED_RELATIVE_PATH
-    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    artifact_drifted = not artifact.is_file() or artifact.read_text(encoding="utf-8") != rendered
-    if not check:
-        artifact.parent.mkdir(parents=True, exist_ok=True)
-        artifact.write_text(rendered, encoding="utf-8")
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    drifted = apply_to_docs(root, payload, check=check)
-
-    if check:
-        stale = ([artifact] if artifact_drifted else []) + drifted
-        if stale:
-            for path in stale:
-                print(
-                    f"sceptre_rs_tools.publish: {path.relative_to(root)} is out of date",
-                    file=sys.stderr,
-                )
-            print(
-                "\nThe committed benchmark numbers no longer match "
-                f"{PUBLISHED_RELATIVE_PATH}. Run `task python:publish` and commit the result.",
-                file=sys.stderr,
-            )
-            return 1
-        print("sceptre_rs_tools.publish: published benchmark numbers are up to date.", file=sys.stderr)
-        return 0
-
+    drifted = apply_to_docs(root, payload, check=False)
     print(f"Wrote {artifact.relative_to(root)}", file=sys.stderr)
     for path in drifted:
         print(f"Updated {path.relative_to(root)}", file=sys.stderr)

@@ -75,8 +75,11 @@ Three rules make it hold:
   README is Markdown and takes `<!-- generated:NAME:start -->`; the docs site is MDX, where an HTML
   comment is a parse error, so it takes `{/* generated:NAME:start */}`.
 
-`--check` re-renders without writing and exits non-zero if the committed files disagree with the
-artifact, naming each stale file.
+`--check` re-renders from the committed artifact and exits non-zero if the committed tables disagree
+with it, naming each stale file. It reads **only files that are in git** — never the gitignored
+measurement report — so it works on a fresh clone with no benchmark run behind it. That constraint
+is load-bearing rather than incidental: a gate that needed the report could not run in CI at all,
+which is how the first version of this job failed.
 
 ### Consequences
 

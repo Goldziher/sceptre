@@ -261,6 +261,36 @@ def test_should_fail_the_drift_check_when_the_artifact_is_missing(tmp_path: Path
     assert p.publish(root, root / "benchmark-results/comparison.json", check=True) == 1
 
 
+def test_should_check_without_any_measurement_report_present(tmp_path: Path) -> None:
+    """The gate runs on a fresh clone: comparison.json is gitignored and never exists in CI."""
+    root = _repo(tmp_path)
+    p.publish(root, root / "benchmark-results/comparison.json", check=False)
+    (root / "benchmark-results/comparison.json").unlink()
+    assert p.check_docs(root) == 0
+
+
+def test_should_still_detect_drift_without_a_measurement_report(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    p.publish(root, root / "benchmark-results/comparison.json", check=False)
+    (root / "benchmark-results/comparison.json").unlink()
+    readme = root / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8").replace("EasyOCR (warm/batch)", "EasyOCR (hand-edited)"),
+        encoding="utf-8",
+    )
+    assert p.check_docs(root) == 1
+
+
+def test_should_reject_an_artifact_written_by_a_different_schema_version(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    p.publish(root, root / "benchmark-results/comparison.json", check=False)
+    artifact = root / p.PUBLISHED_RELATIVE_PATH
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    payload["schema_version"] = p.SCHEMA_VERSION + 1
+    artifact.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    assert p.check_docs(root) == 1
+
+
 def test_should_not_write_anything_in_check_mode(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     before = (root / "README.md").read_text(encoding="utf-8")
