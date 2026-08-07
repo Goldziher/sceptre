@@ -289,6 +289,86 @@ mod tests {
         assert!(grouped.free.is_empty());
     }
 
+    /// Reproduces the `LES ARTS` / `DÉCORATIFS` boxes CRAFT emits for
+    /// `test_documents/images/french.jpg`: two 30px-tall boxes plus a 46px-tall
+    /// box that sceptre's postprocessing measures for `DÉCORATIFS`. The running-mean
+    /// height test (`|mean(30,30) - 46| = 16` against `0.5*30 = 15`) rejects the
+    /// merge by 1px — a boundary miss in the upstream box extent, not in this
+    /// merge logic (see the `LES ARTS DÉCORATIFS` line-grouping investigation).
+    #[test]
+    fn should_split_line_when_third_box_height_exceeds_the_height_ths_boundary() {
+        let config = config_with(0.0);
+        let les = axis_box(246.0, 288.0, 440.0, 470.0);
+        let arts = axis_box(296.0, 358.0, 438.0, 468.0);
+        let decoratifs = axis_box(360.0, 512.0, 422.0, 468.0);
+
+        let grouped = group_boxes(&[les, arts, decoratifs], &config);
+
+        assert_eq!(
+            grouped.horizontal,
+            vec![[246.0, 358.0, 438.0, 470.0], [360.0, 512.0, 422.0, 468.0]]
+        );
+    }
+
+    /// Same three boxes as above, except `DÉCORATIFS` is 44px tall — the height EasyOCR's
+    /// own CRAFT run measures for this exact region (`utils.py:group_text_box`,
+    /// upstream `merge_easyocr_side` fixture generation). `|mean(30,30) - 44| = 14 < 15`
+    /// merges. This proves the running-mean merge test in `group_adjacent` is not the
+    /// defect: it merges or splits correctly depending on the input box height, and
+    /// sceptre's own CRAFT postprocessing produces a 46px box where EasyOCR's produces 44px. ~keep
+    #[test]
+    fn should_merge_line_when_third_box_height_is_within_the_height_ths_boundary() {
+        let config = config_with(0.0);
+        let les = axis_box(246.0, 288.0, 440.0, 470.0);
+        let arts = axis_box(296.0, 358.0, 438.0, 468.0);
+        let decoratifs = axis_box(360.0, 511.0, 422.0, 466.0);
+
+        let grouped = group_boxes(&[les, arts, decoratifs], &config);
+
+        assert_eq!(grouped.horizontal, vec![[246.0, 511.0, 422.0, 470.0]]);
+    }
+
+    /// Corners measured by sceptre's CRAFT postprocessing for the `LOUVRE` region on
+    /// `french.jpg`: `slope_down = 10/96 ≈ 0.1042`, just over `slope_ths = 0.1`, so the
+    /// quad is routed to the free (rotated) path and excluded from horizontal grouping
+    /// with `[Palais du`. EasyOCR's own CRAFT run measures nearly the same quad shifted by
+    /// 1-2px (`slope_down = 9/94 ≈ 0.0957`, just under the threshold), which it keeps
+    /// horizontal and merges. Both quads are classified correctly relative to
+    /// `slope_ths`: the divergence is a sub-2px difference in the upstream box corners,
+    /// not in this threshold comparison. ~keep
+    #[test]
+    fn should_route_near_identical_quads_to_opposite_paths_at_the_slope_boundary() {
+        let config = DetectionConfig::default();
+        let sceptre_quad = [[378.0, 338.0], [474.0, 346.0], [470.0, 380.0], [374.0, 370.0]];
+        let easyocr_quad = [[378.0, 339.0], [472.0, 347.0], [469.0, 378.0], [375.0, 369.0]];
+
+        let sceptre_grouped = group_boxes(&[sceptre_quad], &config);
+        assert!(sceptre_grouped.horizontal.is_empty());
+        assert_eq!(sceptre_grouped.free.len(), 1);
+
+        let easyocr_grouped = group_boxes(&[easyocr_quad], &config);
+        assert!(easyocr_grouped.free.is_empty());
+        assert_eq!(easyocr_grouped.horizontal.len(), 1);
+    }
+
+    /// A merged multi-box group's margin must derive from the merged extent
+    /// (`x_max-x_min`, `y_max-y_min` over the whole group), not from either
+    /// contributing box's own height. Box A is 20px tall at y[10,30]; box B is
+    /// also 20px tall but offset to y[19,39], so the union spans 29px even though
+    /// each box's own height is 20. `merge_group` must use 29 (`int(0.3*29) = 8`),
+    /// not 20 (`int(0.3*20) = 6`), matching `group_text_box`'s "adjacent box in
+    /// same line" case. ~keep
+    #[test]
+    fn should_derive_multi_box_margin_from_the_merged_extent_not_a_member_box_height() {
+        let config = config_with(0.3);
+        let a = axis_box(10.0, 50.0, 10.0, 30.0);
+        let b = axis_box(55.0, 95.0, 19.0, 39.0);
+
+        let grouped = group_boxes(&[a, b], &config);
+
+        assert_eq!(grouped.horizontal, vec![[2.0, 103.0, 2.0, 47.0]]);
+    }
+
     #[test]
     fn should_merge_line_of_three_and_keep_distant_line_separate() {
         // Exercises the running-mean accumulation: three adjacent same-height boxes ~keep
