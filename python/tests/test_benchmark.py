@@ -219,7 +219,7 @@ def test_render_markdown_shows_baseline_delta() -> None:
 
 
 def test_check_thresholds_passes_a_healthy_run() -> None:
-    # warm speedup = (5/2)/(1/2) = 5x; rss ratio = 22x; f1 0.9 >= 0.8 - 0.05.
+    # warm speedup = (5/2)/(1/2) = 5x; rss ratio = 22x.
     assert b.check_thresholds(_report(0.9, 0.8, 500.0, 11000.0)) == []
 
 
@@ -229,10 +229,65 @@ def test_check_thresholds_flags_rss_regression() -> None:
     assert any("peak-RSS ratio" in breach for breach in breaches)
 
 
-def test_check_thresholds_flags_quality_regression() -> None:
-    # sceptre token-F1 0.5 is far below EasyOCR 0.8 - 0.05.
-    breaches = b.check_thresholds(_report(0.5, 0.8, 500.0, 11000.0))
-    assert any("token-F1" in breach for breach in breaches)
+# -- per-image guardrail contract (replaces the corpus-mean quality check) --------------
+
+
+def _labeled_record(stem: str, token_f1: float) -> b.ImageRecord:
+    return b.ImageRecord(stem=stem, group="labeled", languages=["english"], sceptre_token_f1=token_f1)
+
+
+def test_derive_guardrails_applies_the_threshold_factor_per_image() -> None:
+    records = [_labeled_record("a", 0.9), _labeled_record("b", 0.8)]
+    guardrails = b.derive_guardrails(records, threshold_factor=0.9)
+    assert guardrails == {
+        "schema_version": b.GUARDRAILS_SCHEMA_VERSION,
+        "threshold_factor": 0.9,
+        "contracts": [
+            {"stem": "a", "min_token_f1": pytest.approx(0.81)},
+            {"stem": "b", "min_token_f1": pytest.approx(0.72)},
+        ],
+    }
+
+
+def test_derive_guardrails_skips_unscored_and_unlabeled_records() -> None:
+    skipped = b.ImageRecord(stem="skip", group="labeled", languages=["english"], skipped="no image")
+    breadth = b.ImageRecord(stem="breadth", group="breadth", languages=["english"], sceptre_token_f1=0.9)
+    guardrails = b.derive_guardrails([skipped, breadth])
+    assert guardrails["contracts"] == []
+
+
+def test_load_guardrails_returns_none_when_missing(tmp_path: Path) -> None:
+    assert b.load_guardrails(tmp_path / "missing.json") is None
+
+
+def test_load_guardrails_rejects_an_unknown_schema_version(tmp_path: Path) -> None:
+    path = tmp_path / "guardrails.json"
+    path.write_text('{"schema_version": 99, "threshold_factor": 0.9, "contracts": []}', encoding="utf-8")
+    with pytest.raises(ValueError, match="schema_version"):
+        b.load_guardrails(path)
+
+
+def test_check_guardrails_passes_when_every_contract_clears_its_floor() -> None:
+    guardrails = {"schema_version": 1, "threshold_factor": 0.9, "contracts": [{"stem": "a", "min_token_f1": 0.8}]}
+    assert b.check_guardrails([_labeled_record("a", 0.85)], guardrails) == []
+
+
+def test_check_guardrails_flags_a_score_below_its_floor() -> None:
+    guardrails = {"schema_version": 1, "threshold_factor": 0.9, "contracts": [{"stem": "a", "min_token_f1": 0.8}]}
+    failures = b.check_guardrails([_labeled_record("a", 0.5)], guardrails)
+    assert any("a: sceptre token-F1 0.500 < guardrail floor 0.800" in failure for failure in failures)
+
+
+def test_check_guardrails_treats_a_missing_record_as_a_failure() -> None:
+    guardrails = {"schema_version": 1, "threshold_factor": 0.9, "contracts": [{"stem": "missing", "min_token_f1": 0.8}]}
+    failures = b.check_guardrails([], guardrails)
+    assert any("missing" in failure and "unmeasurable" in failure for failure in failures)
+
+
+def test_check_guardrails_treats_a_nan_score_as_a_failure() -> None:
+    guardrails = {"schema_version": 1, "threshold_factor": 0.9, "contracts": [{"stem": "a", "min_token_f1": 0.8}]}
+    failures = b.check_guardrails([_labeled_record("a", float("nan"))], guardrails)
+    assert any("unmeasurable" in failure for failure in failures)
 
 
 # -- validate-before-write ---------------------------------------------------------------

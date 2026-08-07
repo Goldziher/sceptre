@@ -59,7 +59,11 @@ DEFAULT_REPEATS = 3  # per-measurement repeats: median wall time, max peak RSS
 # full-corpus baseline. Peak RSS is a whole-process max, so a single large image sets it.
 WARM_SPEEDUP_FLOOR = 2.0  # sceptre warm/batch must be at least this much faster than EasyOCR
 RSS_RATIO_FLOOR = 3.0  # EasyOCR peak RSS must be at least this many times sceptre's
-QUALITY_TOKEN_F1_DELTA = 0.05  # sceptre mean labeled token-F1 must be >= EasyOCR's minus this
+
+# Per-image quality floors (see GuardrailContract below) replace a single corpus-mean quality
+# check: a corpus mean cannot catch a regression isolated to one language or one image. ~keep
+GUARDRAILS_SCHEMA_VERSION = 1
+GUARDRAIL_THRESHOLD_FACTOR = 0.9  # each image's floor is its baseline score times this factor
 
 # Optional accelerated edit distance; the harness falls back to a stdlib DP if absent.
 try:
@@ -1377,7 +1381,6 @@ def render_markdown(report: RunReport, baseline: dict[str, object] | None = None
 def check_thresholds(report: RunReport) -> list[str]:
     """Return a list of threshold breaches (empty when the run clears the gate)."""
     totals = headline_totals(report)
-    labeled = report.aggregates_labeled
     breaches: list[str] = []
 
     warm_speedup = _warm_speedup(totals)
@@ -1392,13 +1395,62 @@ def check_thresholds(report: RunReport) -> list[str]:
     elif rss_ratio < RSS_RATIO_FLOOR:
         breaches.append(f"peak-RSS ratio {rss_ratio:.2f}x < floor {RSS_RATIO_FLOOR:.2f}x")
 
-    sceptre_f1 = _mean_of(labeled, "sceptre_token_f1")
-    easyocr_f1 = _mean_of(labeled, "easyocr_token_f1")
-    if sceptre_f1 is None or easyocr_f1 is None:
-        breaches.append("labeled token-F1 unmeasurable (no labeled scores)")
-    elif sceptre_f1 < easyocr_f1 - QUALITY_TOKEN_F1_DELTA:
-        breaches.append(f"sceptre token-F1 {sceptre_f1:.3f} < EasyOCR {easyocr_f1:.3f} - {QUALITY_TOKEN_F1_DELTA:.3f}")
     return breaches
+
+
+def derive_guardrails(
+    records: list[ImageRecord], threshold_factor: float = GUARDRAIL_THRESHOLD_FACTOR
+) -> dict[str, object]:
+    """Build a per-image guardrail contract from a baseline run's scored, labeled images.
+
+    Ported from xberg's `split_benchmark.rs` boundary guardrails: each image's floor is its
+    baseline `sceptre_token_f1` times `threshold_factor` (~0.9), so normal run-to-run
+    variation does not trip the gate but a real regression isolated to one image does --
+    something a single corpus-mean quality check cannot see.
+    """
+    contracts = [
+        {"stem": record.stem, "min_token_f1": record.sceptre_token_f1 * threshold_factor}
+        for record in records
+        if record.skipped is None and record.group == "labeled" and record.sceptre_token_f1 is not None
+    ]
+    return {"schema_version": GUARDRAILS_SCHEMA_VERSION, "threshold_factor": threshold_factor, "contracts": contracts}
+
+
+def load_guardrails(path: Path) -> dict[str, object] | None:
+    """Load a guardrail contract file, or ``None`` if it does not exist.
+
+    Raises ``ValueError`` for an existing file with an unsupported ``schema_version`` --
+    a stale gate silently checking the wrong floors is worse than a loud failure.
+    """
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != GUARDRAILS_SCHEMA_VERSION:
+        raise ValueError(f"unsupported guardrails schema_version: {payload.get('schema_version')!r}")
+    return payload
+
+
+def check_guardrails(records: list[ImageRecord], guardrails: dict[str, object]) -> list[str]:
+    """Per-image guardrail breaches (empty when every contract clears its floor).
+
+    A missing record or a non-finite score is a failure, not a silently-skipped contract --
+    an image that stopped being measured at all is exactly the kind of regression this gate
+    exists to catch.
+    """
+    by_stem = {record.stem: record for record in records}
+    failures: list[str] = []
+    for contract in guardrails.get("contracts", []):
+        stem = contract.get("stem")
+        floor = contract.get("min_token_f1")
+        if floor is None:
+            continue
+        record = by_stem.get(stem)
+        score = record.sceptre_token_f1 if record is not None else None
+        if score is None or not math.isfinite(score):
+            failures.append(f"{stem}: sceptre token-F1 unmeasurable (guardrail requires >= {floor:.3f})")
+        elif score < floor:
+            failures.append(f"{stem}: sceptre token-F1 {score:.3f} < guardrail floor {floor:.3f}")
+    return failures
 
 
 # --------------------------------------------------------------------------------------
@@ -1452,6 +1504,8 @@ def run_benchmark(
     threads: int | None,
     baseline_path: Path | None,
     assert_gate: bool,
+    guardrails_path: Path | None = None,
+    write_guardrails_path: Path | None = None,
 ) -> int:
     """Run the full benchmark and write JSON + Markdown; returns a process exit code."""
     root = repo_root()
@@ -1551,8 +1605,19 @@ def run_benchmark(
         print(summary)
     print(f"\nWrote {output_dir / 'comparison.json'} and {output_dir / 'comparison.md'}", file=sys.stderr)
 
+    if write_guardrails_path is not None:
+        guardrails = derive_guardrails(records)
+        write_guardrails_path.write_text(json.dumps(guardrails, indent=2) + "\n", encoding="utf-8")
+        print(f"Wrote {write_guardrails_path} ({len(guardrails['contracts'])} contracts)", file=sys.stderr)
+
     if assert_gate:
         breaches = check_thresholds(report)
+        if guardrails_path is not None:
+            guardrails = load_guardrails(guardrails_path)
+            if guardrails is None:
+                breaches.append(f"guardrails file not found: {guardrails_path}")
+            else:
+                breaches.extend(check_guardrails(report.records, guardrails))
         if breaches:
             print("\nBenchmark gate FAILED:", file=sys.stderr)
             for breach in breaches:
@@ -1596,6 +1661,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=repo_root() / OUTPUT_DIR,
         help="Directory for comparison.json and comparison.md.",
     )
+    parser.add_argument(
+        "--guardrails",
+        type=Path,
+        default=None,
+        help="Per-image guardrail contract file (see derive_guardrails); checked with --assert.",
+    )
+    parser.add_argument(
+        "--write-guardrails",
+        type=Path,
+        default=None,
+        help="Derive a guardrail contract file from this run's scored, labeled images and write it here.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1611,6 +1688,8 @@ def main() -> None:
             threads=args.threads,
             baseline_path=args.baseline,
             assert_gate=args.assert_gate,
+            guardrails_path=args.guardrails,
+            write_guardrails_path=args.write_guardrails,
         )
     )
 
