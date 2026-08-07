@@ -140,8 +140,44 @@ carried orientation.
 The lesson generalizes past this feature: **an orientation decision cannot live in the
 detector, because recognition is what needs the rotated pixels.** It has to be hoisted so
 detection and recognition share one frame, with only the final output quads mapped back.
-That correction is tracked as the follow-up to this ADR; until it lands and is measured
-end to end, the flag's value is unproven and the `false` default is doing real work.
+
+### The corrected design, and what it measures
+
+`SceptreEngine` now resolves the rotation once and runs detection, grayscale conversion,
+and cropping against that single frame, mapping only the final output quads back to the
+caller's frame. `Cow` borrows at `Deg0`, so the disabled path allocates nothing and is
+byte-identical to before.
+
+Re-measured over the same 27 images:
+
+| group | n | CER off → on | token-F1 off → on |
+|---|---|---|---|
+| truly rotated | 6 | 0.858 → **0.134** | 0.003 → **0.911** |
+| vertical Japanese | 5 | 0.970 → 0.983 | ~0 → ~0 |
+| upright | 16 | 0.360 → 0.487 | 0.597 → 0.429 |
+| all | 27 | 0.583 → **0.500** | 0.354 → **0.457** |
+
+Every rotated page lands on *exactly* its upright baseline — `complex_document` scores CER
+0.2672 upright and all three of its rotated variants now score 0.2672; `ocr_test_original`
+scores 0.0000 and all three of its variants now score 0.0000. The rotation is fully undone,
+not merely improved.
+
+Two corrections to earlier framing this measurement forces:
+
+- **Vertical Japanese was never in scope.** The five `ndl_meiji_vertical_*` pages do not
+  move, and should not: vertical writing direction is not page rotation. Grouping them
+  with the rotated pages into one "eleven broken images" bucket overstated what any
+  orientation pre-pass could ever fix.
+- **The false-positive rate, not the win, is the blocker.** Four of sixteen upright images
+  (`financial_table_1`, `invoice_image`, `layout_parser_paper_with_table`,
+  `cord_receipt_01`) flip wrongly, and a wrong rotation is now a *total* loss rather than a
+  no-op, because it corrupts recognition too. `kannada.png` makes five known cases. The
+  corpus aggregate is net positive even so, but an average over a bimodal population is not
+  a reason to enable something that destroys a quarter of upright pages.
+
+The `false` default therefore stands on the false-positive rate, not on the pre-pass being
+unproven. Making it default-on requires separating true from false rotations — whether the
+relative-margin gate can do that is the open question this ADR leaves.
 
 ### Consequences
 
@@ -155,9 +191,10 @@ end to end, the flag's value is unproven and the `false` default is doing real w
   find the flag.
 - Bad: four extra forward passes when enabled. Mitigated by the reduced probe canvas,
   but it is not free, and the probe is serial.
-- Bad: the scorer is a heuristic over heat-map mass, not a trained classifier. The
-  kannada case is proof it has a real false-positive rate on dense non-Latin scripts,
-  and that rate is characterized on exactly one image.
+- Bad: the scorer is a heuristic over heat-map mass, not a trained classifier, and its
+  false-positive rate is the feature's binding constraint — five known cases, four of
+  which are dense tables and receipts rather than the non-Latin scripts the kannada case
+  first suggested. A wrong rotation is a total loss, not a degradation.
 - Neutral: the four probes go through the same `ModelBackend` seam as detection, so
   every backend gets the feature at once with no per-backend work.
 
