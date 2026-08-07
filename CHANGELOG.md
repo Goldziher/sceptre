@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The benchmark corpus is vendored into the repository instead of resolved from a Git-LFS submodule,
   so tests and benchmarks no longer need a submodule checkout. `bench::load_corpus_image` now fails
   loudly on a missing fixture instead of silently substituting a stand-in image, which could make a
-  benchmark measure the wrong picture and still look healthy. The images are excluded from the
-  published crate.
+  benchmark measure the wrong picture and still look healthy. The images and their transcripts are
+  excluded from the published crate — only the Python benchmark tooling reads them.
 
 ### Added
 
