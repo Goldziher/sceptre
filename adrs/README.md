@@ -27,7 +27,7 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0006](0006-ai-rulez-for-agent-config.md) | Generate agent config with ai-rulez | Accepted |
 | [0007](0007-tooling-scaffolding-from-basemind.md) | Tooling scaffolding adapted from basemind | Accepted |
 | [0008](0008-uv-taskfile-tools-infra.md) | In-repo dev tooling: uv Python fallback + Rust `tools/` for model export | Accepted |
-| [0009](0009-candle-evaluation-ort-primary.md) | Backend evaluation: `ort` primary, `candle` deferred off the critical path | Accepted |
+| [0009](0009-candle-evaluation-ort-primary.md) | Backend evaluation: `ort` primary, `candle` deferred off the critical path | Superseded by 0031 |
 | [0010](0010-ocr-engine-seam-and-encapsulation-lockdown.md) | Public `OcrEngine` seam, internal DTO boundaries, and encapsulation lockdown | Accepted |
 | [0011](0011-repointable-registry-owner.md) | Re-pointable model registry via a `registry_owner` override | Accepted |
 | [0012](0012-ort-runtime-provisioning.md) | ONNX Runtime provisioning: `ort-bundled` + `ort-dynamic` (xberg pattern) | Accepted |
@@ -49,3 +49,5 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0028](0028-host-supplied-model-artifacts-and-wasm-execution.md) | Host-supplied model artifacts and sequential browser-WASM execution | Accepted |
 | [0029](0029-cli-provisioning-default-and-runtime-scoped-parity.md) | CLI provisioning default and runtime-scoped parity | Accepted |
 | [0030](0030-published-benchmark-artifact-and-drift-gate.md) | Published benchmark artifact and drift gate | Accepted |
+| [0031](0031-hand-written-candle-networks.md) | Hand-written `candle` networks as the GPU and no-C++-runtime backend | Accepted |
+| [0032](0032-per-backend-accelerator-support.md) | Per-backend accelerator support (amends ADR 0029) | Accepted |

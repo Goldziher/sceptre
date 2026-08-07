@@ -15,12 +15,14 @@ its backend and capabilities explicitly.
 | `ort-bundled` | `ort` plus a prebuilt ONNX Runtime fetched at build time (`download-binaries`, `tls-rustls`). | You want a zero-config native binary for a target with a prebuilt runtime available. |
 | `ort-dynamic` | `ort` plus `dlopen`-based loading of `libonnxruntime` at runtime via `ORT_DYLIB_PATH`. | You want no build-time download — e.g. shipping a dylib next to the release binary — or you're on a [target with no prebuilt](#targets-with-no-prebuilt-onnx-runtime). |
 | `tract` | The pure-Rust ONNX backend. | You're targeting WASM or Android, want no native library dependency at all, or you're on a target with no prebuilt and no `libonnxruntime`. |
-| `candle` | Reserved for a future pure-Rust native-tensor backend. | Not yet implemented — do not select `Backend::Candle` in production. |
+| `candle` | Native-tensor backend that needs no ONNX Runtime: hand-written CRAFT and CRNN networks over the weights in the same ONNX files. | You want a build with no ONNX Runtime, or a GPU without a provider-specific runtime. Slower than `ort` — see [Backends](/concepts/backends/#choosing-a-backend). |
 | `download` | Runtime model download, caching, and SHA-256 verification from Hugging Face. | You want the library to fetch missing models itself rather than requiring them pre-provisioned. |
 | `mcp` | The MCP (`rmcp`) server surface. | You're running `sceptre mcp` or embedding the MCP server in your own binary. |
 | `ort-coreml` | Compiles in ONNX Runtime's CoreML execution provider. | You set `model.accelerator = "coreml"` (or `--accelerator coreml`) on macOS/iOS. |
 | `ort-directml` | Compiles in ONNX Runtime's DirectML execution provider. | You set `model.accelerator = "directml"` on Windows. |
 | `ort-cuda` | Compiles in ONNX Runtime's CUDA execution provider. | You set `model.accelerator = "cuda"` and your ONNX Runtime build carries CUDA. |
+| `candle-metal` | Compiles in candle's Metal device (implies `candle`). | You set `model.accelerator = "metal"` with `--backend candle` on macOS/iOS. |
+| `candle-cuda` | Compiles in candle's CUDA kernels (implies `candle`). Needs the CUDA toolkit at build time. | You set `model.accelerator = "cuda"` with `--backend candle`. |
 | `bench` | Exposes the crate-internal detection/recognition hot paths through a `bench` seam module for the `criterion` benchmarks (`cargo bench`). | You're running or writing the workspace's own microbenchmarks; library consumers never need it. |
 
 The `ort-*` accelerator features only add the Rust-side provider registration; the ONNX Runtime
@@ -36,15 +38,16 @@ performance on desktop/server, `tract` for a pure-Rust WASM/Android build.
 
 The `sceptre-cli` binary's own `default` feature set is `["ort-bundled", "download"]`, so
 `cargo install sceptre-cli` produces a self-contained binary: the ONNX Runtime is fetched and linked
-at build time, and models download at first use. The CLI re-exports eight features, each forwarding
-to the identically-named library feature: `ort-bundled`, `ort-dynamic`, `tract`, `ort-coreml`,
-`ort-directml`, `ort-cuda`, `download`, and `mcp` (off by default, which adds the `sceptre mcp`
-subcommand). Compiling in an `ort-*` accelerator feature only makes the provider available to
-select — the user still picks it at runtime with `model.accelerator` (or `--accelerator`, see
-[Backends](/concepts/backends/#accelerator-selection)).
+at build time, and models download at first use. The CLI re-exports eleven features, each forwarding
+to the identically-named library feature: `ort-bundled`, `ort-dynamic`, `tract`, `candle`,
+`ort-coreml`, `ort-directml`, `ort-cuda`, `candle-metal`, `candle-cuda`, `download`, and `mcp` (off
+by default, which adds the `sceptre mcp` subcommand). Compiling in an accelerator feature only makes
+the device available to select — the user still picks it at runtime with `model.accelerator` (or
+`--accelerator`, see [Backends](/concepts/backends/#accelerator-selection)).
 
-`tract` is a CLI feature in its own right. Before it was exposed, `--backend tract` was accepted by
-the argument parser but could never resolve, because no shipped build compiled the backend in.
+`tract` and `candle` are CLI features in their own right. Without them the matching `--backend`
+value is accepted by the argument parser but can never resolve, because no shipped build compiled
+the backend in — the run fails at model load with "not compiled in".
 
 <Aside type="tip">
   `ort-bundled` and `ort-dynamic` are two provisioning strategies for the same `ort` backend, and

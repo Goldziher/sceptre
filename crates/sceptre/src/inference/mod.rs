@@ -5,7 +5,8 @@
 //!
 //! - `ort` — native ONNX Runtime (desktop/server default).
 //! - `tract` — pure-Rust ONNX (WASM/Android).
-//! - `candle` — pure-Rust native tensors (deferred).
+//! - `candle` — hand-written networks over native tensors, on the CPU, Metal, or CUDA
+//!   (see ADR 0031); the only backend that needs no ONNX Runtime and can still use a GPU.
 //!
 //! [`load_backend`] selects an implementation from [`Backend`]; backends not
 //! compiled in return an [`OcrError::Inference`].
@@ -75,8 +76,8 @@ pub(crate) struct BackendOptions<'a> {
     /// CRAFT detector requires this (see ADR 0027), while `ort` handles dynamic
     /// shapes natively and ignores it.
     pub fixed_input: Option<&'a [usize]>,
-    /// Hardware accelerator to run the graph on. Only the `ort` backend can honor
-    /// a non-CPU selection; the others are CPU-only.
+    /// Hardware accelerator to run the graph on. Which selections a backend can
+    /// honor is given by [`Backend::hardware_accelerators`]; `tract` is CPU-only.
     pub accelerator: Accelerator,
     /// Which network the bytes hold. Backends that interpret the ONNX graph ignore it.
     pub network: NetworkKind,

@@ -38,7 +38,7 @@ runtime, and a heavy process to keep warm. sceptre keeps the accuracy and drops 
 | **A fraction of the memory** | Peak RSS several times lower than the Python + torch process, measured like-for-like (both whole-process peaks). | Runs where EasyOCR won't — small containers, edge boxes, many workers. |
 | **One binary, no Python** | A single self-contained executable. Models download once, cache locally, and run **offline** thereafter. | `cargo install` and go — nothing to `pip install`, no interpreter to ship. |
 | **Three surfaces** | The same engine as a Rust **library**, a **CLI** (`sceptre`), and an **MCP server** for agents. | Drop it into a service, a shell pipeline, or an AI tool without re-plumbing. |
-| **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM / Android — behind one seam. | Portability when you need it, native performance when you don't. |
+| **Three backends, one seam** | ONNX Runtime (`ort`) for native speed, pure-Rust ONNX (`tract`) for WASM / Android, and `candle` for a GPU or a build with no ONNX Runtime at all. | Portability when you need it, native performance when you don't. |
 
 ---
 
@@ -150,14 +150,24 @@ invocation, still beats EasyOCR's already-warm reader.
 **Runtime scope.** Every figure above — speed, memory, and the parity claim — was produced on the
 `ort` backend running the **CPU execution provider**, which is what `model.accelerator` defaults to.
 The same ONNX graph produces different numeric output on a different provider, so an accelerated run
-is a different measurement, not a faster one. Select a provider with `--accelerator`
-(`cpu` | `auto` | `coreml` | `directml` | `cuda`) or `model.accelerator`; the matching cargo feature
-(`ort-coreml`, `ort-directml`, `ort-cuda`) must also be compiled in, and the ONNX Runtime build has
-to carry the provider. An **explicitly requested** provider that cannot register is a hard error, not
-a silent fall back to CPU — only `auto` is allowed to settle for whatever it finds. The parity
-figures above cover only the `ort` backend's CPU execution provider, validated against the golden
-fixtures under [`crates/sceptre/tests/data/golden/`](crates/sceptre/tests/data/golden/): CoreML,
-DirectML and CUDA are all **unvalidated**, so none of the numbers above should be assumed to transfer.
+is a different measurement, not a faster one. Select one with `--accelerator` or
+`model.accelerator`; which values a backend accepts differs, because `ort` reaches hardware through
+ONNX Runtime execution providers while `candle` addresses devices directly:
+
+| Backend | Accelerators | Cargo feature |
+| --- | --- | --- |
+| `ort` | `coreml`, `directml`, `cuda` | `ort-coreml`, `ort-directml`, `ort-cuda` |
+| `tract` | — (CPU only) | — |
+| `candle` | `metal`, `cuda` | `candle-metal`, `candle-cuda` |
+
+For `ort` the linked ONNX Runtime build must also carry the provider. An **explicitly requested**
+accelerator that cannot be used is a hard error, not a silent fall back to CPU — only `auto` is
+allowed to settle for whatever it finds. The parity figures above cover only the `ort` backend's CPU
+execution provider, validated against the golden fixtures under
+[`crates/sceptre/tests/data/golden/`](crates/sceptre/tests/data/golden/): every accelerator is
+**unvalidated** in CI, which has no GPU runner, so none of the numbers above should be assumed to
+transfer. `candle` is a compatibility and deployment option, not a fast one — on a GPU it is still
+several times slower than `ort` on the CPU (see [ADR 0031](adrs/0031-hand-written-candle-networks.md)).
 Re-run the parity harness on your own target before relying on them.
 
 `cargo bench` covers the internal hot paths; the head-to-head harness (`task python:benchmark`)
@@ -178,8 +188,9 @@ Three stages behind one `Reader`, mirroring EasyOCR's latest pipeline:
    min-area boxes become text lines (horizontal and rotated).
 2. **Recognize** — each line is cropped, normalized, and run through a gen2 CRNN; CTC greedy decoding
    turns the logits into text and a confidence.
-3. **Inference** — every model call goes through one backend seam: `ort` (native ONNX Runtime) or
-   `tract` (pure Rust). `config`, `types`, and geometry stay backend-agnostic.
+3. **Inference** — every model call goes through one backend seam: `ort` (native ONNX Runtime),
+   `tract` (pure Rust), or `candle` (hand-written networks over the same ONNX weights, able to run
+   on Metal or CUDA). `config`, `types`, and geometry stay backend-agnostic.
 
 Design decisions live as [MADR records under `adrs/`](adrs/); conventions live in `.ai-rulez/`.
 
@@ -204,7 +215,8 @@ Hugging Face org (Apache-2.0; see [`adrs/0025`](adrs/0025-first-party-onnx-expor
 | `download` | Runtime model download + cache from Hugging Face | ✓ | **default** |
 | `mcp` | MCP (`rmcp`) server surface | ✓ | ✓ |
 | `ort-coreml` / `ort-directml` / `ort-cuda` | Compile in the matching ONNX Runtime execution provider for `model.accelerator` | ✓ | ✓ |
-| `candle` | Reserved for a future pure-Rust native-tensor backend (see ADR 0009) | ✓ | — |
+| `candle` | Native-tensor backend needing no ONNX Runtime, selected at runtime with `--backend candle` (see ADR 0031) | ✓ | ✓ |
+| `candle-metal` / `candle-cuda` | Compile in the matching GPU device for `model.accelerator` on the `candle` backend | ✓ | ✓ |
 | `bench` | Exposes the crate's internal hot paths through a `bench` seam for criterion benchmarking (see ADR 0015) | ✓ | — |
 
 The library ships `default = []`. The CLI ships `default = ["ort-bundled", "download"]`, so

@@ -13,8 +13,8 @@
 //! 2. **Recognition** ([`recognize`]) — each box is cropped, normalized, and run
 //!    through a gen2 CRNN; the logits are CTC-decoded into text.
 //! 3. **Inference backend** ([`inference`]) — a runtime-neutral [`inference::ModelBackend`]
-//!    seam abstracts over `ort` (native) and `tract` (pure-Rust), with `candle`
-//!    reserved as a deferred pure-Rust fallback.
+//!    seam abstracts over `ort` (native ONNX Runtime), `tract` (pure-Rust ONNX), and
+//!    `candle` (hand-written networks, with Metal and CUDA support).
 //!
 //! Models are resolved and cached by [`models`]; behavior is configured through
 //! [`config`].

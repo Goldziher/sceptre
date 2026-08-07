@@ -133,6 +133,12 @@ to the WARP software adapter and produce numbers describing neither CPU nor a re
 
 ## Related
 
+- **Amended by [ADR 0032](0032-per-backend-accelerator-support.md)** for the accelerator
+  vocabulary only: `candle` gained Metal and CUDA support, so the "`tract` and `candle`
+  reject a hardware accelerator" clause above holds for `tract` alone, and validation
+  consults a per-backend support table instead of testing for `ort`. Everything else here —
+  the provisioning default, the `Cpu`-not-`Auto` default, `error_on_failure` registration,
+  and the scoping of published figures to `ort` + CPU — stands unchanged.
 - [ADR 0012](0012-ort-runtime-provisioning.md) — establishes `ort-bundled` / `ort-dynamic`
   and defers the CLI's per-target selection; this ADR resolves that deferral.
 - [ADR 0016](0016-parity-harness-and-test-corpus.md) — the parity harness whose golden

@@ -16,7 +16,7 @@ A Cargo workspace: one rlib core plus a thin CLI. Shared metadata, dependency pi
 - `imaging.rs` — decode to RGB + grayscale.
 - `detect/` — `preprocess`, `craft`, `postprocess`, `group` (CRAFT).
 - `recognize/` — `crop`, `preprocess`, `crnn`, `ctc`, `charset`, `contrast` (CRNN + CTC).
-- `inference/` — `ModelBackend` seam + `ort_backend` / `tract_backend` impls.
+- `inference/` — `ModelBackend` seam + `ort_backend` / `tract_backend` impls, and `candle/` (hand-written `craft_net` / `crnn_net` over ONNX initializers, plus `device` selection).
 - `models/` — `registry` (gen2 model table → Hugging Face) + `download` (fetch/cache/verify).
 - `mcp/` — rmcp server (`mcp` feature).
 

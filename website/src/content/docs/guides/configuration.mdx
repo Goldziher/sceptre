@@ -94,7 +94,7 @@ See [Backends](/concepts/backends/) for why this is a single shared budget.
 |---|---|---|
 | `languages` | `[Language::English]` | Recognition languages to load. Repeatable — one recognizer per entry, duplicates preserved. |
 | `backend` | `Backend::Ort` | Inference backend: `Ort`, `Tract`, or `Candle`. |
-| `accelerator` | `Accelerator::Cpu` | Hardware the backend runs the graph on: `Cpu`, `Auto`, `CoreMl`, `DirectMl`, or `Cuda`. Only `Backend::Ort` can run on a non-CPU accelerator; anything else is rejected by validation. See [Backends](/concepts/backends/#accelerator-selection). |
+| `accelerator` | `Accelerator::Cpu` | Hardware the backend runs the graph on: `Cpu`, `Auto`, `CoreMl`, `DirectMl`, `Metal`, or `Cuda`. Which values a backend accepts is given by `Backend::hardware_accelerators()`; anything else is rejected by validation. See [Backends](/concepts/backends/#accelerator-selection). |
 | `detector_path` | `None` | Explicit local CRAFT ONNX path for host-managed assets. Must be set together with `recognizer_path`; when both are set the default provider bypasses Hugging Face entirely. Library-only — no CLI flag. |
 | `recognizer_path` | `None` | Explicit local recognizer ONNX path for the configured language group. Must be set together with `detector_path`. Library-only — no CLI flag. |
 | `cache_dir` | `None` | Override for the Hugging Face hub cache root. `None` resolves from `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` → `~/.cache/huggingface/hub`. Library-only — no CLI flag. |
@@ -106,9 +106,10 @@ rather than a silent half-local provisioning.
 ## Feature-flag interaction
 
 Selecting `Backend::Tract` requires the crate built with the `tract` feature; `Backend::Ort`
-requires `ort` (via `ort-bundled` or `ort-dynamic`). A non-CPU `accelerator` additionally requires
-the matching feature — `ort-coreml`, `ort-directml`, or `ort-cuda` — and an ONNX Runtime build that
-carries that provider.
+requires `ort` (via `ort-bundled` or `ort-dynamic`); `Backend::Candle` requires `candle`. A non-CPU
+`accelerator` additionally requires the matching feature — `ort-coreml`, `ort-directml`, `ort-cuda`
+on the `ort` backend, or `candle-metal`, `candle-cuda` on `candle` — and for `ort`, an ONNX Runtime
+build that carries that provider.
 
 `cache_dir`/`registry_owner` and model provisioning (`model_manifest`, `download_models`) only fetch
 missing artifacts when the `download` feature is enabled — without it, `download_models` returns an

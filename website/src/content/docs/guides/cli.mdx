@@ -143,8 +143,8 @@ These flags are available on every subcommand above and layer on top of the load
 |---|---|
 | `--lang <LANG>` | Recognition language, repeatable (e.g. `--lang english --lang korean`). One of `english`, `latin`, `chinese-simplified`, `japanese`, `korean`, `cyrillic`, `telugu`, `kannada`. |
 | `--threads <N>` | Maximum worker threads. |
-| `--backend <BACKEND>` | Inference backend: `ort`, `tract`, or `candle`. The backend must be compiled in — `tract` needs the CLI's `tract` feature, which is not in the default set. |
-| `--accelerator <ACCELERATOR>` | Hardware the backend runs on: `cpu` (default), `auto`, `coreml`, `directml`, or `cuda`. Only `ort` supports a non-CPU accelerator. An explicitly requested one that cannot register is a hard error, not a silent fall back to CPU; only `auto` falls back. See [Backends](/concepts/backends/#accelerator-selection). |
+| `--backend <BACKEND>` | Inference backend: `ort`, `tract`, or `candle`. The backend must be compiled in — `tract` and `candle` need the CLI's matching feature, neither of which is in the default set. |
+| `--accelerator <ACCELERATOR>` | Hardware the backend runs on: `cpu` (default), `auto`, `coreml`, `directml`, `metal`, or `cuda`. Which ones a backend accepts differs — `ort` takes `coreml`/`directml`/`cuda`, `candle` takes `metal`/`cuda`, `tract` is CPU-only. An explicitly requested one that cannot be used is a hard error, not a silent fall back to CPU; only `auto` falls back. See [Backends](/concepts/backends/#accelerator-selection). |
 | `--text-threshold <FLOAT>` | Detection text-confidence threshold, `0.0`–`1.0`. |
 | `--link-threshold <FLOAT>` | Detection link-confidence threshold, `0.0`–`1.0`. |
 | `--canvas-size <PX>` | Detection canvas size (longest side, in px). Lower cuts peak memory and detection time on large pages at some accuracy cost; the default (`2560`) matches EasyOCR. |
