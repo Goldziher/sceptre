@@ -11,7 +11,7 @@
 //! ADR 0015.
 
 use std::hint::black_box;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use image::GrayImage;
 use ndarray::Array2;
@@ -20,10 +20,8 @@ use crate::config::{DetectionConfig, Language};
 use crate::recognize::Charset;
 use crate::types::Image;
 
-/// Committed fallback image (relative to the crate manifest) used when the
-/// optional `test_documents/` corpus submodule is not checked out, so benches
-/// run offline.
-const FALLBACK_IMAGE: &str = "tests/data/images/english.png";
+/// Directory holding the committed benchmark corpus images, relative to the crate manifest.
+const CORPUS_IMAGE_DIR: &str = "tests/data/images";
 
 /// Region-score value written into synthetic heat-map blobs; above the default
 /// `text_threshold` (0.7) and `low_text` (0.4).
@@ -49,33 +47,12 @@ const LOGIT_SLOPE: f32 = 0.5;
 /// step; any positive scale exercises the same work.
 const BENCH_INV_RATIO: f32 = 2.0;
 
-/// Load a corpus image by path relative to the `test_documents/` directory.
-///
-/// Walks up from the crate manifest looking for a repository root that holds
-/// both a `Cargo.toml` and a `test_documents/` directory; when found and the
-/// requested file decodes, returns it. Otherwise — the corpus is absent, or the
-/// file is present only as an un-fetched git-LFS pointer that fails to decode —
-/// falls back to the committed [`FALLBACK_IMAGE`] so benchmarks run offline.
-pub fn load_corpus_image(relative: &str) -> Image {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    if let Some(root) = repository_root_with_corpus(manifest) {
-        let candidate = root.join("test_documents").join(relative);
-        if let Ok(image) = Image::from_path(&candidate) {
-            return image;
-        }
-    }
-    let fallback = manifest.join(FALLBACK_IMAGE);
-    Image::from_path(&fallback)
-        .unwrap_or_else(|error| panic!("failed to decode fallback image {}: {error}", fallback.display()))
-}
-
-/// First ancestor of `start` (inclusive) that contains both a `Cargo.toml` and a
-/// `test_documents/` directory, if any.
-fn repository_root_with_corpus(start: &Path) -> Option<PathBuf> {
-    start
-        .ancestors()
-        .find(|dir| dir.join("Cargo.toml").is_file() && dir.join("test_documents").is_dir())
-        .map(Path::to_path_buf)
+/// Load a corpus image by filename from the committed [`CORPUS_IMAGE_DIR`] fixtures.
+pub fn load_corpus_image(filename: &str) -> Image {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(CORPUS_IMAGE_DIR)
+        .join(filename);
+    Image::from_path(&path).unwrap_or_else(|error| panic!("failed to decode corpus image {}: {error}", path.display()))
 }
 
 /// Build synthetic CRAFT `(region, link)` heat-maps of shape `[height, width]`.
@@ -219,10 +196,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn should_load_a_valid_fallback_image_when_corpus_is_absent() {
-        let image = load_corpus_image("images/does_not_exist_in_any_corpus.png");
-        assert!(image.width() > 0, "fallback image has non-zero width");
-        assert!(image.height() > 0, "fallback image has non-zero height");
+    fn should_load_a_committed_corpus_image() {
+        let image = load_corpus_image("english.png");
+        assert!(image.width() > 0, "corpus image has non-zero width");
+        assert!(image.height() > 0, "corpus image has non-zero height");
+    }
+
+    #[test]
+    #[should_panic(expected = "failed to decode corpus image")]
+    fn should_panic_loading_a_missing_corpus_image() {
+        load_corpus_image("does_not_exist_in_any_corpus.png");
     }
 
     #[test]

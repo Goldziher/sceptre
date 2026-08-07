@@ -1,7 +1,7 @@
 //! Detection hot-path microbenchmarks.
 //!
-//! Preprocessing takes a full image, so it runs on a real corpus image (with an
-//! offline fallback baked into `load_corpus_image`). Postprocessing and grouping
+//! Preprocessing takes a full image, so it runs on a real corpus image (a committed
+//! fixture loaded by `load_corpus_image`). Postprocessing and grouping
 //! consume model *output* — CRAFT region/link heat-maps and detector boxes — not
 //! images, so synthetic inputs are intrinsic to those stages, not a shortcut.
 
@@ -38,7 +38,7 @@ const WARM_UP_SECS: u64 = 2;
 const MEASUREMENT_SECS: u64 = 8;
 
 fn bench_preprocess(criterion: &mut Criterion) {
-    let image = load_corpus_image("images/invoice_image.png");
+    let image = load_corpus_image("invoice_image.png");
     criterion.bench_function("detect/preprocess/optimized", |b| {
         b.iter(|| detect_preprocess_for_benchmark(&image, CANVAS_SIZE, MAG_RATIO));
     });

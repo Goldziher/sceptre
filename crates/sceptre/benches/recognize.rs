@@ -1,7 +1,7 @@
 //! Recognition hot-path microbenchmarks.
 //!
 //! Crop + batch preprocessing takes a full grayscale image, so it runs on a real
-//! corpus image (with the offline fallback baked into `load_corpus_image`). CTC
+//! corpus image (a committed fixture loaded by `load_corpus_image`). CTC
 //! decoding consumes model *output* — recognizer logits `[T, classes]` — not an
 //! image, so synthetic logits are intrinsic to that stage, not a shortcut.
 
@@ -18,7 +18,7 @@ const TIMESTEPS: usize = 256;
 const REGION_WIDTH_FRACTION: f32 = 0.5;
 /// Fraction of the image height spanned by the benchmark crop region.
 const REGION_HEIGHT_FRACTION: f32 = 0.25;
-/// Minimum extent (pixels) of the crop region, guarding tiny fallback images.
+/// Minimum extent (pixels) of the crop region, guarding tiny corpus images.
 const MIN_REGION_EXTENT: f32 = 2.0;
 /// Inset (pixels) of the crop region's top-left corner from the image origin.
 const REGION_INSET: f32 = 1.0;
@@ -44,7 +44,7 @@ fn region_corners(gray: &GrayImage) -> [[f32; 2]; 4] {
 }
 
 fn bench_crop_preprocess(criterion: &mut Criterion) {
-    let gray = corpus_gray("images/english_and_korean.png");
+    let gray = corpus_gray("english_and_korean.png");
     let corners = region_corners(&gray);
     criterion.bench_function("recognize/crop_preprocess/optimized", |b| {
         b.iter(|| recognize_crop_preprocess_for_benchmark(&gray, &corners));

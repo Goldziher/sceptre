@@ -1,43 +1,16 @@
 //! Shared helpers for the parity / golden test harness.
 //!
-//! This module carries pure, always-on logic: corpus path resolution, fuzzy
-//! word-level F1, axis-aligned box IoU, and golden-fixture parsing. Model
-//! resolution now lives in the library's default provider, which reads the
-//! Hugging Face hub cache (see ADR 0017); the harness no longer resolves models.
+//! This module carries pure, always-on logic: fuzzy word-level F1, axis-aligned box
+//! IoU, and golden-fixture parsing. Model resolution now lives in the library's
+//! default provider, which reads the Hugging Face hub cache (see ADR 0017); the
+//! harness no longer resolves models. Corpus images are committed fixtures under
+//! `tests/data/images/`, resolved directly by path — no runtime lookup helper needed.
 
 // Only a subset of these helpers is exercised by any single test binary or
 // feature configuration, so unused-symbol warnings here are expected. ~keep
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
-
 use sceptre::BBox;
-
-/// Walk up from `CARGO_MANIFEST_DIR` to the first ancestor that both looks like a
-/// Cargo root (`Cargo.toml`) and contains a `test_documents/` directory, and return
-/// that `test_documents` path. Falls back to the workspace-root guess (two levels
-/// up from the crate manifest) when no ancestor matches, so the returned path is
-/// always well-formed even when the submodule is absent.
-pub fn test_documents_dir() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for ancestor in manifest.ancestors() {
-        if ancestor.join("Cargo.toml").exists() && ancestor.join("test_documents").is_dir() {
-            return ancestor.join("test_documents");
-        }
-    }
-    manifest
-        .parent()
-        .and_then(Path::parent)
-        .unwrap_or(&manifest)
-        .join("test_documents")
-}
-
-/// Resolve a path relative to the `test_documents` corpus, returning `Some` only
-/// when the file actually exists (the submodule may be absent or LFS-unpopulated).
-pub fn skip_if_missing(relative_path: &str) -> Option<PathBuf> {
-    let path = test_documents_dir().join(relative_path);
-    path.exists().then_some(path)
-}
 
 /// Bag-of-words F1 between a hypothesis and a reference string.
 ///

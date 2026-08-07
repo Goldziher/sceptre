@@ -100,8 +100,7 @@ The fixtures are regenerated in two independent steps, then committed. Do this
 whenever a new image is added under `tests/data/images/`, the reference EasyOCR
 version changes, or the sceptre pipeline output intentionally changes.
 
-1. Populate the corpus and models (opt-in, heavy — deferred by default):
-   - `git submodule update --init test_documents && git -C test_documents lfs pull`
+1. Populate the models (opt-in, heavy — deferred by default):
    - download the CRAFT + gen2 models into the Hugging Face cache.
 2. EasyOCR reference (`easyocr` side), via the Python fallback tool:
    - `uv sync --group export`

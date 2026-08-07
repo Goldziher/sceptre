@@ -37,20 +37,19 @@ SCEPTRE_LANGS: dict[str, str] = {
 # Image extensions both engines can decode, tried in order when resolving a stem.
 IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff")
 
-# Base directories, keyed by a short manifest tag, relative to the repo root.
+# Base directories, keyed by a short manifest tag, relative to the repo root. Both tags
+# resolve to the same vendored directory; "documents" and "examples" remain distinct keys
+# because they group manifest records by provenance, not by location (see ATTRIBUTIONS.md
+# in that directory for the "documents" entries' upstream licenses).
 IMAGE_BASES: dict[str, Path] = {
-    "documents": Path("test_documents/images"),
+    "documents": Path("crates/sceptre/tests/data/images"),
     "examples": Path("crates/sceptre/tests/data/images"),
 }
 
-# Ground truth is organized under `ground_truth/` by the source image's extension; search
-# each candidate base for a matching transcript stem.
-GROUND_TRUTH_BASES: tuple[Path, ...] = (
-    Path("test_documents/ground_truth/images"),
-    Path("test_documents/ground_truth/jpg"),
-    Path("test_documents/ground_truth/jpeg"),
-    Path("test_documents/ground_truth/png"),
-)
+# Transcripts for the `labeled` records, vendored alongside the images they describe. Upstream
+# `test_documents` split these across four directories by source extension; manifest stems are
+# unique, so one flat directory holds them without collision.
+GROUND_TRUTH_BASES: tuple[Path, ...] = (Path("crates/sceptre/tests/data/ground_truth"),)
 GROUND_TRUTH_EXTENSIONS: tuple[str, ...] = (".md", ".txt")
 
 
