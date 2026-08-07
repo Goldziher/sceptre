@@ -444,4 +444,89 @@ mod real_model_selection {
         let config = DetectionConfig::default();
         assert_eq!(pick(backend.as_ref(), "kannada.png", &config), Rotation::Deg270);
     }
+
+    /// One row per corpus image: `heat_mass_score` at all four rotations plus the
+    /// relative margin the best-scoring *rotated* candidate holds over `Deg0`
+    /// (the same quantity [`pick_rotation`] gates on), independent of any
+    /// threshold. Diagnostic only, not an assertion: dumps the table so a human
+    /// can judge whether the 6 true rotations and the 4 known upright
+    /// false-positives (plus `kannada.png`, ADR 0037) separate by margin alone.
+    #[test]
+    #[ignore = "requires the real cached CRAFT model; run with --ignored --nocapture"]
+    // A diagnostic dump for a human to read via --nocapture, not a tracing event. ~keep
+    #[allow(clippy::print_stdout)]
+    fn should_print_orientation_score_table_for_the_full_corpus() {
+        let backend = craft_backend();
+        let config = DetectionConfig::default();
+
+        let cases: &[(&str, &str)] = &[
+            ("balance_sheet_1.png", "upright"),
+            ("financial_table_1.png", "upright-FP"),
+            ("invoice_image.png", "upright-FP"),
+            ("complex_document.png", "upright"),
+            ("complex_document_rotated_90.png", "rotated"),
+            ("complex_document_rotated_180.png", "rotated"),
+            ("complex_document_rotated_270.png", "rotated"),
+            ("ocr_test_original.png", "upright"),
+            ("ocr_test_rotated_90.png", "rotated"),
+            ("ocr_test_rotated_180.png", "rotated"),
+            ("ocr_test_rotated_270.png", "rotated"),
+            ("layout_parser_paper_with_table.jpg", "upright-FP"),
+            ("english_and_korean.png", "upright"),
+            ("textocr_scene_01.jpg", "upright"),
+            ("textocr_scene_02.jpg", "upright"),
+            ("textocr_scene_03.jpg", "upright"),
+            ("doclaynet_page_01.jpg", "upright"),
+            ("doclaynet_page_02.jpg", "upright"),
+            ("cord_receipt_01.jpg", "upright-FP"),
+            ("cord_receipt_02.jpg", "upright"),
+            ("cord_receipt_03.jpg", "upright"),
+            ("cord_receipt_04.jpg", "upright"),
+            ("ndl_meiji_vertical_01.jpg", "vertical"),
+            ("ndl_meiji_vertical_02.jpg", "vertical"),
+            ("ndl_meiji_vertical_03.jpg", "vertical"),
+            ("ndl_meiji_vertical_04.jpg", "vertical"),
+            ("ndl_meiji_vertical_05.jpg", "vertical"),
+            ("kannada.png", "kannada-FP"),
+        ];
+
+        println!(
+            "{:34} {:11} {:>12} {:>12} {:>12} {:>12} {:>8} {:>10}",
+            "image", "group", "deg0", "deg90", "deg180", "deg270", "winner", "margin%"
+        );
+        for (name, group) in cases {
+            let image = Image::from_path(images_dir().join(name)).expect("decode corpus image");
+            let mut scores = [0.0f32; 4];
+            for (index, rotation) in Rotation::ALL.into_iter().enumerate() {
+                let rotated = rotate_image(&image, rotation).expect("rotate");
+                let prepared =
+                    preprocess::prepare_with_canvas(&rotated, config.orientation_probe_canvas_size, 1.0, None)
+                        .expect("preprocess");
+                let heat = craft::run_craft(backend.as_ref(), prepared.tensor).expect("run craft");
+                scores[index] = heat_mass_score(&heat, config.low_text, config.link_threshold);
+            }
+            let (best_rotation, best_score) = Rotation::ALL.iter().zip(scores.iter()).skip(1).fold(
+                (Rotation::Deg90, scores[1]),
+                |(best_rotation, best_score), (&rotation, &score)| {
+                    if score > best_score {
+                        (rotation, score)
+                    } else {
+                        (best_rotation, best_score)
+                    }
+                },
+            );
+            let margin_percent = (best_score - scores[0]) / scores[0].max(BASELINE_FLOOR) * 100.0;
+            println!(
+                "{:34} {:11} {:12.6} {:12.6} {:12.6} {:12.6} {:>8} {:9.2}%",
+                name,
+                group,
+                scores[0],
+                scores[1],
+                scores[2],
+                scores[3],
+                format!("{best_rotation:?}"),
+                margin_percent
+            );
+        }
+    }
 }
