@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-08-07
+## [0.5.1] - 2026-08-07
 
 ### Added
 
@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path is exercised in CI, which has no GPU runner.
 - `Accelerator::Metal`, and `Backend::hardware_accelerators()` / `Backend::supports()` reporting
   which accelerators each backend can run on.
+- **`run --timings` now reports the stage breakdown in the `--format json` payload**, not only as a
+  human line on stderr. A single image gains a `timings` key alongside `lines`; a batch, whose
+  payload is an array, is wrapped in a `{ "images", "timings" }` envelope. Times are milliseconds:
+  `setup_ms` (model load + decode), `detect_ms`, `recognize_ms`, `total_ms`.
 
 ### Changed
 
@@ -36,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `runtime_info_for` (and `sceptre env`) no longer reports a fixed `cpu` for the `candle` backend.
   It resolves the device that would actually be opened, and reports the accelerator as undetermined
   when the backend is not compiled in, rather than naming a run that cannot happen.
+- **The project moved to the `xberg-io` organisation.** The repository is now
+  `github.com/xberg-io/sceptre` and the documentation is served from
+  `https://docs.sceptre.xberg.io` on the shared Xberg theme, replacing the
+  `goldziher.github.io/sceptre` project path. The old repository URL redirects; the old
+  documentation URLs do not. Crate names, the CLI binary name and the public API are unchanged. See
+  [ADR 0033](adrs/0033-org-migration-docs-domain-and-shared-theme.md).
 
 ### Fixed
 
@@ -186,7 +196,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Offline-first model provisioning: models download from Hugging Face on first use, cache locally,
   and are sha256-verified on download — every run thereafter reads the cache with no network.
 
-[0.5.0]: https://github.com/xberg-io/sceptre/compare/v0.4.0...v0.5.0
+[0.5.1]: https://github.com/xberg-io/sceptre/compare/v0.4.0...v0.5.1
 [0.4.0]: https://github.com/xberg-io/sceptre/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/xberg-io/sceptre/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/xberg-io/sceptre/compare/v0.1.1...v0.2.0

@@ -27,6 +27,18 @@ tasks:
       - pnpm --dir docs-site install --frozen-lockfile
       - pnpm --dir docs-site build
 
+  changelog:
+    desc: Regenerate the docs changelog page from CHANGELOG.md
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - ./scripts/sync-changelog.sh
+
+  changelog:check:
+    desc: Fail if the docs changelog page has drifted from CHANGELOG.md
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - ./scripts/sync-changelog.sh --check
+
   preview:
     desc: Preview the built docs site
     cmds:
