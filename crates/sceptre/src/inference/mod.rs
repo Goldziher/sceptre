@@ -38,6 +38,21 @@ pub trait ModelBackend: Send + Sync {
     fn run(&self, input: Tensor) -> Result<Tensor>;
 }
 
+/// Which network a set of model bytes is expected to contain.
+///
+/// The `ort` and `tract` backends execute the ONNX graph as given and ignore this.
+/// A backend that runs a hand-written forward pass instead of interpreting the graph
+/// cannot recover the architecture from the bytes alone, so the caller — which always
+/// knows — states it. Both engine call sites have the answer for free.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ModelRole {
+    /// The CRAFT text detector.
+    #[default]
+    Detector,
+    /// A gen2 CRNN text recognizer.
+    Recognizer,
+}
+
 /// Backend-neutral options for [`load_backend`].
 ///
 /// A struct rather than positional arguments so that adding a knob does not churn
@@ -55,6 +70,8 @@ pub(crate) struct BackendOptions<'a> {
     /// Hardware accelerator to run the graph on. Only the `ort` backend can honor
     /// a non-CPU selection; the others are CPU-only.
     pub accelerator: Accelerator,
+    /// Which network the bytes hold. Backends that interpret the ONNX graph ignore it.
+    pub role: ModelRole,
 }
 
 /// Load a model from ONNX bytes using the requested backend.
@@ -64,7 +81,13 @@ pub(crate) fn load_backend(
     options: BackendOptions<'_>,
 ) -> Result<Box<dyn ModelBackend>> {
     // Every argument is consumed only by feature-gated arms below. ~keep
-    let _ = (model_bytes, options.threads, options.fixed_input, options.accelerator);
+    let _ = (
+        model_bytes,
+        options.threads,
+        options.fixed_input,
+        options.accelerator,
+        options.role,
+    );
     match backend {
         #[cfg(feature = "ort")]
         Backend::Ort => Ok(Box::new(ort_backend::OrtBackend::load(model_bytes, options)?)),
@@ -76,5 +99,29 @@ pub(crate) fn load_backend(
         other => Err(OcrError::inference(format!(
             "backend {other:?} is not compiled in (enable the matching cargo feature)"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_default_the_model_role_to_the_detector() {
+        assert_eq!(BackendOptions::default().role, ModelRole::Detector);
+    }
+
+    #[test]
+    fn should_report_an_uncompiled_backend_by_name() {
+        let Err(error) = load_backend(Backend::Candle, &[], BackendOptions::default()) else {
+            panic!("the candle backend is not compiled in, so loading it must fail");
+        };
+        let OcrError::Inference { message, .. } = &error else {
+            panic!("expected an inference error, got {error:?}");
+        };
+        assert!(
+            message.contains("Candle") && message.contains("not compiled in"),
+            "message must name the backend and the cause: {message}"
+        );
     }
 }
