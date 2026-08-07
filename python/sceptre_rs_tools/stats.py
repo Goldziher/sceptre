@@ -38,3 +38,18 @@ def suppressed_percentile(values: list[float], fraction: float, min_samples: int
     if len(values) < min_samples:
         return None
     return percentile_r7(values, fraction)
+
+
+def integrate_cpu_core_seconds(user_seconds: float, system_seconds: float) -> float:
+    """Total CPU core-seconds a process consumed, summed across every core it used.
+
+    xberg's `monitoring.rs::integrate_cpu_core_seconds` trapezoidally integrates a
+    *sampled* per-tick CPU-percent series, because that harness has no other way to
+    observe a running process's total CPU time. sceptre's harness already gets the same
+    quantity directly: `/usr/bin/time -l` (`-v` on Linux) reports the child's user and
+    system CPU seconds in the same stderr block already parsed for peak RSS. Summing
+    those two fields *is* total core-seconds -- exact, not sampled, and free of an extra
+    polling thread. Do not replace this with a sampling loop; it would be strictly worse
+    on both cost and accuracy for what this harness needs. ~keep
+    """
+    return user_seconds + system_seconds
