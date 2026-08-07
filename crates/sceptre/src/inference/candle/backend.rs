@@ -187,6 +187,12 @@ mod ort_parity {
         /// `[0, 1]`, where that same flat bar is the right one. Scaling by the
         /// reference magnitude — floored at 1, so small values stay strict — keeps
         /// both networks held to the tightest bar their arithmetic allows.
+        // Only the Metal parity leg accumulates enough rounding noise to need this bar, so ~keep
+        // without that feature the variant is genuinely unconstructed rather than dead. ~keep
+        #[cfg_attr(
+            not(feature = "candle-metal"),
+            expect(dead_code, reason = "constructed only by the Metal parity test")
+        )]
         Relative(f32),
     }
 
