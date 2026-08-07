@@ -97,6 +97,20 @@ def test_strip_time_stats_removes_darwin_resource_block() -> None:
     assert "swaps" not in cleaned
 
 
+def test_parse_child_cpu_seconds_reads_darwin_user_and_sys() -> None:
+    stderr = "        0.05 real         0.30 user         0.12 sys\n"
+    assert b._parse_child_cpu_seconds(stderr) == pytest.approx(0.42)
+
+
+def test_parse_child_cpu_seconds_reads_linux_user_and_sys() -> None:
+    stderr = "\tUser time (seconds): 0.30\n\tSystem time (seconds): 0.12\n"
+    assert b._parse_child_cpu_seconds(stderr) == pytest.approx(0.42)
+
+
+def test_parse_child_cpu_seconds_is_none_without_a_time_wrapper() -> None:
+    assert b._parse_child_cpu_seconds("no timing info here") is None
+
+
 def test_parse_child_rss_reads_darwin_bytes() -> None:
     assert b._parse_child_rss("   10000000  maximum resident set size") == 10.0
 
@@ -141,6 +155,12 @@ def test_merge_per_image_flattens_batches() -> None:
     second = b.BatchResult("sceptre", ("japanese",), 1.0, 1, None, None, {"b": b.ImageDetections(detections=[])})
     merged = b._merge_per_image([first, second])
     assert set(merged) == {"a", "b"}
+
+
+def test_batch_summary_includes_cpu_core_seconds() -> None:
+    result = b.BatchResult("sceptre", ("english",), 1.0, 2, 500.0, None, {}, cpu_core_seconds=0.42)
+    summary = b._batch_summary({("english",): result})
+    assert summary["english"]["cpu_core_seconds"] == pytest.approx(0.42)
 
 
 # -- report rendering + regression gate -------------------------------------------------
@@ -256,6 +276,55 @@ def test_environment_metadata_leaves_unprobeable_fields_none(tmp_path: Path) -> 
     assert environment["accelerator"] is None
     assert environment["onnxruntime"] is None
     assert environment["models"] == []
+
+
+# -- corpus provenance (test_documents/corpus.lock.json) ---------------------------------
+
+
+def _entry(stem: str, image: Path) -> b.CorpusEntry:
+    return b.CorpusEntry(stem=stem, image=image, ground_truth=None, languages=("english",), group="labeled")
+
+
+def test_corpus_provenance_is_unresolved_without_a_lock_file(tmp_path: Path) -> None:
+    environment = b.environment_metadata(tmp_path / "sceptre", tmp_path, ["english"], {})
+    assert environment["corpus"] == {"resolved": False, "source": None, "images": {}}
+
+
+def test_corpus_provenance_cites_the_lock_hash_when_present(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "test_documents"
+    lock_dir.mkdir()
+    (lock_dir / "corpus.lock.json").write_text(
+        '{"schema": 1, "objects": {"images/sample.png": {"sha256": "deadbeef", "size": 10}}}',
+        encoding="utf-8",
+    )
+    image = tmp_path / "sample.png"
+    image.write_bytes(b"")
+
+    environment = b.environment_metadata(tmp_path / "sceptre", tmp_path, ["english"], {}, [_entry("sample", image)])
+
+    assert environment["corpus"] == {
+        "resolved": True,
+        "source": "test_documents/corpus.lock.json",
+        "lock_schema": 1,
+        "images": {"sample": "deadbeef"},
+    }
+
+
+def test_corpus_provenance_omits_entries_missing_from_the_lock(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "test_documents"
+    lock_dir.mkdir()
+    (lock_dir / "corpus.lock.json").write_text('{"schema": 1, "objects": {}}', encoding="utf-8")
+    image = tmp_path / "unmatched.png"
+    image.write_bytes(b"")
+
+    environment = b.environment_metadata(tmp_path / "sceptre", tmp_path, ["english"], {}, [_entry("unmatched", image)])
+
+    assert environment["corpus"] == {
+        "resolved": True,
+        "source": "test_documents/corpus.lock.json",
+        "lock_schema": 1,
+        "images": {},
+    }
 
 
 def test_render_markdown_reports_the_runtime_line() -> None:

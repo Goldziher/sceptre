@@ -45,7 +45,7 @@ from pathlib import Path
 from time import perf_counter
 
 from sceptre_rs_tools.corpus import CorpusEntry, build_corpus
-from sceptre_rs_tools.stats import P95_MIN_SAMPLES, P99_MIN_SAMPLES, suppressed_percentile
+from sceptre_rs_tools.stats import P95_MIN_SAMPLES, P99_MIN_SAMPLES, integrate_cpu_core_seconds, suppressed_percentile
 
 # sceptre release binary produced by the ort-bundled CLI build.
 SCEPTRE_BIN = Path("target/release/sceptre")
@@ -259,6 +259,8 @@ class BatchResult:
     rss_mb: float | None
     build_seconds: float | None
     per_image: dict[str, ImageDetections]
+    cpu_core_seconds: float | None = None
+    """Median total CPU core-seconds (user + sys) over the repeats, or None if unmeasured."""
     versions: dict[str, str] = field(default_factory=dict)
     """Runtime versions reported by the engine's driver (EasyOCR only); provenance for the report."""
 
@@ -276,6 +278,9 @@ class BatchResult:
 
 _TIME_RSS_DARWIN = re.compile(r"(\d+)\s+maximum resident set size")
 _TIME_RSS_LINUX = re.compile(r"Maximum resident set size \(kbytes\):\s+(\d+)")
+_TIME_CPU_DARWIN = re.compile(r"([\d.]+)\s+real\s+([\d.]+)\s+user\s+([\d.]+)\s+sys")
+_TIME_USER_LINUX = re.compile(r"User time \(seconds\):\s+([\d.]+)")
+_TIME_SYS_LINUX = re.compile(r"System time \(seconds\):\s+([\d.]+)")
 
 
 def _time_wrapper() -> list[str]:
@@ -294,6 +299,23 @@ def _parse_child_rss(stderr: str) -> float | None:
     match = _TIME_RSS_LINUX.search(stderr)
     if match:  # linux reports KiB
         return int(match.group(1)) * 1024 / 1_000_000.0
+    return None
+
+
+def _parse_child_cpu_seconds(stderr: str) -> float | None:
+    """Extract total CPU core-seconds (user + sys) from ``/usr/bin/time`` stderr output.
+
+    Reads the same fields ``/usr/bin/time -l``/``-v`` already reports alongside peak RSS,
+    so no additional sampling is needed to compare a threaded Rust engine against
+    single-threaded Python, or to show a GPU leg offloading CPU work.
+    """
+    match = _TIME_CPU_DARWIN.search(stderr)
+    if match:
+        return integrate_cpu_core_seconds(float(match.group(2)), float(match.group(3)))
+    user_match = _TIME_USER_LINUX.search(stderr)
+    sys_match = _TIME_SYS_LINUX.search(stderr)
+    if user_match and sys_match:
+        return integrate_cpu_core_seconds(float(user_match.group(1)), float(sys_match.group(1)))
     return None
 
 
@@ -387,8 +409,8 @@ def _sceptre_batch_command(
 
 def _run_sceptre_batch_once(
     binary: Path, images: list[Path], sceptre_langs: list[str], root: Path, threads: int | None
-) -> tuple[float, float | None, dict[str, ImageDetections]]:
-    """One warm ``sceptre run`` over a group; return (seconds, rss_mb, per_image).
+) -> tuple[float, float | None, float | None, dict[str, ImageDetections]]:
+    """One warm ``sceptre run`` over a group; return (seconds, rss_mb, cpu_core_seconds, per_image).
 
     A non-zero exit with per-image errors already encoded in the JSON is tolerated (sceptre
     exits non-zero when any image fails); only a run with no parseable JSON raises.
@@ -398,12 +420,13 @@ def _run_sceptre_batch_once(
     completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
     seconds = perf_counter() - start
     rss = _parse_child_rss(completed.stderr)
+    cpu_core_seconds = _parse_child_cpu_seconds(completed.stderr)
     try:
         per_image = _parse_sceptre_batch_json(completed.stdout, images)
     except json.JSONDecodeError as error:
         clean = _strip_time_stats(completed.stderr)[-300:]
         raise RuntimeError(f"sceptre batch produced no JSON (exit {completed.returncode}): {clean}") from error
-    return seconds, rss, per_image
+    return seconds, rss, cpu_core_seconds, per_image
 
 
 def run_sceptre_batch(
@@ -412,12 +435,17 @@ def run_sceptre_batch(
     """Warm/batch sceptre over a group, repeated for a stable median time and max RSS."""
     times: list[float] = []
     rss_values: list[float] = []
+    cpu_values: list[float] = []
     per_image: dict[str, ImageDetections] = {}
     for _ in range(max(repeats, 1)):
-        seconds, rss, per_image = _run_sceptre_batch_once(binary, images, sceptre_langs, root, threads)
+        seconds, rss, cpu_core_seconds, per_image = _run_sceptre_batch_once(
+            binary, images, sceptre_langs, root, threads
+        )
         times.append(seconds)
         if rss is not None:
             rss_values.append(rss)
+        if cpu_core_seconds is not None:
+            cpu_values.append(cpu_core_seconds)
     return BatchResult(
         engine="sceptre",
         langs=tuple(sceptre_langs),
@@ -426,6 +454,7 @@ def run_sceptre_batch(
         rss_mb=max(rss_values) if rss_values else None,
         build_seconds=None,
         per_image=per_image,
+        cpu_core_seconds=_median(cpu_values) if cpu_values else None,
     )
 
 
@@ -507,19 +536,20 @@ def _parse_easyocr_runner_json(payload: str) -> tuple[float | None, dict[str, st
 
 def _run_easyocr_batch_once(
     images: list[Path], easyocr_codes: list[str], root: Path, threads: int | None
-) -> tuple[float, float | None, float | None, dict[str, str], dict[str, ImageDetections]]:
-    """One warm ``_easyocr_runner`` subprocess; (seconds, rss, build, versions, per_image)."""
+) -> tuple[float, float | None, float | None, float | None, dict[str, str], dict[str, ImageDetections]]:
+    """One warm ``_easyocr_runner`` subprocess; (seconds, rss, cpu_core_seconds, build, versions, per_image)."""
     wrapped = _time_wrapper() + _easyocr_runner_command(images, easyocr_codes, threads)
     start = perf_counter()
     completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
     seconds = perf_counter() - start
     rss = _parse_child_rss(completed.stderr)
+    cpu_core_seconds = _parse_child_cpu_seconds(completed.stderr)
     try:
         build_seconds, versions, per_image = _parse_easyocr_runner_json(completed.stdout)
     except json.JSONDecodeError as error:
         clean = _strip_time_stats(completed.stderr)[-300:]
         raise RuntimeError(f"easyocr runner produced no JSON (exit {completed.returncode}): {clean}") from error
-    return seconds, rss, build_seconds, versions, per_image
+    return seconds, rss, cpu_core_seconds, build_seconds, versions, per_image
 
 
 def run_easyocr_batch(
@@ -528,14 +558,19 @@ def run_easyocr_batch(
     """Warm/batch EasyOCR over a group, repeated for a stable median time and max RSS."""
     times: list[float] = []
     rss_values: list[float] = []
+    cpu_values: list[float] = []
     build_values: list[float] = []
     per_image: dict[str, ImageDetections] = {}
     versions: dict[str, str] = {}
     for _ in range(max(repeats, 1)):
-        seconds, rss, build_seconds, versions, per_image = _run_easyocr_batch_once(images, easyocr_codes, root, threads)
+        seconds, rss, cpu_core_seconds, build_seconds, versions, per_image = _run_easyocr_batch_once(
+            images, easyocr_codes, root, threads
+        )
         times.append(seconds)
         if rss is not None:
             rss_values.append(rss)
+        if cpu_core_seconds is not None:
+            cpu_values.append(cpu_core_seconds)
         if build_seconds is not None:
             build_values.append(build_seconds)
     return BatchResult(
@@ -546,6 +581,7 @@ def run_easyocr_batch(
         rss_mb=max(rss_values) if rss_values else None,
         build_seconds=_median(build_values) if build_values else None,
         per_image=per_image,
+        cpu_core_seconds=_median(cpu_values) if cpu_values else None,
         versions=versions,
     )
 
@@ -653,10 +689,79 @@ def _reference_environment(versions: dict[str, str]) -> dict[str, object]:
     }
 
 
+# Path of the fixtures submodule's content-addressed lock file, relative to the repo root.
+CORPUS_LOCK_PATH = Path("test_documents") / "corpus.lock.json"
+
+
+def _load_corpus_lock(root: Path) -> dict[str, object] | None:
+    """Load ``test_documents/corpus.lock.json`` if the fixtures submodule has published one.
+
+    Returns ``None`` (not an error) until the fixture migration lands or the file is
+    malformed -- callers fall back to unresolved provenance rather than fabricating one.
+    """
+    path = root / CORPUS_LOCK_PATH
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("objects"), dict):
+        return None
+    return payload
+
+
+def _corpus_lock_hash_for(lock: dict[str, object], image: Path) -> str | None:
+    """Look up an image's sha256 in the corpus lock by file name.
+
+    The lock's keys are paths relative to the `test_documents` submodule root; matching by
+    name (rather than a full relative path) is robust to the vendored copies under
+    `crates/sceptre/tests/data/images/` not (yet) sharing that exact layout.
+    """
+    objects = lock.get("objects", {})
+    if not isinstance(objects, dict):
+        return None
+    for key, meta in objects.items():
+        if isinstance(meta, dict) and Path(key).name == image.name:
+            sha256 = meta.get("sha256")
+            return str(sha256) if sha256 else None
+    return None
+
+
+def _corpus_provenance(root: Path, entries: list[CorpusEntry]) -> dict[str, object]:
+    """Provenance for this run's corpus images, citing `test_documents/corpus.lock.json`.
+
+    The lock already carries a per-object sha256 for every fixture, so this cites those
+    hashes directly instead of re-hashing files itself (see ADR 0021). Returns
+    `resolved: False` (no fabricated hashes) until the lock file exists, or when an
+    entry's image cannot be matched to a lock object.
+    """
+    lock = _load_corpus_lock(root)
+    if lock is None:
+        return {"resolved": False, "source": None, "images": {}}
+    images: dict[str, str] = {}
+    for entry in entries:
+        if entry.image is None:
+            continue
+        sha256 = _corpus_lock_hash_for(lock, entry.image)
+        if sha256 is not None:
+            images[entry.stem] = sha256
+    return {
+        "resolved": True,
+        "source": str(CORPUS_LOCK_PATH),
+        "lock_schema": lock.get("schema"),
+        "images": images,
+    }
+
+
 def environment_metadata(
-    binary: Path, root: Path, languages: list[str], reference_versions: dict[str, str]
+    binary: Path,
+    root: Path,
+    languages: list[str],
+    reference_versions: dict[str, str],
+    entries: list[CorpusEntry] | None = None,
 ) -> dict[str, object]:
-    """The ``metadata.environment`` block: which runtimes produced this report."""
+    """The ``metadata.environment`` block: which runtimes and corpus produced this report."""
     environment = _sceptre_environment(binary, root, languages)
     environment.update(
         {
@@ -666,6 +771,7 @@ def environment_metadata(
             "platform": platform.platform(),
             "cpu_count": os.cpu_count(),
             "reference": _reference_environment(reference_versions),
+            "corpus": _corpus_provenance(root, entries or []),
         }
     )
     return environment
@@ -1257,6 +1363,7 @@ def _batch_summary(results: dict[tuple[str, ...], BatchResult]) -> dict[str, dic
             "warm_per_image_seconds": result.warm_per_image(),
             "build_seconds": result.build_seconds,
             "rss_mb": result.rss_mb,
+            "cpu_core_seconds": result.cpu_core_seconds,
         }
     return summary
 
@@ -1350,7 +1457,7 @@ def run_benchmark(
     metadata = {
         "platform": platform.platform(),
         "sceptre_binary": str(SCEPTRE_BIN),
-        "environment": environment_metadata(binary, root, languages, reference_versions),
+        "environment": environment_metadata(binary, root, languages, reference_versions, entries),
         "group": group,
         "repeats": repeats,
         "threads": threads if threads is not None else "engine default (all cores)",
