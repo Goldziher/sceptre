@@ -31,12 +31,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `tract` feature on the CLI. `--backend tract` was previously accepted but never compiled in.
 - CI verifies the real `cargo install` paths end to end, runs parity per execution provider, and
   uploads the reports it used to discard.
+- Published benchmark numbers are now generated, not transcribed. `task python:publish` distils a
+  measured run into the committed `benchmarks/published/latest.json` — headline figures plus the
+  sceptre, ONNX Runtime, EasyOCR and torch versions that produced them — and regenerates the tables
+  in the README and on the docs site from it. A report carrying no provenance block is refused
+  rather than published, and `task python:publish:check` fails CI when the committed tables drift
+  from the artifact. See ADR 0030.
 
 ### Fixed
 
 - The cache fast path no longer returns unreadable or zero-length artifacts, and a SHA-256 mismatch
   now evicts the artifact and its backing blob so a corrupt download self-heals instead of being
   served from cache forever.
+- The published speed figures were measured on an unrecorded machine with an older harness and
+  overstated the advantage: re-measured with full provenance, sceptre is ~2.3× faster warm and
+  ~2.4× faster cold than EasyOCR, not the ~2.8× and ~4.4× previously claimed. The peak-RSS
+  advantage (~3×) is unchanged. Numeric claims now live only in the generated table, so the
+  surrounding prose can no longer drift away from a measurement.
+- The golden parity fixtures were regenerated and now carry the `metadata` provenance block that
+  the format has always documented; the committed ones predated it and recorded neither the
+  EasyOCR/torch version nor the sceptre commit behind them. Every EasyOCR reference side reproduced
+  byte-identically. `example.json` lost five low-confidence lines and gained two, because it
+  predated the 0.1.1 change that made `recognition.filter_ths` actually filter.
+- `task python:benchmark`'s flags (`--group`, `--limit`, `--repeats`, `--baseline`, `--assert`)
+  reach the module instead of being silently dropped.
 
 ## [0.3.0] - 2026-08-04
 
