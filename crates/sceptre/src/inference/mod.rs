@@ -15,6 +15,9 @@ use ndarray::ArrayD;
 use crate::config::{Accelerator, Backend};
 use crate::error::{OcrError, Result};
 
+// Every backend crosses the seam through these helpers, so the module exists exactly
+// when one of them is compiled in. ~keep
+#[cfg(any(feature = "ort", feature = "tract", feature = "candle"))]
 mod buffer;
 #[cfg(feature = "ort")]
 mod ort_backend;
