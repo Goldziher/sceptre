@@ -34,7 +34,7 @@ jobs:
       release_complete: ${{ steps.assets.outputs.release_complete }}
       crates_exists: ${{ steps.published.outputs.crates_exists }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
@@ -61,10 +61,29 @@ jobs:
           target="${{ steps.version.outputs.version }}"
           cargo_version="$(grep -E '^version = "' Cargo.toml | head -1 | cut -d'"' -f2)"
           if [ "$cargo_version" != "$target" ]; then
-            echo "::error::Cargo.toml workspace version ($cargo_version) does not match tag ($target)"
+            echo "::error::Cargo.toml [workspace.package].version ($cargo_version) does not match tag ($target)"
             exit 1
           fi
           echo "Workspace version matches tag: $target"
+
+      # Cargo.toml pins the sceptre-cli -> sceptre dependency version separately in
+      # [workspace.dependencies], so a version bump that only touches [workspace.package]
+      # would ship a CLI that still resolves an old sceptre from crates.io. Fail loudly
+      # rather than let that divergence reach a release. ~keep
+      - name: Verify the sceptre dependency pin matches the workspace version
+        run: |
+          set -euo pipefail
+          target="${{ steps.version.outputs.version }}"
+          dep_version="$(grep -E '^sceptre = \{ path = "crates/sceptre"' Cargo.toml | grep -oE 'version = "[^"]+"' | head -1 | cut -d'"' -f2)"
+          if [ -z "$dep_version" ]; then
+            echo "::error::Could not find [workspace.dependencies].sceptre version pin in Cargo.toml"
+            exit 1
+          fi
+          if [ "$dep_version" != "$target" ]; then
+            echo "::error::[workspace.dependencies].sceptre version ($dep_version) does not match [workspace.package].version ($target)"
+            exit 1
+          fi
+          echo "sceptre dependency pin matches workspace version: $target"
 
       - name: Detect an already-published crates.io version
         id: published
@@ -122,28 +141,30 @@ jobs:
     if: needs.meta.outputs.release_complete != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
-      - name: Ensure a draft release exists
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Determine prerelease flag
+        id: prerelease
         run: |
           set -euo pipefail
           tag="${{ needs.meta.outputs.tag }}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists."
-          else
-            prerelease=""
-            case "$tag" in
-              *-rc.* | *-beta* | *-alpha*) prerelease="--prerelease" ;;
-            esac
-            # Create as a DRAFT: the build matrix uploads binaries to it, but it stays hidden
-            # until finalize promotes it — and finalize only runs once checksums (which requires
-            # all platform binaries) succeeds. A failed platform build leaves a hidden draft, not
-            # a live release with missing binaries. ~keep
-            gh release create "$tag" --title "$tag" --notes "Release $tag" --verify-tag --draft $prerelease
-          fi
+          prerelease=false
+          case "$tag" in
+            *-rc.* | *-beta* | *-alpha*) prerelease=true ;;
+          esac
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      # Create as a DRAFT: the build matrix uploads binaries to it, but it stays hidden
+      # until finalize promotes it — and finalize only runs once checksums (which requires
+      # all platform binaries) succeeds. A failed platform build leaves a hidden draft, not
+      # a live release with missing binaries (ADR 0020). Idempotent: an existing draft is
+      # left untouched, so a re-dispatch of the same tag never re-creates or un-drafts it. ~keep
+      - name: Ensure a draft release exists
+        uses: xberg-io/actions/publish-github-release@v1
+        with:
+          tag: ${{ needs.meta.outputs.tag }}
+          title: ${{ needs.meta.outputs.tag }}
+          notes: "Release ${{ needs.meta.outputs.tag }}"
+          draft: "true"
+          prerelease: ${{ steps.prerelease.outputs.prerelease }}
 
   build:
     name: Build ${{ matrix.triple }}
@@ -166,21 +187,19 @@ jobs:
             os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
-      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: xberg-io/actions/setup-rust@v1
         with:
-          targets: ${{ matrix.triple }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.triple }}
+          target: ${{ matrix.triple }}
+          install-llvm-cov: "false"
+          cache-key-prefix: release-build-${{ matrix.triple }}
+
       # Install `task` so the workflow calls task targets, not raw cargo, per the
       # pipeline-standards task-runner rule. ~keep
-      - uses: arduino/setup-task@v2
-        with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: xberg-io/actions/install-task@v1
 
       - name: Build and package
         shell: bash
@@ -203,21 +222,13 @@ jobs:
             tar xzf "$archive" -C "$dir"
             "$dir/sceptre" --version
           fi
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
 
       - name: Upload archive to the release
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          tag="${{ needs.meta.outputs.tag }}"
-          if [ "${{ matrix.triple }}" = "x86_64-pc-windows-msvc" ]; then
-            archive="sceptre-${{ matrix.triple }}.zip"
-          else
-            archive="sceptre-${{ matrix.triple }}.tar.gz"
-          fi
-          [ -f "$archive" ] || { echo "::error::Archive not found: $archive"; exit 1; }
-          gh release upload "$tag" "$archive" --clobber
+        uses: xberg-io/actions/upload-release-assets@v1
+        with:
+          tag: ${{ needs.meta.outputs.tag }}
+          assets: ${{ env.ARCHIVE }}
 
   checksums:
     name: Generate checksums
@@ -225,7 +236,7 @@ jobs:
     if: needs.meta.outputs.release_complete != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
       - name: Verify all platform archives are present, then checksum
@@ -253,7 +264,12 @@ jobs:
           done
           sha256sum sceptre-*.tar.gz sceptre-*.zip | sort > "sceptre_${version}_checksums.txt"
           cat "sceptre_${version}_checksums.txt"
-          gh release upload "$tag" "sceptre_${version}_checksums.txt" --clobber
+
+      - name: Upload checksums to the release
+        uses: xberg-io/actions/upload-release-assets@v1
+        with:
+          tag: ${{ needs.meta.outputs.tag }}
+          assets: sceptre_${{ needs.meta.outputs.version }}_checksums.txt
 
   finalize:
     name: Publish GitHub release
@@ -261,77 +277,63 @@ jobs:
     if: always() && needs.meta.result == 'success' && needs.meta.outputs.release_complete != 'true' && needs.checksums.result == 'success'
     runs-on: ubuntu-latest
     steps:
+      # A hard gate before promotion: never un-draft a release missing an asset (ADR 0020).
+      # `finalize-release` itself only flips the draft flag, so completeness is verified here
+      # first, independently of `meta`'s own idempotency-only completeness probe. ~keep
+      - name: Verify every release asset is present
+        uses: xberg-io/actions/verify-release-assets@v1
+        with:
+          tag: ${{ needs.meta.outputs.tag }}
+          min-size-bytes: "1"
+          expected-assets: |
+            sceptre-x86_64-unknown-linux-gnu.tar.gz
+            sceptre-aarch64-unknown-linux-gnu.tar.gz
+            sceptre-aarch64-apple-darwin.tar.gz
+            sceptre-x86_64-pc-windows-msvc.zip
+            sceptre_${{ needs.meta.outputs.version }}_checksums.txt
+
       - name: Promote the draft once every asset is present
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # This job has no checkout, so gh cannot infer the repo from a git remote; name it
-          # explicitly or gh fails with "not a git repository" and sees zero assets. ~keep
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          tag="${{ needs.meta.outputs.tag }}"
-          version="${{ needs.meta.outputs.version }}"
-          required=(
-            "sceptre-x86_64-unknown-linux-gnu.tar.gz"
-            "sceptre-aarch64-unknown-linux-gnu.tar.gz"
-            "sceptre-aarch64-apple-darwin.tar.gz"
-            "sceptre-x86_64-pc-windows-msvc.zip"
-            "sceptre_${version}_checksums.txt"
-          )
-          gh release view "$tag" --json assets -q '.assets[].name' > /tmp/assets.txt || true
-          missing=0
-          for asset in "${required[@]}"; do
-            grep -qx "$asset" /tmp/assets.txt || { echo "::error::missing $asset"; missing=$((missing + 1)); }
-          done
-          [ "$missing" -eq 0 ] || { echo "::error::release $tag incomplete; leaving it as a draft"; exit 1; }
-          gh release edit "$tag" --draft=false
-          echo "Promoted $tag to a published release"
+        uses: xberg-io/actions/finalize-release@v1
+        with:
+          tag: ${{ needs.meta.outputs.tag }}
 
   publish-crates:
     name: Publish to crates.io
     needs: [meta, finalize]
     # crates.io is irreversible, so publish source only after the platform binaries built
     # and the GitHub release promoted — keeping the surfaces atomic across a partial failure
-    # (ADR 0023). Skipped when this version is already on crates.io (idempotent re-runs). ~keep
+    # (ADR 0023). Skipped when this version is already on crates.io (idempotent re-runs).
+    #
+    # This job's steps MUST stay inline in this file, not behind a reusable workflow call:
+    # crates.io Trusted Publishing binds the OIDC `job_workflow_ref` claim to this exact
+    # workflow file, and delegating the job body elsewhere would break that trust. ~keep
     if: always() && needs.meta.outputs.crates_exists != 'true' && needs.finalize.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
-      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: release-publish-crates
 
       - name: Pre-warm the default-feature build before the irreversible step
         # `cargo publish -p sceptre-cli` runs a verification build with DEFAULT features,
         # which is `ort-bundled` — so it fetches an ONNX Runtime prebuilt from cdn.pyke.io
         # partway through publishing, after the GitHub release has already been promoted.
-        # A CDN outage there strands the release half-published and unrecoverable. Doing
-        # the same build first makes that failure mode land before anything is uploaded. ~keep
+        # A CDN outage there strands the release half-published and unrecoverable.
+        # `publish-crates` has no `--no-default-features` input, so this build cannot be
+        # eliminated — only pre-warmed, so the same fetch during `cargo publish`'s own
+        # verification build is cached and fast rather than a fresh, failure-prone one. ~keep
         run: cargo build -p sceptre-cli --locked
 
-      - name: Authenticate to crates.io (trusted publishing, OIDC)
-        uses: rust-lang/crates-io-auth-action@v1
-        id: crates_auth
+      # Handles crates.io OIDC auth, dependency-ordered publishing, index-propagation waits,
+      # and idempotent skipping of an already-published version internally. ~keep
       - name: Publish sceptre then sceptre-cli (dependency order)
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates_auth.outputs.token }}
-        run: |
-          set -euo pipefail
-          # `cargo publish` waits for each crate to appear in the index before returning, so
-          # sceptre-cli resolves its just-published `sceptre = "x"` dependency. The helper is
-          # idempotent: a version already uploaded (a re-run of the same tag) is a skip, not a
-          # failure, so a partial publish heals on re-dispatch. ~keep
-          publish() {
-            pkg="$1"
-            echo "::group::cargo publish -p $pkg"
-            if cargo publish -p "$pkg" 2>publish.err; then
-              cat publish.err; echo "::endgroup::"; return 0
-            fi
-            if grep -Eq "already (exists|uploaded)|is already uploaded" publish.err; then
-              echo "$pkg already published; skipping"; cat publish.err; echo "::endgroup::"; return 0
-            fi
-            cat publish.err >&2; echo "::endgroup::"; return 1
-          }
-          publish sceptre
-          publish sceptre-cli
+        uses: xberg-io/actions/publish-crates@v1
+        with:
+          crates: sceptre sceptre-cli
+          version: ${{ needs.meta.outputs.version }}
