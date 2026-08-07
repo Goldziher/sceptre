@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "description": "Backend x accelerator benchmark matrix (ADR 0035). Separate from latest.json: this is an intra-sceptre runtime comparison, not a head-to-head against EasyOCR, and it carries no drift gate. Promoted by a human task from a workflow_dispatch run of .github/workflows/benchmarks.yaml's backend-matrix job, never automated.",
+  "legs": []
+}
