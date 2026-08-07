@@ -26,6 +26,27 @@ tasks:
     cmds:
       - cargo bench -p sceptre --features bench
 
+  ci:clippy:
+    desc: Lint one CI matrix leg's feature set with clippy (deny warnings); FEATURES may be empty
+    requires:
+      vars: [FEATURES]
+    cmds:
+      - cargo clippy --workspace --all-targets --tests --features "{{.FEATURES}}" -- -D warnings
+
+  ci:test:
+    desc: Run the workspace test suite for one CI matrix leg's feature set; FEATURES may be empty
+    requires:
+      vars: [FEATURES]
+    cmds:
+      - cargo test --workspace --features "{{.FEATURES}}"
+
+  ci:build:
+    desc: Build the workspace for one CI matrix leg's feature set; FEATURES may be empty
+    requires:
+      vars: [FEATURES]
+    cmds:
+      - cargo build --workspace --features "{{.FEATURES}}"
+
   verify:features:
     desc: Assert the CLI's ONNX Runtime provisioning feature matrix resolves as intended
     cmds:

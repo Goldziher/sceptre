@@ -1,0 +1,354 @@
+name: CI Rust
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/**
+      - tools/**
+      - scripts/**
+      - Cargo.toml
+      - Cargo.lock
+      - rustfmt.toml
+      - deny.toml
+      - .task/**
+      - Taskfile.yaml
+      - .github/workflows/ci-rust.yaml
+  pull_request:
+    branches: [main]
+    paths:
+      - crates/**
+      - tools/**
+      - scripts/**
+      - Cargo.toml
+      - Cargo.lock
+      - rustfmt.toml
+      - deny.toml
+      - .task/**
+      - Taskfile.yaml
+      - .github/workflows/ci-rust.yaml
+  workflow_dispatch:
+
+concurrency:
+  group: ci-rust-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The image the parity and end-to-end lanes OCR. Committed as a plain blob. ~keep
+  SAMPLE_IMAGE: crates/sceptre/tests/data/images/english.png
+
+jobs:
+  test:
+    name: Test (${{ matrix.variant.label }}, ${{ matrix.os }})
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # `candle` on all three because it is the one backend that does not interpret the
+        # ONNX graph — its hand-written networks compile per target and are not exercised
+        # by the ort or tract lanes. ~keep
+        variant:
+          - label: default
+            features: ""
+          - label: mcp
+            features: "mcp"
+          - label: candle
+            features: "candle"
+        include:
+          # backend_agreement.rs is `#![cfg(feature = "ort")]` with per-backend legs inside,
+          # so without a leg that enables the alternatives alongside ort it never compiles. ~keep
+          - os: ubuntu-latest
+            variant:
+              label: backend-agreement
+              features: "ort-bundled,tract,candle,download"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          components: rustfmt, clippy
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-test-${{ matrix.variant.label }}
+
+      - uses: xberg-io/actions/install-task@v1
+
+      - name: Verify the CLI ONNX Runtime feature matrix
+        # Cheap (`cargo tree --locked`: no build, no network) and the only check that a
+        # published `cargo install` resolves to a runnable provisioning strategy. One leg
+        # is enough — feature resolution does not vary by host OS. ~keep
+        if: runner.os == 'Linux' && matrix.variant.label == 'default'
+        run: ./scripts/verify-features.sh
+
+      - name: Clippy
+        run: task rust:ci:clippy FEATURES="${{ matrix.variant.features }}"
+
+      - name: Test
+        run: task rust:ci:test FEATURES="${{ matrix.variant.features }}"
+
+      - name: Build
+        run: task rust:ci:build FEATURES="${{ matrix.variant.features }}"
+
+  install:
+    name: cargo install (${{ matrix.install.label }}, ${{ matrix.os }})
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        install:
+          # The three provisioning paths a user can actually take. The default must stay
+          # self-contained; `ort-dynamic` must remain an additive override that needs no
+          # --no-default-features; `tract` must resolve with no ort in the graph at all. ~keep
+          - label: default
+            args: ""
+            e2e: true
+          - label: ort-dynamic
+            args: "--features ort-dynamic"
+          - label: tract
+            args: "--no-default-features --features tract,download"
+    runs-on: ${{ matrix.os }}
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-install-${{ matrix.install.label }}
+
+      - name: Install from the workspace exactly as `cargo install sceptre-cli` would
+        shell: bash
+        run: cargo install --locked --path crates/sceptre-cli ${{ matrix.install.args }}
+
+      - name: sceptre --version
+        shell: bash
+        run: sceptre --version
+
+      # `--version` never constructs an ONNX Runtime session, so it passes even on a build
+      # whose runtime cannot load — it would not have caught the dlopen panic that made every
+      # default `cargo install` unusable. Only an end-to-end run exercises that path. ~keep
+      - name: Cache Hugging Face models
+        if: matrix.install.e2e && runner.os == 'Linux'
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: End-to-end OCR over a committed image
+        if: matrix.install.e2e && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sceptre models download --lang english
+          sceptre run "${SAMPLE_IMAGE}" --lang english --format json > result.json
+          grep -q '"text"' result.json
+          echo "OCR produced $(grep -c '"text"' result.json) text field(s)"
+
+  parity:
+    name: Parity (${{ matrix.accelerator }} on ${{ matrix.os }})
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name != 'pull_request'
+    # Heavy: downloads the real models and runs real inference. Kept off pull requests —
+    # the light `test` lanes already compile and skip the model-gated tests — but run on
+    # main and on demand. A parity gate that only fires when someone remembers to dispatch
+    # it does not defend the parity claim; the model cache makes repeat runs cheap. ~keep
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            accelerator: cpu
+            features: "ort-bundled,download"
+            cli_features: ""
+          - os: macos-latest
+            accelerator: cpu
+            features: "ort-bundled,download"
+            cli_features: ""
+          - os: windows-latest
+            accelerator: cpu
+            features: "ort-bundled,download"
+            cli_features: ""
+          # CoreML proves the execution-provider registration path end to end. GitHub's
+          # macOS runners are VMs with no Neural Engine, so this is NOT evidence about
+          # on-device ANE numerics. No DirectML lane: the Windows runner has no GPU, so it
+          # would fall back to the WARP software adapter and measure nothing real. No CUDA
+          # lane: there is no GPU runner. ~keep
+          - os: macos-latest
+            accelerator: coreml
+            features: "ort-bundled,ort-coreml,download"
+            # Named through the library (`sceptre/ort-coreml`) rather than the CLI's own
+            # `ort-coreml` passthrough so this lane keeps working if the CLI's feature
+            # aliases are renamed. Cargo features are additive, so this lands on top of the
+            # CLI default (ort-bundled + download) rather than replacing it — which matters,
+            # because ort-coreml alone would enable `ort` with no prebuilt runtime to
+            # link. ~keep
+            cli_features: "sceptre/ort-coreml"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-parity-${{ matrix.accelerator }}
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf
+          # The registry file holds every pinned sha256, so this key is exact and
+          # self-invalidating. The `revision` field is the floating string "main" and is
+          # never sent to the Hub, so it is useless as a cache key. ~keep
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: Build the CLI
+        id: build
+        uses: xberg-io/actions/build-rust-cli@v1
+        with:
+          package-name: sceptre-cli
+          binary-name: sceptre
+          extra-cargo-args: --features "${{ matrix.cli_features }}"
+
+      - name: Resolve the built binary path
+        shell: bash
+        run: echo "SCEPTRE=${{ steps.build.outputs.binary-path }}" >> "$GITHUB_ENV"
+
+      - name: Pre-seed every model, serially, before anything reads the cache
+        shell: bash
+        run: |
+          "$SCEPTRE" models download --all
+
+      - name: Record the runtime this lane resolves to
+        shell: bash
+        run: |
+          "$SCEPTRE" env --accelerator ${{ matrix.accelerator }} --format json | tee env.json
+
+      - name: Golden parity suite
+        if: matrix.accelerator == 'cpu'
+        shell: bash
+        env:
+          SCEPTRE_REQUIRE_MODELS: "1"
+        run: cargo test -p sceptre --features "${{ matrix.features }}" --test tier2_golden -- --nocapture 2>&1 | tee tier2_golden.log
+
+      - name: End-to-end OCR through the requested execution provider
+        # The golden fixtures are CPU fixtures, so a non-CPU lane asserts that the provider
+        # registers and the pipeline runs — an explicitly requested provider that cannot
+        # register is a hard error, so a silent CPU fallback cannot pass this step. ~keep
+        if: matrix.accelerator != 'cpu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$SCEPTRE" run "${SAMPLE_IMAGE}" \
+            --lang english --accelerator ${{ matrix.accelerator }} --format json > result.json
+          grep -q '"text"' result.json
+
+      - name: Upload parity results
+        # env.json records the resolved runtime; tier2_golden.log is the golden-suite
+        # output on the CPU legs; result.json is the smoke-test output on the CoreML leg.
+        # Kept per matrix leg so a failure on one OS/accelerator does not overwrite another. ~keep
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: parity-${{ matrix.os }}-${{ matrix.accelerator }}-${{ github.run_id }}
+          path: |
+            env.json
+            tier2_golden.log
+            result.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  gpu-backends:
+    name: candle GPU (${{ matrix.device }})
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    # COMPILE-ONLY, and deliberately so: no hosted runner has a GPU. This proves the
+    # `candle-metal` / `candle-cuda` code paths and their toolchain requirements still
+    # build; it is NOT evidence about GPU numerics. Metal is validated against ort on real
+    # hardware (see ADR 0031); CUDA is compiled and never executed anywhere. Running
+    # `cargo test` here would fail on the device-open assertions, since the runners have
+    # no device to open. ~keep
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: metal
+            os: macos-latest
+          - device: cuda
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          components: clippy
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-gpu-${{ matrix.device }}
+      - name: Install nvcc
+        # candle's CUDA kernels are compiled by candle-kernels' build script, so the
+        # toolkit is a build-time requirement even with no GPU present. Only the nvcc
+        # sub-package is installed; the runtime libraries are never loaded. ~keep
+        if: matrix.device == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          method: network
+          sub-packages: '["nvcc"]'
+      - name: Clippy
+        run: cargo clippy -p sceptre --all-targets --features "candle-${{ matrix.device }}" -- -D warnings
+      - name: Compile-check the CLI
+        run: cargo check -p sceptre-cli --features "candle-${{ matrix.device }}"
+
+  bench:
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          components: clippy
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-bench
+      - name: Clippy (benches)
+        run: cargo clippy -p sceptre --all-targets --features bench -- -D warnings
+      - name: Compile-check benches
+        # Benches are compile-checked here, not perf-run; timing runs are manual. ~keep
+        run: cargo check -p sceptre --benches --features bench
+
+  deny:
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: cargo deny check
+        run: cargo deny check
