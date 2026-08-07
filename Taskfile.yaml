@@ -12,11 +12,13 @@ includes:
 
 tasks:
   setup:
-    desc: Fetch Rust dependencies, install git hooks, and sync the Python dev environment
+    desc: Fetch Rust dependencies, install git hooks, sync the Python dev environment, and fetch the test corpus
     cmds:
       - cargo fetch
       - poly hooks install
       - uv sync
+      - git submodule update --init --recursive test_documents
+      - python3 test_documents/scripts/fetch_corpus.py --include 'images/**'
 
   build:
     desc: Build the Rust workspace
