@@ -5,6 +5,56 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-07
+
+### Added
+
+- **The `candle` backend runs.** `--backend candle` (feature `candle`) executes CRAFT and the gen2
+  recognizers with no ONNX Runtime at all. It does not interpret the ONNX graph: the two networks
+  are written out against `candle_nn` and their weights are read from the initializers of the same
+  ONNX files the other backends load, so there is no new model artifact, no change to the registry
+  or its sha256 pins, and no `protoc` build dependency. Validated against `ort` at the tensor level
+  (within `1e-4` over the shapes the export pipeline checks) and end to end (exact sorted
+  word-multiset equality on `english.png` and `cyrillic.png`). See
+  [ADR 0031](adrs/0031-hand-written-candle-networks.md).
+- **GPU execution on the `candle` backend**, via the `candle-metal` and `candle-cuda` features and
+  `--accelerator metal` / `--accelerator cuda`. This reaches a GPU without provisioning a
+  provider-specific ONNX Runtime build. Metal is validated against `ort` on real hardware; neither
+  path is exercised in CI, which has no GPU runner.
+- `Accelerator::Metal`, and `Backend::hardware_accelerators()` / `Backend::supports()` reporting
+  which accelerators each backend can run on.
+
+### Changed
+
+- **Accelerator validation is a per-backend table** instead of a test for `ort`. `ort` takes
+  `coreml`, `directml`, `cuda`; `candle` takes `metal`, `cuda`; `tract` remains CPU-only. `cuda` is
+  shared because it names hardware rather than an execution provider, while `coreml` and `metal`
+  stay distinct — same Apple GPU, different frameworks and different numerics — and a wrong pairing
+  is rejected with the equivalent for your backend named in the error. Amends
+  [ADR 0029](adrs/0029-cli-provisioning-default-and-runtime-scoped-parity.md); see
+  [ADR 0032](adrs/0032-per-backend-accelerator-support.md).
+- `runtime_info_for` (and `sceptre env`) no longer reports a fixed `cpu` for the `candle` backend.
+  It resolves the device that would actually be opened, and reports the accelerator as undetermined
+  when the backend is not compiled in, rather than naming a run that cannot happen.
+
+### Fixed
+
+- `wide` moved off the yanked 1.6.0.
+
+### Notes
+
+- `candle` is **not** the fast backend. On Apple Silicon its CPU path measures ~10× slower than
+  `ort` on the CPU, and Metal is still ~3–4× slower than `ort` on the CPU. Choose it for what it
+  removes — the ONNX Runtime dependency and its provisioning matrix — not for speed. It is excluded
+  from the published benchmark drift gate.
+- `candle` is not a pure-Rust backend: `candle-core` 0.10+ pulls `tokenizers`, which compiles
+  oniguruma from C. `tract` remains the pure-Rust path. The 0.11 pin is deliberate — 0.9.x
+  miscomputes one of CRAFT's convolutions.
+
+### Breaking
+
+- `Accelerator` gains a `Metal` variant, so exhaustive matches on it need a new arm.
+
 ## [0.4.0] - 2026-08-07
 
 ### Changed
@@ -136,6 +186,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Offline-first model provisioning: models download from Hugging Face on first use, cache locally,
   and are sha256-verified on download — every run thereafter reads the cache with no network.
 
+[0.5.0]: https://github.com/Goldziher/sceptre/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Goldziher/sceptre/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Goldziher/sceptre/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Goldziher/sceptre/compare/v0.1.1...v0.2.0
