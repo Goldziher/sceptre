@@ -15,6 +15,7 @@ use ndarray::ArrayD;
 use crate::config::{Accelerator, Backend};
 use crate::error::{OcrError, Result};
 
+mod buffer;
 #[cfg(feature = "ort")]
 mod ort_backend;
 #[cfg(feature = "ort")]

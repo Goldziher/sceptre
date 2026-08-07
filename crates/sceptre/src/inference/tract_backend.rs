@@ -10,13 +10,13 @@
 
 use std::sync::Arc;
 
-use ndarray::{ArrayD, IxDyn};
 use tract_onnx::onnx;
 use tract_onnx::prelude::{
     DatumType, Framework, InferenceFact, InferenceModelExt, IntoRunnable, IntoTValue, IntoTensor,
     Tensor as TractTensor, TractError, TypedRunnableModel, tvec,
 };
 
+use super::buffer::{array_from_parts, input_buffer};
 use super::{ModelBackend, Tensor};
 use crate::error::{OcrError, Result};
 
@@ -92,42 +92,8 @@ impl ModelBackend for TractBackend {
             .iter()
             .copied()
             .collect();
-        array_from_parts(output.shape(), out_data)
+        array_from_parts("tract", output.shape(), out_data)
     }
-}
-
-/// Move a tensor's backing buffer out in row-major order, copy-free when possible.
-///
-/// A standard-layout tensor whose buffer starts at offset 0 and is sized to the shape
-/// has that buffer taken by move (the common case, copy-free). Any other layout — a
-/// nonzero offset, an over-long backing buffer, or a transposed view — is materialized
-/// into a fresh contiguous buffer. Either way the returned [`Vec`] matches the tensor's
-/// logical `iter().copied()` order, so inference stays bit-identical.
-fn input_buffer(input: Tensor) -> (Vec<usize>, Vec<f32>) {
-    let shape = input.shape().to_vec();
-    let element_count: usize = shape.iter().product();
-    if input.is_standard_layout() {
-        let (data, offset) = input.into_raw_vec_and_offset();
-        let start = offset.unwrap_or(0);
-        if start == 0 && data.len() == element_count {
-            return (shape, data);
-        }
-        return (shape, data.into_iter().skip(start).take(element_count).collect());
-    }
-    let (data, _) = input.as_standard_layout().into_owned().into_raw_vec_and_offset();
-    (shape, data)
-}
-
-/// Rebuild an owned crate [`Tensor`] from a tract output shape and its data buffer.
-///
-/// The output shape is preserved exactly; a mismatch between the shape and the
-/// data length is surfaced as an [`OcrError::Inference`].
-fn array_from_parts(shape: &[usize], data: Vec<f32>) -> Result<Tensor> {
-    let length = data.len();
-    ArrayD::from_shape_vec(IxDyn(shape), data).map_err(|error| OcrError::Inference {
-        message: format!("tract output shape {shape:?} does not match its element count {length}"),
-        source: Some(Box::new(error)),
-    })
 }
 
 /// Build an [`OcrError::Inference`] wrapping a tract error with operation context.
@@ -144,51 +110,9 @@ fn tract_error(operation: &str, error: TractError) -> OcrError {
 
 #[cfg(test)]
 mod tests {
+    use ndarray::{ArrayD, IxDyn};
+
     use super::*;
-
-    #[test]
-    fn input_buffer_preserves_row_major_order_for_standard_layout() {
-        let expected: Vec<f32> = (0..8).map(|value| value as f32).collect();
-        let input = ArrayD::from_shape_vec(IxDyn(&[1, 2, 2, 2]), expected.clone()).expect("build the tensor");
-        let manual: Vec<f32> = input.iter().copied().collect();
-
-        let (shape, data) = input_buffer(input);
-
-        assert_eq!(shape, vec![1_usize, 2, 2, 2]);
-        assert_eq!(data, manual);
-        assert_eq!(data, expected);
-    }
-
-    #[test]
-    fn input_buffer_matches_iter_order_for_non_standard_layout() {
-        let base = ArrayD::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|value| value as f32).collect())
-            .expect("build the tensor");
-        let transposed = base.t().into_owned();
-        assert!(
-            !transposed.is_standard_layout(),
-            "transpose must be non-standard layout"
-        );
-        let manual: Vec<f32> = transposed.iter().copied().collect();
-
-        let (shape, data) = input_buffer(transposed);
-
-        assert_eq!(shape, vec![3_usize, 2]);
-        assert_eq!(data, manual);
-    }
-
-    #[test]
-    fn array_from_parts_preserves_shape() {
-        let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let array = array_from_parts(&[1, 2, 3], data.clone()).expect("shape matches element count");
-        assert_eq!(array.shape(), &[1, 2, 3]);
-        assert_eq!(array.iter().copied().collect::<Vec<_>>(), data);
-    }
-
-    #[test]
-    fn array_from_parts_errors_on_length_mismatch() {
-        let error = array_from_parts(&[2, 2], vec![1.0_f32, 2.0, 3.0]).expect_err("length mismatch must fail");
-        assert!(matches!(error, OcrError::Inference { .. }));
-    }
 
     #[test]
     fn input_buffer_round_trips_through_a_tract_tensor() {
@@ -203,7 +127,7 @@ mod tests {
             .iter()
             .copied()
             .collect();
-        let restored = array_from_parts(tensor.shape(), restored_data).expect("rebuild");
+        let restored = array_from_parts("tract", tensor.shape(), restored_data).expect("rebuild");
 
         assert_eq!(restored.shape(), &[2, 3, 2]);
         assert_eq!(restored.iter().copied().collect::<Vec<_>>(), expected);

@@ -7,12 +7,11 @@
 
 use std::sync::Mutex;
 
-use ndarray::{ArrayD, IxDyn};
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor as OrtTensor;
 
-use super::{BackendOptions, ModelBackend, Tensor, ort_ep};
+use super::{BackendOptions, ModelBackend, Tensor, buffer, ort_ep};
 use crate::error::{OcrError, Result};
 
 /// ONNX Runtime session wrapper.
@@ -101,29 +100,12 @@ impl ModelBackend for OrtBackend {
     }
 }
 
-/// Move a tensor's backing buffer out in row-major order, copy-free when possible.
+/// Move a tensor's backing buffer out in row-major order with the `i64` dims `ort` expects.
 ///
-/// A standard-layout tensor whose buffer starts at offset 0 and is sized to the shape
-/// has that buffer taken by move (the common case, copy-free). A standard-layout slice
-/// with a nonzero offset or an over-long backing buffer, or a non-standard layout (e.g.
-/// a transposed view), is copied into a fresh contiguous buffer. Either way the returned
-/// [`Vec`] matches the tensor's logical `iter().copied()` order, so inference stays
-/// bit-identical.
+/// Thin wrapper over the shared [`buffer::input_buffer`], which owns the layout handling.
 fn input_buffer(input: Tensor) -> (Vec<i64>, Vec<f32>) {
-    let shape = shape_to_i64(input.shape());
-    let element_count: usize = input.shape().iter().product();
-    if input.is_standard_layout() {
-        let (data, offset) = input.into_raw_vec_and_offset();
-        let start = offset.unwrap_or(0);
-        // Offset-0 buffers sized to the shape move out copy-free; a standard-layout ~keep
-        // slice's logical elements are the contiguous run [start, start + count). ~keep
-        if start == 0 && data.len() == element_count {
-            return (shape, data);
-        }
-        return (shape, data.into_iter().skip(start).take(element_count).collect());
-    }
-    let (data, _) = input.as_standard_layout().into_owned().into_raw_vec_and_offset();
-    (shape, data)
+    let (shape, data) = buffer::input_buffer(input);
+    (shape_to_i64(&shape), data)
 }
 
 /// Convert an ndarray shape (`&[usize]`) to the `i64` dims `ort` expects.
@@ -142,13 +124,7 @@ fn array_from_output(dims: &[i64], data: &[f32]) -> Result<Tensor> {
         )));
     }
     let shape: Vec<usize> = dims.iter().map(|&dim| dim as usize).collect();
-    ArrayD::from_shape_vec(IxDyn(&shape), data.to_vec()).map_err(|error| OcrError::Inference {
-        message: format!(
-            "ONNX Runtime output shape {dims:?} does not match {} elements",
-            data.len()
-        ),
-        source: Some(Box::new(error)),
-    })
+    buffer::array_from_parts("ONNX Runtime", &shape, data.to_vec())
 }
 
 /// Build an [`OcrError::Inference`] wrapping an `ort` error with operation context.
@@ -161,6 +137,8 @@ fn inference_error(operation: &str, source: ort::Error) -> OcrError {
 
 #[cfg(test)]
 mod tests {
+    use ndarray::{ArrayD, IxDyn};
+
     use super::*;
 
     #[test]
