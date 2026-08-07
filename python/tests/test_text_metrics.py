@@ -32,7 +32,7 @@ def test_tokenize_treats_pipe_as_whitespace() -> None:
 
 
 def test_tokenize_strips_invisible_characters() -> None:
-    assert tokenize("a​b") == tokenize("ab")
+    assert tokenize("a\u200bb") == tokenize("ab")
 
 
 def test_tokenize_applies_nfkc_normalization() -> None:
