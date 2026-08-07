@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--no-default-features --features tract,download`.
 - `deny.toml` audits every feature (`all-features = true`); previously only the default graph was
   checked, so the `ort-bundled` dependency tree had never been reviewed.
+- The benchmark corpus is vendored into the repository instead of resolved from a Git-LFS submodule,
+  so tests and benchmarks no longer need a submodule checkout. `bench::load_corpus_image` now fails
+  loudly on a missing fixture instead of silently substituting a stand-in image, which could make a
+  benchmark measure the wrong picture and still look healthy. The images are excluded from the
+  published crate.
 
 ### Added
 
