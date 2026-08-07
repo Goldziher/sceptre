@@ -200,6 +200,12 @@ def _report(sceptre_f1: float, easyocr_f1: float, sceptre_rss: float, easyocr_rs
     )
 
 
+def test_run_report_to_dict_carries_a_schema_version() -> None:
+    payload = _report(0.9, 0.8, 500.0, 11000.0).to_dict()
+    assert payload["schema_version"] == b.RunReport.SCHEMA_VERSION
+    assert isinstance(payload["schema_version"], int)
+
+
 def test_render_markdown_lists_capability_gaps() -> None:
     markdown = b.render_markdown(_report(0.9, 0.8, 500.0, 11000.0))
     assert "Capability gaps" in markdown

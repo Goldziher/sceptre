@@ -996,6 +996,11 @@ def aggregate(records: list[ImageRecord]) -> dict[str, dict[str, float]]:
 class RunReport:
     """The full benchmark result: metadata, per-image records, and aggregates."""
 
+    # Bump when a field is added, removed, or changes meaning in `to_dict()`'s output, so a
+    # consumer (publish.py's drift check, a stored baseline) can tell reports apart. Mirrors
+    # the published comparison artifact, which has carried a schema_version since inception.
+    SCHEMA_VERSION = 1
+
     metadata: dict[str, object]
     records: list[ImageRecord]
     aggregates_labeled: dict[str, dict[str, float]] = field(default_factory=dict)
@@ -1004,6 +1009,7 @@ class RunReport:
     def to_dict(self) -> dict[str, object]:
         """Serialize the whole report for JSON output."""
         return {
+            "schema_version": self.SCHEMA_VERSION,
             "metadata": self.metadata,
             "aggregates": {"labeled": self.aggregates_labeled, "all": self.aggregates_all},
             "records": [record.to_dict() for record in self.records],
