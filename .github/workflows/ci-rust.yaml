@@ -322,8 +322,17 @@ jobs:
           method: network
           sub-packages: '["nvcc"]'
       - name: Clippy
+        env:
+          # candle-kernels' build script probes `nvidia-smi` for the compute capability,
+          # which does not exist on a GPU-less builder, so the build fails before clippy
+          # runs. Pin it explicitly: 89 is Ada, matching the `runner-gpu-l4` hardware the
+          # CUDA benchmark leg targets. Compile-only, so the value only has to be a real
+          # capability nvcc accepts. Inert for the metal leg. ~keep
+          CUDA_COMPUTE_CAP: "89"
         run: cargo clippy -p sceptre --all-targets --features "candle-${{ matrix.device }}" -- -D warnings
       - name: Compile-check the CLI
+        env:
+          CUDA_COMPUTE_CAP: "89"
         run: cargo check -p sceptre-cli --features "candle-${{ matrix.device }}"
 
   bench:
