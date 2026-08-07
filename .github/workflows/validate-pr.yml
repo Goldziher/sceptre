@@ -1,0 +1,14 @@
+name: Validate PR
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    uses: xberg-io/actions/.github/workflows/reusable-validate-pr.yml@v1
+    secrets: inherit
