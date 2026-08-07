@@ -108,8 +108,11 @@ fn ctc_beam_search(matrix: ArrayView2<f32>, beam_width: usize) -> Vec<usize> {
 /// Total order over `(total mass, labeling)`, highest mass first, ties broken by the
 /// labeling's own `Ord` so beam pruning and the final pick are reproducible.
 ///
+/// Because the order is descending, the best beam is the `min_by` under it, not the
+/// `max_by`.
+///
 /// `HashMap`'s per-instance random seed makes iteration order — and so any float tie
-/// in `sort_by`/`max_by` alone — vary between calls with identical input, which for a
+/// under a bare mass comparison — vary between calls with identical input, which for a
 /// decoder means the same crop could recognize to different text on different runs.
 /// Breaking every tie on the labeling itself (unique per `HashMap` key) removes that
 /// nondeterminism without pretending float equality is deterministic on its own.
@@ -321,15 +324,20 @@ mod tests {
 
     #[test]
     fn should_decode_deterministically_across_repeated_calls() {
-        // `HashMap`'s per-instance random seed means two runs of the same search can ~keep
-        // iterate beams in a different order; without a labeling-based tie-break in ~keep
-        // `rank_beams`, that could silently change which equally-scored labeling wins, ~keep
-        // i.e. the same crop could recognize to different text on different runs. A ~keep
-        // beam-width-1 fixture forces frequent float ties (many beams pruned to a single ~keep
-        // one each step), so this would have been flaky pre-fix. ~keep
+        // `HashMap`'s per-instance random seed means two searches over identical input ~keep
+        // can iterate beams in a different order; without the labeling tie-break in ~keep
+        // `rank_beams`, the stable `sort_by` then preserves that arbitrary order among ~keep
+        // equal-mass beams, so pruning silently keeps a different labeling and the same ~keep
+        // crop recognizes to different text on different runs. ~keep
+        //
+        // Classes 1 and 2 carry *exactly* equal probability, so the labelings "0" and ~keep
+        // "1" tie on mass at every timestep, and `beam_width` 1 forces the tie to decide ~keep
+        // the survivor. Distinct probabilities would never exercise the tie-break at ~keep
+        // all — verified by reverting `rank_beams` to a bare mass comparison, under ~keep
+        // which this fixture fails and an unequal one still passes. ~keep
         let charset = english();
         let mask = no_ignore(&charset);
-        let row = [(0.4f32).ln(), (0.35f32).ln(), (0.25f32).ln()];
+        let row = [(0.2f32).ln(), (0.4f32).ln(), (0.4f32).ln()];
         let logits = arr2(&[row, row, row, row]);
         let first = decode_beam_search(logits.view(), &charset, &mask, 1);
         for _ in 0..50 {
