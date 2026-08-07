@@ -53,3 +53,4 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0032](0032-per-backend-accelerator-support.md) | Per-backend accelerator support (amends ADR 0029) | Accepted |
 | [0033](0033-org-migration-docs-domain-and-shared-theme.md) | Docs on `docs.sceptre.xberg.io` with the shared `@xberg-io/docs-theme` | Accepted |
 | [0034](0034-test-documents-corpus-via-content-addressed-fetch.md) | Test corpus via the `test_documents` submodule, content-addressed fetch (supersedes ADR 0016 corpus decision) | Accepted |
+| [0036](0036-opt-in-ctc-beam-search-decoding.md) | Opt-in CTC beam-search decoding, greedy stays default | Accepted |
