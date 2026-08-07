@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import re
@@ -1016,6 +1017,53 @@ class RunReport:
         }
 
 
+# Aggregate/record fields that are scores bounded to [0, 1]; anything else measured (seconds,
+# RSS, CPU core-seconds) only needs to be finite. ~keep
+_UNIT_INTERVAL_FIELDS = frozenset(
+    {
+        "agreement_char_f1",
+        "agreement_word_f1",
+        "agreement_mean_iou",
+        "easyocr_token_f1",
+        "sceptre_token_f1",
+    }
+)
+
+
+def validate_report(report: RunReport) -> list[str]:
+    """Reject a malformed report -- NaN or an out-of-range score -- before it is written to disk.
+
+    A regression *gate* failure (a real quality/speed drop) is expected to happen and still
+    leaves a complete, inspectable report on disk; this catches a different kind of failure --
+    a bug producing a NaN or an impossible score -- which must never land in comparison.json in
+    the first place.
+    """
+    problems: list[str] = []
+    for aggregate_name, aggregates in (("labeled", report.aggregates_labeled), ("all", report.aggregates_all)):
+        for field_name, summary in aggregates.items():
+            for stat_name, value in summary.items():
+                problems.extend(
+                    _validate_score(f"aggregates.{aggregate_name}.{field_name}.{stat_name}", value, field_name)
+                )
+    for record in report.records:
+        for field_name in _UNIT_INTERVAL_FIELDS:
+            problems.extend(
+                _validate_score(f"records[{record.stem}].{field_name}", getattr(record, field_name), field_name)
+            )
+    return problems
+
+
+def _validate_score(label: str, value: float | None, field_name: str) -> list[str]:
+    """Validate one numeric field, or skip it if unset."""
+    if value is None:
+        return []
+    if not math.isfinite(value):
+        return [f"{label} is not finite: {value}"]
+    if field_name in _UNIT_INTERVAL_FIELDS and not (0.0 <= value <= 1.0):
+        return [f"{label} = {value} is outside [0, 1]"]
+    return []
+
+
 # --------------------------------------------------------------------------------------
 # Headline totals
 # --------------------------------------------------------------------------------------
@@ -1482,6 +1530,13 @@ def run_benchmark(
         aggregates_labeled=aggregate(labeled),
         aggregates_all=aggregate(records),
     )
+
+    problems = validate_report(report)
+    if problems:
+        print("sceptre_rs_tools.benchmark: report failed validation, not writing artifacts:", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
 
     baseline = _load_baseline(baseline_path)
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -235,6 +235,40 @@ def test_check_thresholds_flags_quality_regression() -> None:
     assert any("token-F1" in breach for breach in breaches)
 
 
+# -- validate-before-write ---------------------------------------------------------------
+
+
+def test_validate_report_passes_a_well_formed_report() -> None:
+    assert b.validate_report(_report(0.9, 0.8, 500.0, 11000.0)) == []
+
+
+def test_validate_report_flags_a_nan_aggregate_score() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.aggregates_labeled["sceptre_token_f1"]["mean"] = float("nan")
+    problems = b.validate_report(report)
+    assert any("not finite" in problem for problem in problems)
+
+
+def test_validate_report_flags_an_out_of_range_aggregate_score() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.aggregates_labeled["sceptre_token_f1"]["mean"] = 1.5
+    problems = b.validate_report(report)
+    assert any("outside [0, 1]" in problem for problem in problems)
+
+
+def test_validate_report_flags_an_out_of_range_record_score() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.records[0].agreement_word_f1 = -0.1
+    problems = b.validate_report(report)
+    assert any("agreement_word_f1" in problem and "outside [0, 1]" in problem for problem in problems)
+
+
+def test_validate_report_allows_unbounded_timing_fields() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.aggregates_labeled["easyocr_warm_seconds"] = {"mean": 123.4}
+    assert b.validate_report(report) == []
+
+
 # -- environment provenance -------------------------------------------------------------
 
 
