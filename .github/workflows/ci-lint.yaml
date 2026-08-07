@@ -1,0 +1,25 @@
+name: CI Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
+    with:
+      setup-rust: true
+      setup-python: true
+      python-version: "3.13"
