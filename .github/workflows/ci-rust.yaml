@@ -38,8 +38,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # The image the parity and end-to-end lanes OCR. Committed as a plain blob. ~keep
-  SAMPLE_IMAGE: crates/sceptre/tests/data/images/english.png
+  # The image the parity and end-to-end lanes OCR, fetched from the test_documents submodule. ~keep
+  SAMPLE_IMAGE: test_documents/images/english.png
 
 jobs:
   test:

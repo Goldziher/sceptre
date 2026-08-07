@@ -41,11 +41,11 @@ tasks:
       - cargo test --workspace --features "{{.FEATURES}}"
 
   ci:build:
-    desc: Build the workspace for one CI matrix leg's feature set; FEATURES may be empty
+    desc: Release-build the workspace for one CI matrix leg's feature set; FEATURES may be empty
     requires:
       vars: [FEATURES]
     cmds:
-      - cargo build --workspace --features "{{.FEATURES}}"
+      - cargo build --release --workspace --features "{{.FEATURES}}"
 
   verify:features:
     desc: Assert the CLI's ONNX Runtime provisioning feature matrix resolves as intended
