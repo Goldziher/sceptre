@@ -11,6 +11,7 @@
 mod craft;
 mod detector;
 mod group;
+mod orientation;
 mod postprocess;
 mod preprocess;
 
