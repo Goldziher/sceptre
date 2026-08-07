@@ -285,5 +285,6 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instruct
 
 ## License
 
-[MIT License](LICENSE). Model weights are distributed by third parties under their own licenses (the
-gen2 EasyOCR models and the iText ONNX exports are Apache-2.0).
+[MIT License](LICENSE). Model weights are distributed under their own licenses — the gen2 EasyOCR
+models and the first-party [`sceptre-ocr`](https://huggingface.co/sceptre-ocr) ONNX exports derived
+from them are Apache-2.0.

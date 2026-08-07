@@ -83,7 +83,7 @@ def marked_regions(root: Path) -> list[MarkedRegion]:
     return [
         MarkedRegion(root / "README.md", "benchmark-headline", "<!--", "-->"),
         MarkedRegion(
-            root / "website/src/content/docs/reference/benchmarks.mdx",
+            root / "docs-site/src/content/docs/reference/benchmarks.mdx",
             "benchmark-headline",
             "{/*",
             "*/}",
