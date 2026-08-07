@@ -89,7 +89,7 @@ fn ctc_beam_search(matrix: ArrayView2<f32>, beam_width: usize) -> Vec<usize> {
     for t in 0..timesteps {
         let mut next: HashMap<Vec<usize>, BeamEntry> = HashMap::new();
         let mut ranked: Vec<(Vec<usize>, BeamEntry)> = beams.into_iter().collect();
-        ranked.sort_by(|(_, a), (_, b)| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+        ranked.sort_by(|(a_labeling, a), (b_labeling, b)| rank_beams(a.total, a_labeling, b.total, b_labeling));
         ranked.truncate(beam_width);
 
         for (labeling, entry) in &ranked {
@@ -100,9 +100,24 @@ fn ctc_beam_search(matrix: ArrayView2<f32>, beam_width: usize) -> Vec<usize> {
 
     beams
         .into_iter()
-        .max_by(|(_, a), (_, b)| a.total.partial_cmp(&b.total).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|(a_labeling, a), (b_labeling, b)| rank_beams(a.total, a_labeling, b.total, b_labeling))
         .map(|(labeling, _)| labeling)
         .unwrap_or_default()
+}
+
+/// Total order over `(total mass, labeling)`, highest mass first, ties broken by the
+/// labeling's own `Ord` so beam pruning and the final pick are reproducible.
+///
+/// `HashMap`'s per-instance random seed makes iteration order — and so any float tie
+/// in `sort_by`/`max_by` alone — vary between calls with identical input, which for a
+/// decoder means the same crop could recognize to different text on different runs.
+/// Breaking every tie on the labeling itself (unique per `HashMap` key) removes that
+/// nondeterminism without pretending float equality is deterministic on its own.
+fn rank_beams(a_total: f32, a_labeling: &[usize], b_total: f32, b_labeling: &[usize]) -> std::cmp::Ordering {
+    b_total
+        .partial_cmp(&a_total)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| a_labeling.cmp(b_labeling))
 }
 
 /// Advance one beam by one timestep: the "no new character" continuation, then an
@@ -302,6 +317,28 @@ mod tests {
         let beam = decode_beam_search(logits.view(), &charset, &mask, 5);
         assert_eq!(beam.text, "");
         assert_eq!(beam.confidence, 0.0);
+    }
+
+    #[test]
+    fn should_decode_deterministically_across_repeated_calls() {
+        // `HashMap`'s per-instance random seed means two runs of the same search can ~keep
+        // iterate beams in a different order; without a labeling-based tie-break in ~keep
+        // `rank_beams`, that could silently change which equally-scored labeling wins, ~keep
+        // i.e. the same crop could recognize to different text on different runs. A ~keep
+        // beam-width-1 fixture forces frequent float ties (many beams pruned to a single ~keep
+        // one each step), so this would have been flaky pre-fix. ~keep
+        let charset = english();
+        let mask = no_ignore(&charset);
+        let row = [(0.4f32).ln(), (0.35f32).ln(), (0.25f32).ln()];
+        let logits = arr2(&[row, row, row, row]);
+        let first = decode_beam_search(logits.view(), &charset, &mask, 1);
+        for _ in 0..50 {
+            let repeat = decode_beam_search(logits.view(), &charset, &mask, 1);
+            assert_eq!(
+                repeat.text, first.text,
+                "beam search must decode the same crop identically every call"
+            );
+        }
     }
 
     #[test]

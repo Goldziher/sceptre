@@ -44,7 +44,8 @@ port EasyOCR's specific algorithm, and what the default should be.
   blank extension and the implicit "beam unchanged" continuation both add mass to the
   same blank-ending labeling — not a normalized probability update). Tempting, but this
   stops being an EasyOCR decoder and starts being a different algorithm sceptre would
-  own the correctness of, with no upstream reference to validate against.
+  own the correctness of, with no upstream reference to validate against — and, per the
+  "Follow-up" section below, it was measured and is worse net, not better.
 - **Port `ctcBeamSearch` faithfully, quirk included, opt-in via `Decoder::BeamSearch`**,
   leaving `Decoder::WordBeamSearch` a config error.
 
@@ -66,6 +67,23 @@ segmentation (`utils.py::word_segmentation`) — infrastructure sceptre has no e
 of today. Implementing it without that infrastructure would be a different, weaker
 algorithm wearing the same name.
 
+### A determinism bug found and fixed along the way
+
+The first measurement pass gave a different `english.png` word-F1 on different process
+runs of the same code and config (0.919, then 0.901). Root cause: beam pruning and the
+final "pick the highest-mass labeling" step both broke ties on plain `f32` comparison
+over a `HashMap<Vec<usize>, BeamEntry>`; `HashMap`'s hasher is reseeded randomly per
+instance (not just per process), so iteration order — and so which entry a tied
+`sort_by`/`max_by` lands on — varies from call to call with identical input. For a
+decoder, that means the same crop could recognize to different text on different runs
+of the same binary. Fixed by `rank_beams`, a total order over `(total mass, labeling)`
+that breaks every float tie on the labeling itself (unique per `HashMap` key), used by
+both the per-timestep pruning sort and the final selection; regression-tested by
+`should_decode_deterministically_across_repeated_calls` (a beam-width-1 fixture chosen
+to force frequent ties). This is orthogonal to the accuracy question below but changes
+the exact figures from a first draft of this ADR: all numbers here are post-fix and
+reproduced identically across repeated runs.
+
 ### Measured accuracy: mixed, and net negative at the EasyOCR default
 
 Word-F1 against the EasyOCR reference, tier-2 corpus, `beam_width=5` (EasyOCR's
@@ -73,7 +91,7 @@ default) vs. the existing `Greedy` default, everything else unchanged:
 
 | image | greedy | beamsearch | delta |
 | --- | ---: | ---: | ---: |
-| english.png | 1.000 | 0.919 | −0.081 |
+| english.png | 1.000 | 0.927 | −0.073 |
 | chinese.jpg | 0.900 | 0.900 | +0.000 |
 | japanese.jpg | 0.895 | 0.973 | **+0.078** |
 | korean.png | 1.000 | 0.857 | **−0.143** |
@@ -83,21 +101,68 @@ default) vs. the existing `Greedy` default, everything else unchanged:
 | french.jpg | 0.933 | 0.933 | +0.000 |
 
 Net: one clear win (Japanese), two regressions (English, Korean) that outweigh it, four
-unaffected. Inspecting the regressions (`english.png`: "coronavirus infection" →
-"coronaviru ifect"; "coughing" → "coughg"; `korean.png`: "205Km" → "20Km") shows a
-consistent pattern: beam search drops a character mid-word rather than substituting a
-wrong one. Widening `beam_width` (5 → 15 → 50 on `english.png`) does not recover it
-(F1 0.937 → 0.919 → 0.919, plateauing) — this is not a pruning artifact fixable by a
-wider search, it is the actual highest-total-probability-mass label under a model with
-no language-model prior on word length or content. This matches a known limitation of
-un-language-modeled CTC beam search: a shorter labeling can integrate more total path
-mass across timesteps than the correct, one-character-longer path, and only a language
-model (which is exactly what `wordbeamsearch` adds via its dictionary) reliably fixes
-it. Decode time cost is 0.96×–1.4× greedy per image — not the bottleneck either way.
+unaffected (net Σdelta = −0.138 over the 8 images). Inspecting the regressions
+(`english.png`: "coronavirus infection" → "coronaviru ifect"; "coughing" → "coughg";
+`korean.png`: "205Km" → "20Km") shows a consistent pattern: beam search drops a
+character mid-word rather than substituting a wrong one. Widening `beam_width` (5 → 15
+→ 50 on `english.png`) does not recover it (F1 0.927 → 0.901 → 0.893, monotonically
+*worse*) — this is not a pruning artifact fixable by a wider search, it is the actual
+highest-total-probability-mass label under a model with no language-model prior on word
+length or content. Decode time cost is 0.83×–1.3× greedy per image — not the
+bottleneck either way.
 
 Measured with `crates/sceptre/tests/decoder_beam_search_parity.rs`, a throwaway
 comparison harness added alongside this ADR (not a gate — `tier2_golden.rs`'s
 thresholds describe the greedy default and must not move for an opt-in decoder).
+
+### Follow-up: is the blank-handling quirk the actual cause?
+
+A natural hypothesis is that the character-dropping pattern above traces to the exact
+quirk this ADR chose to port faithfully rather than fix (see Considered Options): when
+a labeling already ends in a blank, `char_highscore` still offers the blank as an
+extension candidate, `fast_simplify_label` returns the labeling unchanged for it (its
+"consecutive blanks" branch), and that unchanged key is the same one the continuation
+step just wrote to — so blank-continuation mass gets counted twice, the second time
+booked into the *non-blank-ending* bucket. The systematic effect would be to inflate
+the mass of labelings that end in blank, i.e. shorter labelings — plausibly exactly
+what a dropped character looks like.
+
+Tested directly: `extend_beam`'s extension loop was changed to skip `class ==
+BLANK_CLASS` (the standard Graves formulation, where blank-ending mass comes solely
+from the continuation branch's `prBlank`), re-measured across all 8 images at
+`beam_width=5`, confirmed reproducible across repeated runs (the determinism fix
+above applies to this variant too):
+
+| image | greedy | beamsearch (faithful) | beamsearch (blank skipped) |
+| --- | ---: | ---: | ---: |
+| english.png | 1.000 | 0.927 | 0.929 |
+| chinese.jpg | 0.900 | 0.900 | 0.900 |
+| japanese.jpg | 0.895 | **0.973** | 0.895 |
+| korean.png | 1.000 | 0.857 | **1.000** |
+| cyrillic.png | 1.000 | 1.000 | **0.750** |
+| telugu.png | 1.000 | 1.000 | 1.000 |
+| kannada.png | 1.000 | 1.000 | 1.000 |
+| french.jpg | 0.933 | 0.933 | 0.933 |
+
+Net Σdelta over the 8 images: faithful −0.138, blank-skipped **−0.321** — worse, not
+better. The hypothesis is half right: it correctly predicts and fixes the Korean
+regression (`2O5Km` decodes correctly once blank-continuation mass stops leaking into
+the non-blank bucket) and nudges English from −0.073 to −0.071. But it does not
+generalize — it costs the entire Japanese win (`NO LTTB` → `NOLTTB`, closing a spurious
+greedy-inserted space, stops happening once shorter-labeling mass is no longer
+inflated in that direction either) and opens a new, larger regression on Cyrillic
+("Россия" → "Росия", a repeated-letter word losing its repeat exactly like
+`coronavirus` → `coronaviru`). The quirk is a real, identifiable defect in upstream's
+implementation, and it is *a* contributor to the character-dropping pattern, but the
+pattern's root cause is the broader one already documented above: a length bias with no
+language model to counteract it, which the quirk amplifies in some places and
+(via the Japanese case) accidentally cancels in others. Removing the quirk does not
+remove the bias, it just redistributes which words it lands on.
+
+**Decision on this follow-up: keep the faithful port.** Diverging from EasyOCR's
+algorithm here is not license to invent a strictly-better one without re-measuring —
+and the strictly-better hypothesis measured worse. `extend_beam` is unchanged from the
+faithful port.
 
 ### Consequences
 
@@ -116,6 +181,10 @@ thresholds describe the greedy default and must not move for an opt-in decoder).
   accuracy fix.
 - Neutral: `Decoder::WordBeamSearch` remains unimplemented; building it would need a
   dictionary/word-segmentation subsystem this ADR does not scope.
+- Good (incidental): the investigation surfaced and fixed a real determinism bug
+  (`rank_beams`) that would otherwise have shipped — the same crop recognizing to
+  different text on different runs is a correctness defect independent of whether beam
+  search helps accuracy at all.
 
 ## Related
 

@@ -13,9 +13,11 @@ pub enum Decoder {
     Greedy,
     /// Beam-search CTC decoding (EasyOCR `decoder='beamsearch'`, `beamWidth` from
     /// [`RecognitionConfig::beam_width`]). Not a general accuracy win: measured on the
-    /// tier-2 corpus it gained word-F1 on Japanese but lost it on English and Korean by
-    /// dropping characters mid-word, a known failure mode of CTC beam search without a
-    /// language model. Opt in only where it is measured to help (see ADR 0036).
+    /// tier-2 corpus it gained word-F1 on Japanese but lost it (net negative overall) on
+    /// English and Korean by dropping characters mid-word — a length bias inherent to CTC
+    /// beam search without a language model, confirmed (not just assumed) by testing and
+    /// rejecting a targeted fix for one contributing cause. Opt in only where it is
+    /// measured to help (see ADR 0036).
     BeamSearch,
     /// Dictionary-constrained word-beam-search. Not implemented: EasyOCR's variant needs
     /// per-language dictionaries and, for non-Latin separators, word segmentation that
