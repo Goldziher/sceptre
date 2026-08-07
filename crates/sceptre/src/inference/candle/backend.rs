@@ -5,7 +5,7 @@ use candle_core::{Device, Tensor as CandleTensor};
 use super::craft_net::CraftNet;
 use super::crnn_net::CrnnNet;
 use super::onnx_proto::OnnxGraph;
-use super::{candle_error, weights};
+use super::{candle_error, device, weights};
 use crate::error::{OcrError, Result};
 use crate::inference::{BackendOptions, ModelBackend, NetworkKind, Tensor, buffer};
 
@@ -41,7 +41,12 @@ impl CandleBackend {
         // the environment at first use, and every inference already runs inside the reader's ~keep
         // private pool, so the shared budget is honored by containment rather than by a knob. ~keep
         let _ = options.threads;
-        let device = Device::Cpu;
+        let (device, accelerator) = device::select_device(options.accelerator)?;
+        tracing::debug!(
+            requested = options.accelerator.as_str(),
+            selected = accelerator.as_str(),
+            "resolved the candle device"
+        );
         let graph = OnnxGraph::decode(model_bytes)?;
         validate_network(&graph, options.network)?;
         let vb = weights::var_builder(&graph, &device)?;
@@ -158,15 +163,42 @@ mod ort_parity {
     use ndarray::{ArrayD, IxDyn};
 
     use super::*;
-    use crate::config::{Backend, Language, OcrConfig};
+    use crate::config::{Accelerator, Backend, Language, OcrConfig};
     use crate::inference::load_backend;
     use crate::models::provision::model_manifest;
 
-    /// Largest absolute difference tolerated between the two backends' outputs.
+    /// Largest absolute difference tolerated between the two backends on the CPU.
     const TOLERANCE: f32 = 1e-4;
 
     /// Multiplier and increment of a full-period linear congruential generator.
     const LCG: (u32, u32) = (1_664_525, 1_013_904_223);
+
+    /// How far apart two backends' outputs may be at one element.
+    #[derive(Debug, Clone, Copy)]
+    enum Bar {
+        /// A flat difference, whatever the magnitude of the value.
+        Absolute(f32),
+        /// A difference that may grow with the magnitude of the reference value.
+        ///
+        /// GPU kernels reduce in a different order than the CPU ones, so rounding
+        /// noise scales with the value being accumulated. The recognizer's logits
+        /// reach magnitude ~5 after 63 timesteps of two bidirectional LSTMs, where
+        /// float32 noise alone exceeds a flat `1e-4`; CRAFT's heat-maps sit in
+        /// `[0, 1]`, where that same flat bar is the right one. Scaling by the
+        /// reference magnitude — floored at 1, so small values stay strict — keeps
+        /// both networks held to the tightest bar their arithmetic allows.
+        Relative(f32),
+    }
+
+    impl Bar {
+        /// The largest difference allowed where `ort` produced `reference`.
+        fn allowed(self, reference: f32) -> f32 {
+            match self {
+                Self::Absolute(tolerance) => tolerance,
+                Self::Relative(tolerance) => tolerance * reference.abs().max(1.0),
+            }
+        }
+    }
 
     fn require_models() -> bool {
         std::env::var("SCEPTRE_REQUIRE_MODELS")
@@ -196,6 +228,7 @@ mod ort_parity {
 
     fn run(
         backend: Backend,
+        accelerator: Accelerator,
         bytes: &[u8],
         network: NetworkKind,
         shape: &[usize],
@@ -203,6 +236,7 @@ mod ort_parity {
     ) -> (Vec<usize>, Vec<f32>) {
         let options = BackendOptions {
             network,
+            accelerator,
             ..BackendOptions::default()
         };
         let loaded = load_backend(backend, bytes, options).expect("load the model");
@@ -212,31 +246,45 @@ mod ort_parity {
     }
 
     fn assert_agreement(model: &std::path::Path, network: NetworkKind, shape: &[usize], seed: u32) {
+        assert_agreement_on(Accelerator::Cpu, Bar::Absolute(TOLERANCE), model, network, shape, seed);
+    }
+
+    /// Compare `ort` on the CPU against candle running on `accelerator`.
+    fn assert_agreement_on(
+        accelerator: Accelerator,
+        bar: Bar,
+        model: &std::path::Path,
+        network: NetworkKind,
+        shape: &[usize],
+        seed: u32,
+    ) {
         let bytes = std::fs::read(model).expect("read the model file");
         let values = pseudo_random(shape, seed);
-        let (ort_shape, ort_values) = run(Backend::Ort, &bytes, network, shape, &values);
-        let (candle_shape, candle_values) = run(Backend::Candle, &bytes, network, shape, &values);
+        let (ort_shape, ort_values) = run(Backend::Ort, Accelerator::Cpu, &bytes, network, shape, &values);
+        let (candle_shape, candle_values) = run(Backend::Candle, accelerator, &bytes, network, shape, &values);
 
         assert_eq!(
             ort_shape, candle_shape,
             "{network:?} output shapes differ for input {shape:?}"
         );
-        let differences: Vec<f32> = ort_values
+        // Each element is scored against its own bar, so the worst offender is the one ~keep
+        // furthest past what it was allowed rather than merely the largest difference. ~keep
+        let overruns: Vec<f32> = ort_values
             .iter()
             .zip(candle_values.iter())
-            .map(|(left, right)| (left - right).abs())
+            .map(|(reference, actual)| (reference - actual).abs() / bar.allowed(*reference))
             .collect();
-        let (index, difference) = differences
+        let (index, overrun) = overruns
             .iter()
             .copied()
             .enumerate()
             .max_by(|left, right| left.1.total_cmp(&right.1))
             .expect("the output is non-empty");
-        let exceeding = differences.iter().filter(|value| **value > TOLERANCE).count();
-        let coordinates: Vec<String> = differences
+        let exceeding = overruns.iter().filter(|value| **value > 1.0).count();
+        let coordinates: Vec<String> = overruns
             .iter()
             .enumerate()
-            .filter(|(_, value)| **value > TOLERANCE)
+            .filter(|(_, value)| **value > 1.0)
             .take(8)
             .map(|(flat, _)| {
                 let mut remainder = flat;
@@ -250,14 +298,18 @@ mod ort_parity {
             })
             .collect();
         assert!(
-            difference <= TOLERANCE,
-            "{network:?} at input {shape:?}: candle differs from ort by {difference} at flat index \
-             {index} of {} (ort={}, candle={}); {exceeding} values ({:.1}%) exceed the {TOLERANCE} \
-             tolerance, output shape {ort_shape:?}; first differing positions {coordinates:?}",
-            differences.len(),
+            overrun <= 1.0,
+            "{network:?} at input {shape:?}: candle on {} differs from ort by {} at flat index \
+             {index} of {} (ort={}, candle={}), {:.1}x its {bar:?} bar of {}; {exceeding} values \
+             ({:.1}%) exceed their bar, output shape {ort_shape:?}; first differing positions {coordinates:?}",
+            accelerator.as_str(),
+            (ort_values[index] - candle_values[index]).abs(),
+            overruns.len(),
             ort_values[index],
             candle_values[index],
-            100.0 * exceeding as f64 / differences.len() as f64
+            overrun,
+            bar.allowed(ort_values[index]),
+            100.0 * exceeding as f64 / overruns.len() as f64
         );
     }
 
@@ -293,5 +345,41 @@ mod ort_parity {
             return;
         };
         assert_agreement(&model, NetworkKind::Recognizer, &[2, 1, 64, 192], 21);
+    }
+
+    /// The same bar on the GPU, which runs different kernels for every operation.
+    ///
+    /// This can only run on a machine with a Metal device, and CI has none — GitHub's
+    /// macOS runners are virtualized without GPU passthrough — so the GPU path is
+    /// compiled in CI and validated only here. Treat a green CI as no evidence about
+    /// Metal numerics.
+    #[cfg(feature = "candle-metal")]
+    #[test]
+    fn should_agree_with_ort_when_candle_runs_on_metal() {
+        let Some(detector) = cached_model(Language::English, "craft_mlt_25k") else {
+            assert!(!require_models(), "craft_mlt_25k is not cached");
+            return;
+        };
+        assert_agreement_on(
+            Accelerator::Metal,
+            Bar::Relative(TOLERANCE),
+            &detector,
+            NetworkKind::Detector,
+            &[1, 3, 320, 480],
+            2,
+        );
+
+        let Some(recognizer) = cached_model(Language::English, "english_g2") else {
+            assert!(!require_models(), "english_g2 is not cached");
+            return;
+        };
+        assert_agreement_on(
+            Accelerator::Metal,
+            Bar::Relative(TOLERANCE),
+            &recognizer,
+            NetworkKind::Recognizer,
+            &[2, 1, 64, 256],
+            12,
+        );
     }
 }

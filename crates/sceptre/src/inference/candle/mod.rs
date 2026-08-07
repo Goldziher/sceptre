@@ -12,13 +12,26 @@ mod backend;
 mod bilstm;
 mod craft_net;
 mod crnn_net;
+mod device;
 mod onnx_proto;
 mod ops;
 mod weights;
 
 pub(super) use backend::CandleBackend;
 
+use crate::config::Accelerator;
 use crate::error::OcrError;
+
+/// The accelerator this build would actually run on, or `None` when none can be opened.
+///
+/// Opening a device is a side effect, so this resolves one and drops it rather than
+/// guessing — the same contract as the `ort` probe, and for the same reason: published
+/// provenance must name what ran, not what was asked for.
+pub(super) fn probe_accelerator(requested: Accelerator) -> Option<Accelerator> {
+    device::select_device(requested)
+        .map(|(_device, selected)| selected)
+        .ok()
+}
 
 /// Build an [`OcrError::Inference`] wrapping a candle error with operation context.
 pub(super) fn candle_error(operation: &str, error: candle_core::Error) -> OcrError {

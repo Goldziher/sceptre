@@ -39,7 +39,7 @@ pub struct OcrOverrides {
     #[arg(long, value_enum)]
     backend: Option<BackendArg>,
 
-    /// Hardware accelerator for the inference backend (`ort` only).
+    /// Hardware accelerator for the inference backend (not every backend runs on every one).
     #[arg(long, value_enum)]
     accelerator: Option<AcceleratorArg>,
 
@@ -100,6 +100,8 @@ pub enum AcceleratorArg {
     Coreml,
     /// Microsoft DirectML.
     Directml,
+    /// Apple Metal (the `candle` backend's route to the same GPU as CoreML).
+    Metal,
     /// NVIDIA CUDA.
     Cuda,
 }
@@ -149,6 +151,7 @@ impl From<AcceleratorArg> for sceptre::Accelerator {
             AcceleratorArg::Auto => Accelerator::Auto,
             AcceleratorArg::Coreml => Accelerator::CoreMl,
             AcceleratorArg::Directml => Accelerator::DirectMl,
+            AcceleratorArg::Metal => Accelerator::Metal,
             AcceleratorArg::Cuda => Accelerator::Cuda,
         }
     }
@@ -197,7 +200,7 @@ mod tests {
     fn should_map_every_accelerator_arg_to_its_library_wire_name() {
         use clap::ValueEnum as _;
 
-        let expected = ["cpu", "auto", "coreml", "directml", "cuda"];
+        let expected = ["cpu", "auto", "coreml", "directml", "metal", "cuda"];
         let variants = AcceleratorArg::value_variants();
         assert_eq!(variants.len(), expected.len(), "every variant must be covered");
         for (variant, wire) in variants.iter().copied().zip(expected) {

@@ -95,11 +95,16 @@ fn register_preferred(builder: SessionBuilder) -> (SessionBuilder, Accelerator) 
 
 /// Register a user-requested accelerator, failing loudly if it cannot be used.
 fn register_explicit(builder: SessionBuilder, accelerator: Accelerator) -> Result<(SessionBuilder, Accelerator)> {
+    let Some(feature) = cargo_feature(accelerator) else {
+        return Err(OcrError::config(format!(
+            "the `ort` backend has no execution provider for accelerator `{}`",
+            accelerator.as_str()
+        )));
+    };
     let Some(provider) = provider(accelerator) else {
         return Err(OcrError::config(format!(
-            "accelerator `{}` is not compiled into this build of sceptre; rebuild with the `{}` cargo feature",
+            "accelerator `{}` is not compiled into this build of sceptre; rebuild with the `{feature}` cargo feature",
             accelerator.as_str(),
-            cargo_feature(accelerator)
         )));
     };
     if !provider.available {
@@ -143,19 +148,23 @@ fn preferred_accelerators() -> &'static [Accelerator] {
 }
 
 /// The sceptre cargo feature that compiles in support for `accelerator`.
-fn cargo_feature(accelerator: Accelerator) -> &'static str {
+///
+/// `None` for the selections that have no execution provider at all: the CPU ones,
+/// which ONNX Runtime serves implicitly, and [`Accelerator::Metal`], which belongs to
+/// the `candle` backend and is refused here rather than blamed on a missing feature.
+fn cargo_feature(accelerator: Accelerator) -> Option<&'static str> {
     match accelerator {
-        Accelerator::Cpu | Accelerator::Auto => "ort",
-        Accelerator::CoreMl => "ort-coreml",
-        Accelerator::DirectMl => "ort-directml",
-        Accelerator::Cuda => "ort-cuda",
+        Accelerator::Cpu | Accelerator::Auto | Accelerator::Metal => None,
+        Accelerator::CoreMl => Some("ort-coreml"),
+        Accelerator::DirectMl => Some("ort-directml"),
+        Accelerator::Cuda => Some("ort-cuda"),
     }
 }
 
 /// The execution provider for `accelerator`, or `None` when it is not compiled in.
 fn provider(accelerator: Accelerator) -> Option<Provider> {
     match accelerator {
-        Accelerator::Cpu | Accelerator::Auto => None,
+        Accelerator::Cpu | Accelerator::Auto | Accelerator::Metal => None,
         Accelerator::CoreMl => coreml_provider(),
         Accelerator::DirectMl => directml_provider(),
         Accelerator::Cuda => cuda_provider(),
@@ -221,10 +230,17 @@ mod tests {
     }
 
     #[test]
-    fn every_accelerator_names_the_cargo_feature_that_enables_it() {
-        assert_eq!(cargo_feature(Accelerator::CoreMl), "ort-coreml");
-        assert_eq!(cargo_feature(Accelerator::DirectMl), "ort-directml");
-        assert_eq!(cargo_feature(Accelerator::Cuda), "ort-cuda");
+    fn every_execution_provider_names_the_cargo_feature_that_enables_it() {
+        assert_eq!(cargo_feature(Accelerator::CoreMl), Some("ort-coreml"));
+        assert_eq!(cargo_feature(Accelerator::DirectMl), Some("ort-directml"));
+        assert_eq!(cargo_feature(Accelerator::Cuda), Some("ort-cuda"));
+    }
+
+    /// Metal is a candle device, so no `ort-*` feature can ever enable it here.
+    #[test]
+    fn metal_has_no_ort_execution_provider() {
+        assert_eq!(cargo_feature(Accelerator::Metal), None);
+        assert!(provider(Accelerator::Metal).is_none());
     }
 
     #[test]

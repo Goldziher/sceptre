@@ -76,8 +76,9 @@ pub fn runtime_info_for(model: &ModelConfig) -> Result<RuntimeInfo> {
     model.validate()?;
     let (accelerator_registered, ort) = match model.backend {
         Backend::Ort => probe_ort(model.accelerator),
-        // tract and candle are CPU-only, which validation has already enforced. ~keep
-        Backend::Tract | Backend::Candle => (Some(Accelerator::Cpu), None),
+        // tract is CPU-only, which validation has already enforced. ~keep
+        Backend::Tract => (Some(Accelerator::Cpu), None),
+        Backend::Candle => (probe_candle(model.accelerator), None),
     };
     Ok(RuntimeInfo {
         sceptre_version: crate::VERSION,
@@ -143,6 +144,19 @@ fn probe_ort(requested: Accelerator) -> (Option<Accelerator>, Option<OrtRuntimeI
 #[cfg(not(feature = "ort"))]
 fn probe_ort(_requested: Accelerator) -> (Option<Accelerator>, Option<OrtRuntimeInfo>) {
     (None, None)
+}
+
+/// Resolve the device the candle backend would open for `requested`.
+#[cfg(feature = "candle")]
+fn probe_candle(requested: Accelerator) -> Option<Accelerator> {
+    super::candle::probe_accelerator(requested)
+}
+
+/// Without the backend compiled in there is no device to resolve, and reporting the
+/// CPU would claim a run that cannot happen.
+#[cfg(not(feature = "candle"))]
+fn probe_candle(_requested: Accelerator) -> Option<Accelerator> {
+    None
 }
 
 /// Extract the `x.y.z` release version from an ONNX Runtime build-info string.
@@ -220,6 +234,63 @@ mod tests {
         assert_eq!(info.sceptre_version, crate::VERSION);
         assert_eq!(info.os, std::env::consts::OS);
         assert_eq!(info.arch, std::env::consts::ARCH);
+    }
+
+    /// The candle backend must report the device it would really open.
+    ///
+    /// Reporting a fixed CPU here would put "cpu" into published benchmark provenance
+    /// for a run that happened on the GPU.
+    #[cfg(feature = "candle")]
+    #[test]
+    fn should_report_the_device_the_candle_backend_would_open() {
+        let model = ModelConfig {
+            backend: Backend::Candle,
+            accelerator: Accelerator::Auto,
+            ..ModelConfig::default()
+        };
+
+        let info = runtime_info_for(&model).expect("auto on candle is a valid configuration");
+
+        let registered = info.accelerator_registered.expect("auto always resolves");
+        assert_ne!(registered, Accelerator::Auto, "auto must resolve to a real device");
+        assert!(
+            Backend::Candle.supports(registered),
+            "candle reported {registered:?}, which it cannot run on"
+        );
+        assert!(info.ort.is_none(), "the candle backend has no ONNX Runtime details");
+    }
+
+    /// On a build that compiled Metal in, a Mac must actually resolve to it.
+    #[cfg(all(feature = "candle-metal", target_os = "macos"))]
+    #[test]
+    fn should_resolve_auto_to_metal_on_a_mac_that_compiled_it_in() {
+        let model = ModelConfig {
+            backend: Backend::Candle,
+            accelerator: Accelerator::Auto,
+            ..ModelConfig::default()
+        };
+
+        let info = runtime_info_for(&model).expect("auto on candle is a valid configuration");
+
+        assert_eq!(info.accelerator_registered, Some(Accelerator::Metal));
+    }
+
+    /// A backend that is not compiled in has no device, and claiming the CPU would
+    /// promise a run that cannot happen.
+    #[cfg(not(feature = "candle"))]
+    #[test]
+    fn should_not_claim_a_device_for_a_backend_that_is_not_compiled_in() {
+        let model = ModelConfig {
+            backend: Backend::Candle,
+            ..ModelConfig::default()
+        };
+
+        let info = runtime_info_for(&model).expect("cpu on candle is a valid configuration");
+
+        assert_eq!(
+            info.accelerator_registered, None,
+            "an absent backend must report an undetermined accelerator"
+        );
     }
 
     #[test]

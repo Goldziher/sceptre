@@ -38,9 +38,12 @@ pub enum Backend {
     Ort,
     /// Pure-Rust ONNX (`tract`). For WASM/Android.
     Tract,
-    /// Pure-Rust native-tensor backend (`candle`). Deferred.
+    /// Pure-Rust native-tensor backend (`candle`), with Metal and CUDA support.
     Candle,
 }
+
+/// Every backend, for diagnostics that have to search across them.
+const EVERY_BACKEND: [Backend; 3] = [Backend::Ort, Backend::Tract, Backend::Candle];
 
 impl Backend {
     /// The serialized wire name, for diagnostics and error messages.
@@ -51,13 +54,39 @@ impl Backend {
             Self::Candle => "candle",
         }
     }
+
+    /// The non-CPU accelerators this backend can run a graph on.
+    ///
+    /// Support is a property of the backend, not of the accelerator: `ort` reaches
+    /// hardware through ONNX Runtime execution providers, while `candle` addresses
+    /// devices directly. [`Accelerator::Cuda`] therefore appears on both — it names
+    /// hardware — whereas [`Accelerator::CoreMl`] and [`Accelerator::Metal`] are two
+    /// different frameworks over the same Apple GPU and each belongs to one backend.
+    ///
+    /// Compiling the support in is a separate question, answered at load time by the
+    /// relevant cargo feature; this is the configuration vocabulary only.
+    pub const fn hardware_accelerators(self) -> &'static [Accelerator] {
+        match self {
+            Self::Ort => &[Accelerator::CoreMl, Accelerator::DirectMl, Accelerator::Cuda],
+            Self::Tract => &[],
+            Self::Candle => &[Accelerator::Metal, Accelerator::Cuda],
+        }
+    }
+
+    /// Whether this backend can honor `accelerator`.
+    ///
+    /// Always true for the CPU-only selections, which every backend answers.
+    pub fn supports(self, accelerator: Accelerator) -> bool {
+        accelerator.is_cpu_only() || self.hardware_accelerators().contains(&accelerator)
+    }
 }
 
 /// Which hardware accelerator the inference backend should run the graph on.
 ///
 /// This is deliberately backend-neutral vocabulary: `ort` maps it onto an ONNX
-/// Runtime execution provider, while `tract` and `candle` are CPU-only and answer
-/// the same field.
+/// Runtime execution provider and `candle` onto a compute device, while `tract`
+/// is CPU-only. Not every backend answers every value — see
+/// [`Backend::hardware_accelerators`] for which pairings are valid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Accelerator {
@@ -79,6 +108,12 @@ pub enum Accelerator {
     /// Microsoft DirectML (Windows).
     #[serde(rename = "directml")]
     DirectMl,
+    /// Apple Metal (macOS and iOS).
+    ///
+    /// Distinct from [`Self::CoreMl`]: both drive the same GPU, but through
+    /// different frameworks with different numerics, and this value flows verbatim
+    /// into published benchmark provenance.
+    Metal,
     /// NVIDIA CUDA.
     Cuda,
 }
@@ -91,8 +126,23 @@ impl Accelerator {
             Self::Auto => "auto",
             Self::CoreMl => "coreml",
             Self::DirectMl => "directml",
+            Self::Metal => "metal",
             Self::Cuda => "cuda",
         }
+    }
+
+    /// The accelerator on `backend` that reaches the same hardware as this one.
+    ///
+    /// Only the Apple pair differs by name: CoreML and Metal are two frameworks over
+    /// one GPU, so requesting the wrong one is a plausible mistake in either direction
+    /// and deserves a better answer than "unsupported".
+    fn equivalent_on(self, backend: Backend) -> Option<Self> {
+        let equivalent = match self {
+            Self::CoreMl => Self::Metal,
+            Self::Metal => Self::CoreMl,
+            _ => return None,
+        };
+        backend.supports(equivalent).then_some(equivalent)
     }
 
     /// Whether this selection can only ever resolve to the CPU.
@@ -114,8 +164,9 @@ pub struct ModelConfig {
     pub backend: Backend,
     /// Hardware accelerator the backend should run on.
     ///
-    /// Only [`Backend::Ort`] can run on a non-CPU accelerator; configuring one on
-    /// another backend is rejected by validation.
+    /// Which values a backend can honor is given by
+    /// [`Backend::hardware_accelerators`]; any other pairing is rejected by
+    /// validation rather than silently degraded to the CPU.
     pub accelerator: Accelerator,
     /// Explicit local CRAFT detector ONNX path for host-managed model assets.
     ///
@@ -176,17 +227,49 @@ impl ModelConfig {
         self.validate_accelerator()
     }
 
-    /// Reject a hardware accelerator on a backend that can only run on the CPU.
+    /// Reject an accelerator the configured backend cannot run on.
     fn validate_accelerator(&self) -> Result<()> {
-        if self.accelerator.is_cpu_only() || self.backend == Backend::Ort {
+        if self.backend.supports(self.accelerator) {
             return Ok(());
         }
-        Err(OcrError::config(format!(
-            "model.accelerator = \"{}\" requires model.backend = \"ort\"; the \"{}\" backend is CPU-only",
-            self.accelerator.as_str(),
-            self.backend.as_str()
+        Err(OcrError::config(unsupported_accelerator(
+            self.backend,
+            self.accelerator,
         )))
     }
+}
+
+/// Explain why `backend` cannot honor `accelerator`, and what to do instead.
+///
+/// The remedy matters more than the rejection: every one of these mistakes has a
+/// concrete fix, either a different accelerator on this backend or a different
+/// backend for this accelerator.
+fn unsupported_accelerator(backend: Backend, accelerator: Accelerator) -> String {
+    let supported = backend.hardware_accelerators();
+    let mut message = if supported.is_empty() {
+        format!(
+            "model.accelerator = \"{}\" is not available: the \"{}\" backend is CPU-only",
+            accelerator.as_str(),
+            backend.as_str()
+        )
+    } else {
+        let names: Vec<&str> = supported.iter().map(|supported| supported.as_str()).collect();
+        format!(
+            "model.accelerator = \"{}\" is not available on the \"{}\" backend, which runs on {}",
+            accelerator.as_str(),
+            backend.as_str(),
+            names.join(" or ")
+        )
+    };
+    if let Some(equivalent) = accelerator.equivalent_on(backend) {
+        message.push_str(&format!(
+            "; the same hardware is reached with model.accelerator = \"{}\"",
+            equivalent.as_str()
+        ));
+    } else if let Some(other) = EVERY_BACKEND.iter().find(|other| other.supports(accelerator)) {
+        message.push_str(&format!("; model.backend = \"{}\" runs on it", other.as_str()));
+    }
+    message
 }
 
 #[cfg(test)]
@@ -218,6 +301,7 @@ mod tests {
             (Accelerator::Auto, "auto"),
             (Accelerator::CoreMl, "coreml"),
             (Accelerator::DirectMl, "directml"),
+            (Accelerator::Metal, "metal"),
             (Accelerator::Cuda, "cuda"),
         ];
         for (accelerator, wire) in cases {
@@ -234,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn should_reject_a_non_cpu_accelerator_when_the_backend_is_not_ort() {
+    fn should_reject_a_hardware_accelerator_on_a_cpu_only_backend() {
         let config = ModelConfig {
             backend: Backend::Tract,
             accelerator: Accelerator::CoreMl,
@@ -250,6 +334,107 @@ mod tests {
             "message must name the accelerator: {message}"
         );
         assert!(message.contains("tract"), "message must name the backend: {message}");
+        assert!(
+            message.contains("CPU-only"),
+            "message must say why tract cannot honor it: {message}"
+        );
+    }
+
+    #[test]
+    fn should_reject_an_accelerator_that_belongs_to_another_backend() {
+        let config = ModelConfig {
+            backend: Backend::Candle,
+            accelerator: Accelerator::DirectMl,
+            ..ModelConfig::default()
+        };
+
+        let error = config.validate().expect_err("directml on candle must be rejected");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("directml") && message.contains("candle"),
+            "message must name both sides: {message}"
+        );
+        assert!(
+            message.contains("metal") && message.contains("cuda"),
+            "message must list what candle does support: {message}"
+        );
+        assert!(
+            message.contains("backend = \"ort\""),
+            "message must point at the backend that does support directml: {message}"
+        );
+    }
+
+    /// CoreML and Metal drive the same Apple GPU through different frameworks, so
+    /// naming the wrong one is the mistake most likely to be made in either direction.
+    #[test]
+    fn should_name_the_apple_equivalent_when_the_wrong_framework_is_requested() {
+        let cases = [
+            (Backend::Candle, Accelerator::CoreMl, "metal"),
+            (Backend::Ort, Accelerator::Metal, "coreml"),
+        ];
+        for (backend, accelerator, equivalent) in cases {
+            let config = ModelConfig {
+                backend,
+                accelerator,
+                ..ModelConfig::default()
+            };
+
+            let Err(error) = config.validate() else {
+                panic!("{accelerator:?} on {backend:?} must be rejected");
+            };
+
+            let message = error.to_string();
+            assert!(
+                message.contains(equivalent),
+                "on the {} backend the message must point at `{equivalent}`: {message}",
+                backend.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn should_accept_every_accelerator_the_support_table_lists() {
+        for backend in [Backend::Ort, Backend::Tract, Backend::Candle] {
+            for accelerator in backend.hardware_accelerators() {
+                let config = ModelConfig {
+                    backend,
+                    accelerator: *accelerator,
+                    ..ModelConfig::default()
+                };
+                config
+                    .validate()
+                    .unwrap_or_else(|error| panic!("{accelerator:?} is listed for {backend:?} but rejected: {error}"));
+                assert!(backend.supports(*accelerator));
+            }
+        }
+    }
+
+    #[test]
+    fn should_list_no_hardware_accelerator_that_is_really_the_cpu() {
+        for backend in [Backend::Ort, Backend::Tract, Backend::Candle] {
+            let listed = backend.hardware_accelerators();
+            assert!(
+                listed.iter().all(|accelerator| !accelerator.is_cpu_only()),
+                "{backend:?} lists a CPU selection as hardware: {listed:?}"
+            );
+            assert!(
+                backend.supports(Accelerator::Cpu) && backend.supports(Accelerator::Auto),
+                "{backend:?} must accept the CPU-only selections"
+            );
+        }
+    }
+
+    #[test]
+    fn should_run_candle_on_metal_and_cuda_but_not_on_the_onnx_runtime_providers() {
+        assert_eq!(
+            Backend::Candle.hardware_accelerators(),
+            &[Accelerator::Metal, Accelerator::Cuda],
+            "candle names hardware, not ONNX Runtime execution providers"
+        );
+        assert!(!Backend::Candle.supports(Accelerator::CoreMl));
+        assert!(!Backend::Ort.supports(Accelerator::Metal));
+        assert!(Backend::Tract.hardware_accelerators().is_empty());
     }
 
     #[test]
@@ -265,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn should_accept_every_accelerator_on_the_ort_backend() {
+    fn should_accept_every_onnx_runtime_provider_on_the_ort_backend() {
         for accelerator in [
             Accelerator::Cpu,
             Accelerator::Auto,
@@ -278,7 +463,9 @@ mod tests {
                 accelerator,
                 ..ModelConfig::default()
             };
-            config.validate().expect("ort accepts every accelerator at config time");
+            config
+                .validate()
+                .expect("ort accepts every execution provider at config time");
         }
     }
 }

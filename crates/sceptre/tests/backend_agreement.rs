@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use sceptre::{Backend, Language, OcrConfig, ReadOptions, Reader};
+use sceptre::{Accelerator, Backend, Language, OcrConfig, ReadOptions, Reader};
 
 /// Truthy `SCEPTRE_REQUIRE_MODELS` opts this heavy, model-backed test in.
 fn require_models() -> bool {
@@ -29,10 +29,11 @@ fn data_dir() -> PathBuf {
 
 /// A single-language config on `backend`, with a modest detection canvas so the fixed
 /// tract canvas stays small enough to optimize and run quickly.
-fn config_for(language: Language, backend: Backend) -> OcrConfig {
+fn config_for(language: Language, backend: Backend, accelerator: Accelerator) -> OcrConfig {
     let mut config = OcrConfig::default();
     config.model.languages = vec![language];
     config.model.backend = backend;
+    config.model.accelerator = accelerator;
     // Both backends share this cap so they see the same resized image; tract additionally
     // pads to a fixed `canvas x canvas` square. 1024 keeps the small example images at full
     // resolution while bounding tract's CRAFT optimization cost. ~keep
@@ -47,8 +48,8 @@ fn models_available(config: &OcrConfig) -> bool {
 }
 
 /// Recognized text lines for `image_file` under `backend`, top-to-bottom.
-fn recognize_text(image_file: &str, language: Language, backend: Backend) -> Vec<String> {
-    let config = config_for(language, backend);
+fn recognize_text(image_file: &str, language: Language, backend: Backend, accelerator: Accelerator) -> Vec<String> {
+    let config = config_for(language, backend, accelerator);
     assert!(
         models_available(&config),
         "SCEPTRE_REQUIRE_MODELS is set but the models for {image_file} are not cached"
@@ -83,15 +84,25 @@ fn word_multiset(lines: &[String]) -> Vec<String> {
     expect(dead_code, reason = "no alternative backend is compiled in")
 )]
 fn assert_backends_agree(image_file: &str, language: Language, other: Backend) {
+    assert_backends_agree_on(image_file, language, other, Accelerator::Cpu);
+}
+
+/// `other`, running on `accelerator`, must recognize the same words as ort on the CPU.
+#[cfg_attr(
+    not(any(feature = "tract", feature = "candle")),
+    expect(dead_code, reason = "no alternative backend is compiled in")
+)]
+fn assert_backends_agree_on(image_file: &str, language: Language, other: Backend, accelerator: Accelerator) {
     if !require_models() {
         return;
     }
-    let ort = recognize_text(image_file, language, Backend::Ort);
-    let actual = recognize_text(image_file, language, other);
+    let ort = recognize_text(image_file, language, Backend::Ort, Accelerator::Cpu);
+    let actual = recognize_text(image_file, language, other, accelerator);
     assert_eq!(
         word_multiset(&ort),
         word_multiset(&actual),
-        "ort and {other:?} disagree on {image_file}: ort={ort:?} {other:?}={actual:?}"
+        "ort and {other:?} on {} disagree on {image_file}: ort={ort:?} {other:?}={actual:?}",
+        accelerator.as_str()
     );
 }
 
@@ -117,4 +128,14 @@ fn ort_and_candle_agree_on_english() {
 #[test]
 fn ort_and_candle_agree_on_cyrillic() {
     assert_backends_agree("cyrillic.png", Language::Cyrillic, Backend::Candle);
+}
+
+/// The GPU path must clear the same bar as the CPU one, on a machine that has a GPU.
+///
+/// CI has none — no hosted runner offers Metal — so this compiles everywhere and runs
+/// only on real hardware. A green CI says nothing about Metal.
+#[cfg(feature = "candle-metal")]
+#[test]
+fn ort_and_candle_on_metal_agree_on_english() {
+    assert_backends_agree_on("english.png", Language::English, Backend::Candle, Accelerator::Metal);
 }

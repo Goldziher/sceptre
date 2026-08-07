@@ -52,6 +52,10 @@ bench = []
 ort-coreml = ["ort", "ort?/coreml"]
 ort-directml = ["ort", "ort?/directml"]
 ort-cuda = ["ort", "ort?/cuda"]
+# GPU devices for the candle backend. `candle-metal` needs the macOS/iOS SDK; `candle-cuda`
+# compiles candle's CUDA kernels and needs the CUDA toolkit on the build machine. ~keep
+candle-metal = ["candle", "candle-core?/metal", "candle-nn?/metal"]
+candle-cuda = ["candle", "candle-core?/cuda", "candle-nn?/cuda"]
 
 [dependencies]
 candle-core = { workspace = true, optional = true }

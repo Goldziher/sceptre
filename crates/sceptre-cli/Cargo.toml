@@ -59,6 +59,11 @@ tract = ["sceptre/tract"]
 ort-coreml = ["sceptre/ort-coreml"]
 ort-directml = ["sceptre/ort-directml"]
 ort-cuda = ["sceptre/ort-cuda"]
+# GPU devices for `--backend candle`. Unlike the ort providers these need no runtime
+# library, but they do need a toolchain: `candle-metal` the macOS/iOS SDK, `candle-cuda`
+# the CUDA toolkit. Each implies the candle backend itself. ~keep
+candle-metal = ["sceptre/candle-metal"]
+candle-cuda = ["sceptre/candle-cuda"]
 # Runtime model download, caching, and sha256 verification from Hugging Face. ~keep
 download = ["sceptre/download"]
 # Expose the MCP server as the `mcp` subcommand. ~keep
