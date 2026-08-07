@@ -27,12 +27,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        features: ["", "mcp"]
+        # `candle` on all three because it is the one backend that does not interpret the
+        # ONNX graph — its hand-written networks compile per target and are not exercised
+        # by the ort or tract lanes. ~keep
+        features: ["", "mcp", "candle"]
         include:
-          # backend_agreement.rs is `#![cfg(all(feature = "ort", feature = "tract"))]`, so
-          # without a leg that enables both backends at once it never compiles anywhere. ~keep
+          # backend_agreement.rs is `#![cfg(feature = "ort")]` with per-backend legs inside,
+          # so without a leg that enables the alternatives alongside ort it never compiles. ~keep
           - os: ubuntu-latest
-            features: "ort-bundled,tract,download"
+            features: "ort-bundled,tract,candle,download"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -223,6 +226,43 @@ jobs:
             result.json
           if-no-files-found: ignore
           retention-days: 14
+
+  gpu-backends:
+    name: candle GPU (${{ matrix.device }})
+    # COMPILE-ONLY, and deliberately so: no hosted runner has a GPU. This proves the
+    # `candle-metal` / `candle-cuda` code paths and their toolchain requirements still
+    # build; it is NOT evidence about GPU numerics. Metal is validated against ort on real
+    # hardware (see ADR 0031); CUDA is compiled and never executed anywhere. Running
+    # `cargo test` here would fail on the device-open assertions, since the runners have
+    # no device to open. ~keep
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: metal
+            os: macos-latest
+          - device: cuda
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install nvcc
+        # candle's CUDA kernels are compiled by candle-kernels' build script, so the
+        # toolkit is a build-time requirement even with no GPU present. Only the nvcc
+        # sub-package is installed; the runtime libraries are never loaded. ~keep
+        if: matrix.device == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          method: network
+          sub-packages: '["nvcc"]'
+      - name: Clippy
+        run: cargo clippy -p sceptre --all-targets --features "candle-${{ matrix.device }}" -- -D warnings
+      - name: Compile-check the CLI
+        run: cargo check -p sceptre-cli --features "candle-${{ matrix.device }}"
 
   bench:
     runs-on: ubuntu-latest
