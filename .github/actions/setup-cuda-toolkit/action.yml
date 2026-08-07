@@ -1,0 +1,43 @@
+name: Setup CUDA toolkit
+description: >
+  Install the CUDA toolkit (nvcc + runtime libraries) if not already present, exporting
+  CUDA_PATH/CUDA_HOME and adding nvcc to PATH. Ported verbatim from
+  xberg-io/xberg's ci-gpu.yaml, whose GPU-build and GPU-runner copies of this block were
+  byte-identical bar a comment (ADR 0035) — factored once here instead of duplicated a
+  second time in sceptre.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup CUDA toolkit (nvcc)
+      shell: bash
+      run: |
+        set -euxo pipefail
+        if command -v nvcc >/dev/null 2>&1; then
+          echo "nvcc already present: $(command -v nvcc)"
+        elif [ -x /usr/local/cuda/bin/nvcc ]; then
+          echo "/usr/local/cuda/bin" >> "$GITHUB_PATH"
+          echo "CUDA_PATH=/usr/local/cuda" >> "$GITHUB_ENV"
+          echo "CUDA_HOME=/usr/local/cuda" >> "$GITHUB_ENV"
+        else
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) repo_arch="x86_64" ;;
+            aarch64) repo_arch="sbsa" ;;
+            *) echo "Unsupported arch: $arch"; exit 1 ;;
+          esac
+          . /etc/os-release
+          distro="${ID}${VERSION_ID//./}"
+          keyring="cuda-keyring_1.1-1_all.deb"
+          curl -fsSL -o "${keyring}" "https://developer.download.nvidia.com/compute/cuda/repos/${distro}/${repo_arch}/${keyring}"
+          sudo dpkg -i "${keyring}"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cuda-toolkit-12-6
+          echo "/usr/local/cuda-12.6/bin" >> "$GITHUB_PATH"
+          echo "CUDA_PATH=/usr/local/cuda-12.6" >> "$GITHUB_ENV"
+          echo "CUDA_HOME=/usr/local/cuda-12.6" >> "$GITHUB_ENV"
+        fi
+
+    - name: Verify nvcc
+      shell: bash
+      run: nvcc --version

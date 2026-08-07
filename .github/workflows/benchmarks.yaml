@@ -1,0 +1,470 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly EasyOCR head-to-head, per ADR 0021 ("runs via workflow_dispatch and a weekly
+    # schedule"). The old ci.yaml never added this trigger despite the ADR; this workflow
+    # brings the code into conformance rather than deciding anything new. ~keep
+    - cron: "0 6 * * 1"
+  pull_request:
+    branches: [main]
+    paths:
+      - benchmarks/published/**
+      - README.md
+      - docs-site/**
+      - python/sceptre_rs_tools/publish.py
+      - python/sceptre_rs_tools/benchmark.py
+  push:
+    branches: [main]
+    paths:
+      - benchmarks/published/**
+      - README.md
+      - docs-site/**
+      - python/sceptre_rs_tools/publish.py
+      - python/sceptre_rs_tools/benchmark.py
+
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The image the backend matrix and the parity lanes OCR, fetched from the test_documents
+  # submodule. ~keep
+  SAMPLE_IMAGE: test_documents/images/english.png
+  # ONNX Runtime GPU/CUDA build, proven working in xberg's ci-gpu.yaml (ADR 0035, open
+  # question #2: this pin should be revisited once RuntimeInfo.ort.version confirms what
+  # actually loaded on the CUDA leg). ~keep
+  ORT_VERSION: "1.24.2"
+
+jobs:
+  # Guards the published benchmark numbers (ADR 0030): the README and docs tables must still
+  # match benchmarks/published/latest.json. Cheap (no torch, no models, no release binary) so
+  # it runs on every pull request that could cause drift, not only on demand. ~keep
+  benchmark-drift:
+    name: Published benchmark drift
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: xberg-io/actions/setup-python-env@v1
+        with:
+          python-version: "3.13"
+          install-command: "uv sync"
+
+      - name: Published benchmark numbers match the committed artifact
+        run: uv run python -m sceptre_rs_tools.publish --check
+
+  # Real, timed criterion run (ADR 0015: report-only, never a gate). Previously a
+  # compile-check only; this promotes it to an actual measurement, uploaded for inspection. ~keep
+  bench:
+    name: Criterion microbenchmarks
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    runs-on: runner-large-arm64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-bench-run
+
+      - name: Run criterion benchmarks
+        run: cargo bench -p sceptre --features bench
+
+      - name: Upload criterion report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: criterion-report-${{ github.run_id }}
+          path: target/criterion/**
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Opt-in head-to-head regression gate (ADR 0021). Heavy (torch + easyocr + models + a
+  # release binary) and its numbers are only comparable when the machine is not otherwise
+  # busy, so it runs via workflow_dispatch and this weekly schedule, never on every PR.
+  #
+  # Runner moved from ubuntu-latest to runner-medium (amd64, non-spot): this changes the
+  # numbers the published figures and --assert floors were measured on. The first scheduled
+  # run here is deliberate re-baselining, and its provenance block records the runner label
+  # so a future reader can tell which host produced it (ADR 0035). ~keep
+  easyocr-benchmark:
+    name: EasyOCR head-to-head
+    if: >-
+      github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+    runs-on: runner-medium
+    timeout-minutes: 60
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf
+      BENCHMARK_RUNNER_LABEL: runner-medium
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-easyocr-benchmark
+
+      - uses: xberg-io/actions/setup-python-env@v1
+        with:
+          python-version: "3.13"
+          install-command: "uv sync --group export"
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: Cache EasyOCR weights
+        # EasyOCR fetches its own weights into ~/.EasyOCR through its own mechanism, entirely
+        # separately from the Hugging Face cache. Cache only one of the two and half the
+        # download cost of this job remains. ~keep
+        uses: actions/cache@v5
+        with:
+          path: ~/.EasyOCR
+          key: easyocr-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: easyocr-${{ runner.os }}-
+
+      - name: Build release CLI (bundled ONNX Runtime + on-demand model download)
+        run: cargo build --release -p sceptre-cli --no-default-features --features ort-bundled,download
+
+      - name: Pre-seed every model, serially, before the harness fans out
+        run: ./target/release/sceptre models download --all
+
+      - name: Benchmark and assert regression floors
+        # --assert fails the job on a floor breach. ~keep
+        run: uv run python -m sceptre_rs_tools.benchmark --repeats 2 --assert
+
+      - name: Upload the benchmark report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-report-${{ github.run_id }}
+          path: benchmark-results/
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Backend x accelerator matrix (ADR 0035): liveness and throughput, never parity evidence.
+  # backend_agreement.rs remains the only correctness bar. All four legs fix canvas_size=1024
+  # (ADR 0027 makes that comparability requirement, not a tuning choice) and report the
+  # accelerator that registered, not merely the one requested. ~keep
+  backend-matrix-linux-cpu:
+    name: Backend matrix (Linux CPU)
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    runs-on: runner-large-arm64
+    timeout-minutes: 45
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf
+      SCEPTRE_REQUIRE_MODELS: "1"
+      SCEPTRE_BACKEND_MATRIX_OUTPUT_DIR: ${{ github.workspace }}/benchmark-results/backends
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-backend-matrix-linux-cpu
+
+      - uses: xberg-io/actions/install-task@v1
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: Build the CLI
+        id: build
+        uses: xberg-io/actions/build-rust-cli@v1
+        with:
+          package-name: sceptre-cli
+          binary-name: sceptre
+          extra-cargo-args: --no-default-features --features ort-bundled,download
+
+      - name: Pre-seed every model, serially, before the matrix reads the cache
+        run: ${{ steps.build.outputs.binary-path }} models download --all
+
+      - name: Run the backend matrix (ort, tract, candle x CPU)
+        run: |
+          cargo test --locked -p sceptre --test backend_matrix \
+            --features ort-bundled,tract,candle,download -- --ignored --nocapture
+
+      - name: Upload leg reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-matrix-linux-cpu-${{ github.run_id }}
+          path: benchmark-results/backends/
+          if-no-files-found: warn
+          retention-days: 30
+
+  backend-matrix-macos:
+    name: Backend matrix (macOS)
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf
+      SCEPTRE_REQUIRE_MODELS: "1"
+      SCEPTRE_BACKEND_MATRIX_OUTPUT_DIR: ${{ github.workspace }}/benchmark-results/backends
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-backend-matrix-macos
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: Build the CLI
+        id: build
+        uses: xberg-io/actions/build-rust-cli@v1
+        with:
+          package-name: sceptre-cli
+          binary-name: sceptre
+          extra-cargo-args: --no-default-features --features ort-bundled,download
+
+      - name: Pre-seed every model, serially, before the matrix reads the cache
+        run: ${{ steps.build.outputs.binary-path }} models download --all
+
+      # bench_candle_metal hard-fails if no Metal device registers (ADR 0032's fail-loud
+      # invariant). This is correct behavior, and exactly why the lane is workflow_dispatch
+      # only, not on the weekly schedule, until a first run confirms macos-latest exposes a
+      # Metal device (ADR 0035, open question #1). ~keep
+      - name: Run the backend matrix (ort+coreml, tract, candle+metal)
+        run: |
+          cargo test --locked -p sceptre --test backend_matrix \
+            --features ort-bundled,ort-coreml,tract,candle-metal,download -- --ignored --nocapture
+
+      - name: Upload leg reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-matrix-macos-${{ github.run_id }}
+          path: benchmark-results/backends/
+          if-no-files-found: warn
+          retention-days: 30
+
+  backend-matrix-gpu-build:
+    name: Backend matrix (GPU build)
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CUDA_COMPUTE_CAP: "89"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: xberg-io/actions/setup-rust@v1
+        with:
+          install-llvm-cov: "false"
+          cache-key-prefix: rust-backend-matrix-gpu-build
+
+      # A plain-Rust CLI build (no ort, no CUDA) that only needs the `download` feature, so
+      # it can be built before the CUDA toolkit install below and used purely to pre-seed
+      # the model cache on the GPU runner. ~keep
+      - name: Build the model-seeder CLI
+        id: build-seeder
+        uses: xberg-io/actions/build-rust-cli@v1
+        with:
+          package-name: sceptre-cli
+          binary-name: sceptre
+          extra-cargo-args: --no-default-features --features tract,download
+
+      - name: Upload the model-seeder CLI
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-matrix-model-seeder
+          path: ${{ steps.build-seeder.outputs.binary-path }}
+          retention-days: 1
+
+      - uses: ./.github/actions/setup-cuda-toolkit
+
+      # build-gpu-test-binary@v1 runs `cargo test --no-run` with no --release and no profile
+      # input (ADR 0035); these job-level profile knobs are the workaround since the `test`
+      # profile inherits `dev`. A `profile:` input on the action itself would be the better
+      # fix — filed as follow-up against xberg-io/actions, not solved here. ~keep
+      - name: Build the GPU backend-matrix test binary
+        uses: xberg-io/actions/build-gpu-test-binary@v1
+        env:
+          CARGO_PROFILE_DEV_OPT_LEVEL: "3"
+          CARGO_PROFILE_DEV_LTO: "false"
+          CARGO_PROFILE_DEV_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: "false"
+          CARGO_PROFILE_DEV_OVERFLOW_CHECKS: "false"
+        with:
+          package: sceptre
+          test-name: backend_matrix
+          features: "ort-dynamic,ort-cuda,tract,candle-cuda,download"
+          output-name: backend-matrix-gpu-test
+
+      - name: Confirm the profile knobs actually took effect
+        env:
+          CARGO_PROFILE_DEV_OPT_LEVEL: "3"
+          CARGO_PROFILE_DEV_LTO: "false"
+          CARGO_PROFILE_DEV_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: "false"
+          CARGO_PROFILE_DEV_OVERFLOW_CHECKS: "false"
+        run: |
+          cargo test --locked -p sceptre --test backend_matrix \
+            --features ort-dynamic,ort-cuda,tract,candle-cuda,download --no-run -v 2>&1 | tail -40
+
+      - name: Upload the GPU test binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-matrix-gpu-test
+          path: backend-matrix-gpu-test
+          retention-days: 1
+
+  backend-matrix-gpu-run:
+    name: Backend matrix (GPU run)
+    needs: backend-matrix-gpu-build
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    runs-on: runner-gpu-l4
+    timeout-minutes: 60
+    # A run in flight must not be killed mid-inference by a newer push cancelling the group. ~keep
+    concurrency:
+      group: benchmarks-gpu-run-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      # $HOME persists across jobs on this self-hosted runner, and sceptre caches ONNX
+      # weights under HF_HOME. Pinning it into the (per-job, non-persisted) workspace means
+      # there is no stale cache path to clear, unlike xberg's `rm -rf` workaround. ~keep
+      HF_HOME: ${{ github.workspace }}/.hf
+      SCEPTRE_REQUIRE_MODELS: "1"
+      SCEPTRE_BACKEND_MATRIX_OUTPUT_DIR: ${{ github.workspace }}/benchmark-results/backends
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
+
+      - name: Verify GPU
+        run: |
+          nvidia-smi || {
+            echo "ERROR: nvidia-smi failed — no GPU detected"
+            exit 1
+          }
+          echo "GPU detected:"
+          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+
+      - uses: ./.github/actions/setup-cuda-toolkit
+
+      - name: Download the model-seeder CLI
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-matrix-model-seeder
+
+      - name: Download the GPU backend-matrix test binary
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-matrix-gpu-test
+
+      - name: Restore the executable bit
+        # actions/download-artifact strips it; both binaries need it before they can run. ~keep
+        run: |
+          chmod +x sceptre
+          chmod +x backend-matrix-gpu-test
+
+      - name: Download ONNX Runtime (GPU/CUDA)
+        uses: xberg-io/actions/setup-onnx-runtime-gpu@v1
+        with:
+          version: ${{ env.ORT_VERSION }}
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: Pre-seed every model, serially, before the matrix reads the cache
+        run: ./sceptre models download --all
+
+      - name: Run the backend matrix (ort+cuda, tract, candle+cuda, and a same-host CPU baseline)
+        run: ./backend-matrix-gpu-test --ignored --nocapture
+
+      - name: Upload leg reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-matrix-gpu-${{ github.run_id }}
+          path: benchmark-results/backends/
+          if-no-files-found: warn
+          retention-days: 30
+
+  backend-matrix-aggregate:
+    name: Backend matrix (aggregate)
+    needs: [backend-matrix-linux-cpu, backend-matrix-macos, backend-matrix-gpu-run]
+    if: always() && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: xberg-io/actions/setup-python-env@v1
+        with:
+          python-version: "3.13"
+          install-command: "uv sync"
+
+      - name: Download every leg's reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: backend-matrix-*
+          path: benchmark-results/backends
+          merge-multiple: true
+
+      - name: Aggregate into one artifact and a step summary
+        run: |
+          uv run python -m sceptre_rs_tools.backend_matrix \
+            --input-dir benchmark-results/backends \
+            --out benchmark-results/backends-combined.json \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the combined artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-matrix-combined-${{ github.run_id }}
+          path: benchmark-results/backends-combined.json
+          if-no-files-found: warn
+          retention-days: 90
