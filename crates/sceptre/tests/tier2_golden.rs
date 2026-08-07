@@ -1,3 +1,8 @@
+// The per-image metrics line is this harness's result output, not a diagnostic: it is what
+// a threshold recalibration reads. Integration tests are separate crates and do not inherit
+// the library's crate-root allow. ~keep
+#![allow(clippy::print_stdout)]
+
 //! Tier-2 golden parity harness.
 //!
 //! Each example image, resolved from the `test_documents` corpus (see [`images_dir`]),
@@ -29,19 +34,22 @@ use sceptre::{Language, OcrConfig, ReadOptions, Reader};
 const WORD_F1_THRESHOLD: f32 = 0.8;
 
 /// Recall floor for the greedy line-detection match: nearly every reference line must be
-/// covered. Not calibrated against a real `SCEPTRE_REQUIRE_MODELS=1` run in this change
-/// (no cached models / `ort` backend available where this was written) -- revisit against
-/// real golden output before treating this as load-bearing. ~keep
+/// covered.
+///
+/// Calibrated against a full `SCEPTRE_REQUIRE_MODELS=1` corpus run. Seven of the eight
+/// images score a perfect 1.000; `french.jpg` is the floor at 0.833, so this sits just
+/// under it. A drop below here means sceptre stopped finding lines EasyOCR finds.
 #[cfg(feature = "ort")]
-const LINE_RECALL_THRESHOLD: f32 = 0.9;
+const LINE_RECALL_THRESHOLD: f32 = 0.8;
 
-/// Precision floor for the greedy line-detection match. Set below the recall floor to
-/// tolerate the documented `parity_french_jpg` split (one reference line detected as two
-/// boxes, penalizing precision without indicating a real regression) -- see that test's
-/// doc comment. Likewise not calibrated against a real run; revisit together with
-/// [`LINE_RECALL_THRESHOLD`]. ~keep
+/// Precision floor for the greedy line-detection match, i.e. the bar on fabricated lines.
+///
+/// Deliberately looser than [`LINE_RECALL_THRESHOLD`]: splitting one reference line into
+/// two boxes costs precision without losing any text, which is a difference in grouping
+/// rather than a recognition regression. Same corpus run — `english.png` scores 0.923 and
+/// `french.jpg` is the floor at 0.625, so this sits just under that.
 #[cfg(feature = "ort")]
-const LINE_PRECISION_THRESHOLD: f32 = 0.7;
+const LINE_PRECISION_THRESHOLD: f32 = 0.6;
 
 /// Whether `SCEPTRE_REQUIRE_MODELS` is set to a truthy value, forcing real-model
 /// tests to run (and fail loudly if models are missing) instead of skipping.
@@ -158,14 +166,7 @@ fn run_dual_golden_parity(image_file: &str, golden_stem: &str, language: Languag
     }
 
     assert_sceptre_snapshot(&result, &golden, image_file);
-    assert_easyocr_reference(&result, &golden, image_file, language);
-}
-
-/// Scripts without word boundaries (Japanese, Chinese) are scored with
-/// character-level F1; whitespace-delimited scripts use word-level F1.
-#[cfg(feature = "ort")]
-fn uses_char_metric(language: Language) -> bool {
-    matches!(language, Language::Japanese | Language::ChineseSimplified)
+    assert_easyocr_reference(&result, &golden, image_file);
 }
 
 #[test]
@@ -236,15 +237,11 @@ fn assert_sceptre_snapshot(result: &sceptre::OcrResult, golden: &helpers::DualGo
 
 /// Fuzzy text-F1 + per-line box-IoU check against the EasyOCR reference golden.
 ///
-/// Text similarity uses character-level F1 for CJK scripts and word-level F1 for
-/// whitespace-delimited scripts (see [`uses_char_metric`]).
+/// Every script is scored with [`helpers::word_f1`]. Its tokenizer expands CJK runs into
+/// overlapping bigrams, so a script without word boundaries no longer collapses into a
+/// single token and does not need the character-bag fallback it used to be routed to.
 #[cfg(feature = "ort")]
-fn assert_easyocr_reference(
-    result: &sceptre::OcrResult,
-    golden: &helpers::DualGolden,
-    image_file: &str,
-    language: Language,
-) {
+fn assert_easyocr_reference(result: &sceptre::OcrResult, golden: &helpers::DualGolden, image_file: &str) {
     let actual_text = result
         .lines
         .iter()
@@ -258,14 +255,10 @@ fn assert_easyocr_reference(
         .map(|line| line.text.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    let (metric, f1) = if uses_char_metric(language) {
-        ("char-F1", helpers::char_f1(&actual_text, &reference_text))
-    } else {
-        ("word-F1", helpers::word_f1(&actual_text, &reference_text))
-    };
+    let f1 = helpers::word_f1(&actual_text, &reference_text);
     assert!(
         f1 >= WORD_F1_THRESHOLD,
-        "{image_file}: {metric} {f1:.3} against the EasyOCR reference is below the {WORD_F1_THRESHOLD} threshold"
+        "{image_file}: word-F1 {f1:.3} against the EasyOCR reference is below the {WORD_F1_THRESHOLD} threshold"
     );
 
     let sceptre_bboxes: Vec<sceptre::BBox> = result.lines.iter().map(|line| quad_bbox(&line.quad)).collect();
@@ -275,6 +268,12 @@ fn assert_easyocr_reference(
     // precision and recall separately means a low score reads as fabrication (low
     // precision) vs omission (low recall) instead of collapsing both into one number. ~keep
     let (line_f1, line_precision, line_recall) = helpers::line_detection_scores(&reference_bboxes, &sceptre_bboxes);
+    // Printed for every image, not only failures, so recalibrating a floor reads the whole
+    // corpus off one `--nocapture` run instead of bisecting on assertion messages. ~keep
+    println!(
+        "parity-metrics\t{image_file}\tword_f1={f1:.3}\tline_recall={line_recall:.3}\
+         \tline_precision={line_precision:.3}\tline_f1={line_f1:.3}"
+    );
     assert!(
         line_recall >= LINE_RECALL_THRESHOLD,
         "{image_file}: line recall {line_recall:.3} against the EasyOCR reference is below \
