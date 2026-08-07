@@ -93,6 +93,34 @@ fn compute_breakdown(events: &[(String, Duration)], total: Duration) -> Breakdow
     }
 }
 
+/// Millisecond projection of a [`Breakdown`] for the `--format json` payload.
+///
+/// [`Duration`] has no stable JSON encoding worth committing to as a public contract,
+/// so the report fixes the unit in the field names instead.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct TimingsReport {
+    /// Load and decode time before the first detection stage.
+    pub setup_ms: f64,
+    /// Total detection time.
+    pub detect_ms: f64,
+    /// Total recognition time.
+    pub recognize_ms: f64,
+    /// Full measured wall time of the run.
+    pub total_ms: f64,
+}
+
+impl From<&Breakdown> for TimingsReport {
+    fn from(breakdown: &Breakdown) -> Self {
+        let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+        Self {
+            setup_ms: ms(breakdown.setup),
+            detect_ms: ms(breakdown.detect),
+            recognize_ms: ms(breakdown.recognize),
+            total_ms: ms(breakdown.total),
+        }
+    }
+}
+
 /// Render the breakdown as a one-block stderr summary with millisecond precision.
 pub fn render(breakdown: &Breakdown) -> String {
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;

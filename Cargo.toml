@@ -70,6 +70,8 @@ tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# NFKC for the benchmark tokenizer, so Rust matches Python's unicodedata.normalize. ~keep
+unicode-normalization = "0.1"
 # The tract-onnx frontend is CPU-only and WASM-safe; the top-level tract facade bundles GPU backends. ~keep
 tract-onnx = { version = "0.23.4", default-features = false }
 

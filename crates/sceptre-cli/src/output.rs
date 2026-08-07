@@ -8,6 +8,7 @@ use clap::ValueEnum;
 use sceptre::{ModelDescriptor, ModelInfo, ModelRole, OcrResult, OrtRuntimeInfo, Quad, RuntimeInfo, TextLine};
 
 use crate::style;
+use crate::timing::TimingsReport;
 
 /// Number of decimal places used when formatting confidence scores.
 const CONFIDENCE_PRECISION: usize = 3;
@@ -140,10 +141,30 @@ fn model_pin(descriptor: &ModelDescriptor) -> ModelPin {
     }
 }
 
-/// Render a full OCR result as text or JSON.
-pub fn render_result(result: &OcrResult, format: OutputFormat, detail: bool, writer: &mut dyn Write) -> io::Result<()> {
+/// A single result carrying the run's stage timings alongside its lines.
+///
+/// The result is flattened, so `--timings` only *adds* a `timings` key to the
+/// object `--format json` already emitted.
+#[derive(serde::Serialize)]
+struct TimedResult<'a> {
+    #[serde(flatten)]
+    result: &'a OcrResult,
+    timings: TimingsReport,
+}
+
+/// Render a full OCR result as text or JSON, optionally carrying stage timings.
+pub fn render_result(
+    result: &OcrResult,
+    format: OutputFormat,
+    detail: bool,
+    timings: Option<TimingsReport>,
+    writer: &mut dyn Write,
+) -> io::Result<()> {
     match format {
-        OutputFormat::Json => write_json(result, writer),
+        OutputFormat::Json => match timings {
+            Some(timings) => write_json(&TimedResult { result, timings }, writer),
+            None => write_json(result, writer),
+        },
         OutputFormat::Text => {
             for line in &result.lines {
                 write_text_line(line, detail, writer)?;
@@ -166,21 +187,36 @@ struct BatchEntry<'a> {
     error: Option<&'a str>,
 }
 
-/// Render a batch of per-image OCR outcomes as text or JSON.
+/// A batch carrying the run's stage timings alongside its per-image entries.
+///
+/// Timings are run-wide, so unlike [`TimedResult`] the array cannot absorb them and
+/// `--timings` wraps it in an envelope instead.
+#[derive(serde::Serialize)]
+struct TimedBatch<'a> {
+    images: Vec<BatchEntry<'a>>,
+    timings: TimingsReport,
+}
+
+/// Render a batch of per-image OCR outcomes as text or JSON, optionally carrying stage timings.
 ///
 /// JSON emits an array of `{ "image", "lines" }` (or `{ "image", "error" }`) objects in input
-/// order. Text prints a per-image path header followed by that image's lines or its error, with a
-/// blank line separating images.
+/// order — or, with `--timings`, a `{ "images", "timings" }` envelope around that array. Text
+/// prints a per-image path header followed by that image's lines or its error, with a blank line
+/// separating images.
 pub fn render_batch(
     items: &[(PathBuf, ImageOutcome)],
     format: OutputFormat,
     detail: bool,
+    timings: Option<TimingsReport>,
     writer: &mut dyn Write,
 ) -> io::Result<()> {
     match format {
         OutputFormat::Json => {
-            let entries: Vec<BatchEntry<'_>> = items.iter().map(|(path, outcome)| batch_entry(path, outcome)).collect();
-            write_json(&entries, writer)
+            let images: Vec<BatchEntry<'_>> = items.iter().map(|(path, outcome)| batch_entry(path, outcome)).collect();
+            match timings {
+                Some(timings) => write_json(&TimedBatch { images, timings }, writer),
+                None => write_json(&images, writer),
+            }
         }
         OutputFormat::Text => {
             for (path, outcome) in items {
@@ -364,16 +400,61 @@ mod tests {
     #[test]
     fn should_render_result_as_parseable_json() {
         let mut buffer: Vec<u8> = Vec::new();
-        render_result(&sample_result(), OutputFormat::Json, true, &mut buffer).unwrap();
+        render_result(&sample_result(), OutputFormat::Json, true, None, &mut buffer).unwrap();
         let text = String::from_utf8(buffer).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["lines"][0]["text"], "hello");
     }
 
+    fn sample_timings() -> TimingsReport {
+        TimingsReport {
+            setup_ms: 100.0,
+            detect_ms: 150.0,
+            recognize_ms: 150.0,
+            total_ms: 400.0,
+        }
+    }
+
+    #[test]
+    fn should_add_timings_alongside_lines_when_timed() {
+        let mut buffer: Vec<u8> = Vec::new();
+        render_result(
+            &sample_result(),
+            OutputFormat::Json,
+            true,
+            Some(sample_timings()),
+            &mut buffer,
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&buffer).unwrap();
+        assert_eq!(value["lines"][0]["text"], "hello");
+        assert_eq!(value["timings"]["detect_ms"], 150.0);
+        assert_eq!(value["timings"]["total_ms"], 400.0);
+    }
+
+    #[test]
+    fn should_wrap_batch_in_an_envelope_when_timed() {
+        let items = vec![(PathBuf::from("a.png"), Ok(sample_result()))];
+        let mut buffer: Vec<u8> = Vec::new();
+        render_batch(&items, OutputFormat::Json, true, Some(sample_timings()), &mut buffer).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&buffer).unwrap();
+        assert_eq!(value["images"][0]["image"], "a.png");
+        assert_eq!(value["timings"]["setup_ms"], 100.0);
+    }
+
+    #[test]
+    fn should_keep_batch_a_bare_array_when_untimed() {
+        let items = vec![(PathBuf::from("a.png"), Ok(sample_result()))];
+        let mut buffer: Vec<u8> = Vec::new();
+        render_batch(&items, OutputFormat::Json, true, None, &mut buffer).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&buffer).unwrap();
+        assert_eq!(value[0]["image"], "a.png");
+    }
+
     #[test]
     fn should_render_result_text_without_detail_prints_only_text() {
         let mut buffer: Vec<u8> = Vec::new();
-        render_result(&sample_result(), OutputFormat::Text, false, &mut buffer).unwrap();
+        render_result(&sample_result(), OutputFormat::Text, false, None, &mut buffer).unwrap();
         let text = String::from_utf8(buffer).unwrap();
         assert_eq!(text, "hello\n");
     }
@@ -381,7 +462,7 @@ mod tests {
     #[test]
     fn should_render_result_text_with_detail_includes_confidence_and_quad() {
         let mut buffer: Vec<u8> = Vec::new();
-        render_result(&sample_result(), OutputFormat::Text, true, &mut buffer).unwrap();
+        render_result(&sample_result(), OutputFormat::Text, true, None, &mut buffer).unwrap();
         let text = String::from_utf8(buffer).unwrap();
         assert!(text.contains("hello"), "missing text: {text}");
         assert!(text.contains("0.876"), "missing confidence: {text}");

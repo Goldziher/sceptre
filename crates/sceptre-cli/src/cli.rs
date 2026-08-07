@@ -11,7 +11,7 @@ use sceptre::{OcrConfig, ReadOptions, Reader};
 
 use crate::output::{self, OutputFormat};
 use crate::overrides::OcrOverrides;
-use crate::timing::StageTimer;
+use crate::timing::{StageTimer, TimingsReport};
 
 /// CRAFT + gen2 CRNN optical character recognition over ONNX.
 #[derive(Parser)]
@@ -67,7 +67,8 @@ enum Commands {
         /// Emit only the recognized text, omitting confidence and box detail.
         #[arg(long)]
         no_detail: bool,
-        /// Print a per-stage timing breakdown (load/detect/recognize) to stderr.
+        /// Report a per-stage timing breakdown (load/detect/recognize) on stderr, and in
+        /// the `--format json` payload.
         #[arg(long)]
         timings: bool,
     },
@@ -176,8 +177,8 @@ fn run_ocr(
         let result = reader
             .readtext(image, &options)
             .with_context(|| format!("running OCR over {image:?}"))?;
-        report_timings(&timer, started);
-        output::render_result(&result, format, detail, &mut stdout()).context("writing OCR results")?;
+        let timings = report_timings(&timer, started);
+        output::render_result(&result, format, detail, timings, &mut stdout()).context("writing OCR results")?;
         return Ok(());
     }
 
@@ -195,8 +196,8 @@ fn run_ocr(
             }
         }
     }
-    report_timings(&timer, started);
-    output::render_batch(&outcomes, format, detail, &mut stdout()).context("writing OCR results")?;
+    let timings = report_timings(&timer, started);
+    output::render_batch(&outcomes, format, detail, timings, &mut stdout()).context("writing OCR results")?;
     if failures > 0 {
         anyhow::bail!("{failures} of {} image(s) failed", images.len());
     }
@@ -204,11 +205,13 @@ fn run_ocr(
 }
 
 /// Print the stage-timing breakdown to stderr when `--timings` installed a timer.
-fn report_timings(timer: &Option<Arc<StageTimer>>, started: Instant) {
-    if let Some(timer) = timer {
-        let breakdown = timer.breakdown(started, Instant::now());
-        let _ = writeln!(stderr(), "{}", crate::timing::render(&breakdown));
-    }
+///
+/// Returns the same breakdown so the caller can fold it into a `--format json` payload.
+fn report_timings(timer: &Option<Arc<StageTimer>>, started: Instant) -> Option<TimingsReport> {
+    let timer = timer.as_ref()?;
+    let breakdown = timer.breakdown(started, Instant::now());
+    let _ = writeln!(stderr(), "{}", crate::timing::render(&breakdown));
+    Some(TimingsReport::from(&breakdown))
 }
 
 /// Detect text regions and render their quads.
