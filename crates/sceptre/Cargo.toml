@@ -12,11 +12,6 @@ documentation = "https://docs.rs/sceptre"
 readme = "README.md"
 keywords = ["ocr", "text-recognition", "easyocr", "craft", "onnx"]
 categories = ["computer-vision", "text-processing"]
-# The vendored corpus images are 14 MiB, over the crates.io package limit, and no consumer of the
-# published crate reads them — `bench::load_corpus_image` resolves them under CARGO_MANIFEST_DIR at
-# runtime, so they are a repository fixture rather than crate content. The ground-truth transcripts
-# beside them are the same kind of thing: only the Python benchmark tooling reads them. ~keep
-exclude = ["tests/data/images/**", "tests/data/ground_truth/**"]
 
 # docs.rs has no network in the build sandbox, so the `ort-bundled` prebuilt download
 # cannot run there; document the dynamic + pure-Rust surface instead. ~keep
