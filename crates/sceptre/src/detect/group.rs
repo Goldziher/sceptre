@@ -311,8 +311,8 @@ mod tests {
     }
 
     /// Same three boxes as above, except `DÉCORATIFS` is 44px tall — the height EasyOCR's
-    /// own CRAFT run measures for this exact region (`utils.py:group_text_box`,
-    /// upstream `merge_easyocr_side` fixture generation). `|mean(30,30) - 44| = 14 < 15`
+    /// own CRAFT run measures for this exact region, obtained by dumping the box list
+    /// `utils.py:group_text_box` receives. `|mean(30,30) - 44| = 14 < 15`
     /// merges. This proves the running-mean merge test in `group_adjacent` is not the
     /// defect: it merges or splits correctly depending on the input box height, and
     /// sceptre's own CRAFT postprocessing produces a 46px box where EasyOCR's produces 44px. ~keep
