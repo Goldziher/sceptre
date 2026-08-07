@@ -20,6 +20,10 @@ dev = ["ruff>=0.6", "pytest>=8"]
 # golden-fixture generation; onnxruntime validates each export against torch. Not
 # installed by default. ~keep
 export = ["torch", "easyocr", "onnx", "onnxruntime", "numpy"]
+# Opt-in PDF rasterization dev tooling (see sceptre_rs_tools.rasterize, ADR 0034 follow-up).
+# `pillow` renders pypdfium2's bitmap output to PNG; kept out of `export` since that group is
+# the heavy torch/easyocr path and rasterization needs neither. ~keep
+corpus = ["pypdfium2>=4", "pillow>=10"]
 
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }]

@@ -37,6 +37,10 @@ __pycache__/
 # benchmarks/published/ — see ADR 0030.
 /benchmark-results
 
+# Local PDF-rasterization output (reproduce via `task python:rasterize`); not published to
+# the test_documents bucket by this repo, see ADR 0034 and sceptre_rs_tools/rasterize.py.
+/rasterized-pages
+
 # BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)
 .ai-rulez/.generated-manifest.json
 .claude/

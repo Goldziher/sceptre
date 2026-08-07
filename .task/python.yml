@@ -36,6 +36,14 @@ tasks:
     cmds:
       - uv run python -m sceptre_rs_tools.golden
 
+  rasterize:
+    desc: >-
+      Render test_documents corpus PDFs to deterministic per-page PNGs for OCR testing
+      (forwards extra CLI args, e.g. --pdf/--dpi/--output-dir); requires the opt-in corpus
+      dependency group (pypdfium2, pillow)
+    cmds:
+      - uv run python -m sceptre_rs_tools.rasterize {{.CLI_ARGS}}
+
   benchmark:
     desc: >-
       Head-to-head benchmark of sceptre (release CLI) vs upstream EasyOCR over the
