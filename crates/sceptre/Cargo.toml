@@ -78,6 +78,7 @@ rayon = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 serde_json = { workspace = true }
+unicode-normalization = { workspace = true }
 
 [lints]
 workspace = true
