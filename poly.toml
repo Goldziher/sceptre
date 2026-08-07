@@ -24,10 +24,13 @@ exclude = [
 ]
 
 [lint.markdown.rumdl]
-disable = ["MD013", "MD024", "MD033", "MD036", "MD041"]
+disable = ["MD012", "MD013", "MD024", "MD033", "MD036", "MD041", "MD046", "MD051", "MD076"]
 
 [fmt.markdown.rumdl]
-disable = ["MD013", "MD024", "MD033", "MD036", "MD041"]
+disable = ["MD012", "MD013", "MD024", "MD033", "MD036", "MD041", "MD046", "MD051", "MD076"]
+
+[tools.actionlint]
+enabled = true
 
 [lint.uncomment]
 enabled = true
@@ -36,7 +39,36 @@ remove_todos = false
 remove_fixme = false
 remove_docs = false
 use_default_ignores = true
-preserve_patterns = ["SAFETY", "HACK", "WORKAROUND", "NOTE"]
+preserve_patterns = [
+  "SAFETY",
+  "HACK",
+  "WORKAROUND",
+  "NOTE",
+  "Copyright",
+  "Licensed",
+  "License",
+  "SPDX",
+  "Apache",
+  "MIT",
+  "WITHOUT WARRANTIES",
+  "limitations under the License",
+  "copyright",
+  "licensed",
+  "license",
+  "apache",
+  "you may not use this file except in compliance",
+  "You may obtain a copy of the License",
+  "you may obtain a copy of the license",
+  "Unless required by applicable law",
+  "unless required by applicable law",
+  "distributed under the License",
+  "distributed under the license",
+  "AS IS",
+  "as is",
+  "without warranties",
+  "specific language governing permissions",
+  "limitations under the license",
+]
 
 [per-file-ignores]
 "basemind.toml" = ["comment", "doc-comment"]
