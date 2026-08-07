@@ -1,12 +1,15 @@
-//! Cross-backend agreement: the pure-Rust `tract` pipeline must produce the same
-//! recognized text as native `ort` on the same images (ADR 0027).
+//! Cross-backend agreement: every non-default backend must produce the same recognized
+//! text as native `ort` on the same images.
 //!
 //! `tract` cannot shape-infer the CRAFT detector under dynamic H/W, so on that backend
-//! detection runs on a fixed square canvas while the recognizers stay dynamic. This test
-//! is the end-to-end proof that the fixed-canvas detection path plus the tract recognizers
-//! reproduce the `ort` output. It is opt-in (heavy: it loads real models and tract's CRAFT
-//! optimization is slow) and only compiled when both backends are available.
-#![cfg(all(feature = "ort", feature = "tract"))]
+//! detection runs on a fixed square canvas while the recognizers stay dynamic (ADR 0027).
+//! `candle` does not execute the graph at all — it runs hand-written networks over the
+//! same weights — so for it this is the end-to-end proof that the transcription is right
+//! where the tensor-level comparison in `inference::candle` proves the arithmetic is.
+//!
+//! Opt-in and heavy: it loads real models, and both alternative backends are slower than
+//! `ort`. Each pairing compiles only when both of its backends are available.
+#![cfg(feature = "ort")]
 
 use std::path::PathBuf;
 
@@ -74,26 +77,44 @@ fn word_multiset(lines: &[String]) -> Vec<String> {
     words
 }
 
-/// The tract pipeline must recognize the same words as ort on each image.
-fn assert_backends_agree(image_file: &str, language: Language) {
+/// `other` must recognize the same words as ort on each image.
+#[cfg_attr(
+    not(any(feature = "tract", feature = "candle")),
+    expect(dead_code, reason = "no alternative backend is compiled in")
+)]
+fn assert_backends_agree(image_file: &str, language: Language, other: Backend) {
     if !require_models() {
         return;
     }
     let ort = recognize_text(image_file, language, Backend::Ort);
-    let tract = recognize_text(image_file, language, Backend::Tract);
+    let actual = recognize_text(image_file, language, other);
     assert_eq!(
         word_multiset(&ort),
-        word_multiset(&tract),
-        "ort and tract disagree on {image_file}: ort={ort:?} tract={tract:?}"
+        word_multiset(&actual),
+        "ort and {other:?} disagree on {image_file}: ort={ort:?} {other:?}={actual:?}"
     );
 }
 
+#[cfg(feature = "tract")]
 #[test]
 fn ort_and_tract_agree_on_english() {
-    assert_backends_agree("english.png", Language::English);
+    assert_backends_agree("english.png", Language::English, Backend::Tract);
 }
 
+#[cfg(feature = "tract")]
 #[test]
 fn ort_and_tract_agree_on_cyrillic() {
-    assert_backends_agree("cyrillic.png", Language::Cyrillic);
+    assert_backends_agree("cyrillic.png", Language::Cyrillic, Backend::Tract);
+}
+
+#[cfg(feature = "candle")]
+#[test]
+fn ort_and_candle_agree_on_english() {
+    assert_backends_agree("english.png", Language::English, Backend::Candle);
+}
+
+#[cfg(feature = "candle")]
+#[test]
+fn ort_and_candle_agree_on_cyrillic() {
+    assert_backends_agree("cyrillic.png", Language::Cyrillic, Backend::Candle);
 }
