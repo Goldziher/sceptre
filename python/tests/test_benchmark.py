@@ -45,6 +45,39 @@ def test_word_error_rate_is_none_for_empty_reference() -> None:
     assert b.word_error_rate("", "anything") is None
 
 
+# -- percentile aggregation ---------------------------------------------------------------
+
+
+def test_summary_reports_p95_and_p99_at_full_sample_counts() -> None:
+    summary = b._summary([float(i) for i in range(120)])
+    assert summary is not None
+    assert summary["p95"] is not None
+    assert summary["p99"] is not None
+    assert summary["count"] == 120
+
+
+def test_summary_suppresses_p95_below_min_samples() -> None:
+    from sceptre_rs_tools.stats import P95_MIN_SAMPLES
+
+    summary = b._summary([float(i) for i in range(P95_MIN_SAMPLES - 1)])
+    assert summary is not None
+    assert summary["p95"] is None
+
+
+def test_summary_suppresses_p99_but_not_p95_between_the_two_floors() -> None:
+    from sceptre_rs_tools.stats import P95_MIN_SAMPLES, P99_MIN_SAMPLES
+
+    values = [float(i) for i in range(P95_MIN_SAMPLES, P99_MIN_SAMPLES - 1)]
+    summary = b._summary(values)
+    assert summary is not None
+    assert summary["p95"] is not None
+    assert summary["p99"] is None
+
+
+def test_summary_of_empty_list_is_none() -> None:
+    assert b._summary([]) is None
+
+
 # -- subprocess stderr hygiene ----------------------------------------------------------
 
 

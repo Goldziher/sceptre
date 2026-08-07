@@ -45,6 +45,7 @@ from pathlib import Path
 from time import perf_counter
 
 from sceptre_rs_tools.corpus import CorpusEntry, build_corpus
+from sceptre_rs_tools.stats import P95_MIN_SAMPLES, P99_MIN_SAMPLES, suppressed_percentile
 
 # sceptre release binary produced by the ort-bundled CLI build.
 SCEPTRE_BIN = Path("target/release/sceptre")
@@ -833,17 +834,21 @@ def benchmark_entry(
 # --------------------------------------------------------------------------------------
 
 
-def _summary(values: list[float]) -> dict[str, float] | None:
-    """Median / p95 / mean / count over a list of floats, or None if empty."""
+def _summary(values: list[float]) -> dict[str, float | None] | None:
+    """Median / p95 / p99 / mean / count over a list of floats, or None if empty.
+
+    p95 and p99 use R-7 interpolation (`percentile_r7`) and are suppressed to `None`
+    below `P95_MIN_SAMPLES` / `P99_MIN_SAMPLES` samples respectively — a percentile from
+    a handful of images is just the maximum wearing a statistical label.
+    """
     if not values:
         return None
-    ordered = sorted(values)
-    index = min(len(ordered) - 1, round(0.95 * (len(ordered) - 1)))
     return {
-        "median": statistics.median(ordered),
-        "p95": ordered[index],
-        "mean": statistics.fmean(ordered),
-        "count": len(ordered),
+        "median": statistics.median(values),
+        "p95": suppressed_percentile(values, 0.95, P95_MIN_SAMPLES),
+        "p99": suppressed_percentile(values, 0.99, P99_MIN_SAMPLES),
+        "mean": statistics.fmean(values),
+        "count": len(values),
     }
 
 
