@@ -110,9 +110,7 @@ Measured with the real CRAFT model:
 
 Enabling this by default would trade a parity image scoring word-F1 1.000 for the
 rotated ones. That trade is not the pre-pass's to make silently, and it would break the
-tier-2 byte-identical contract without the ADR that contract requires. Off by default,
-the false positive cannot affect a real pipeline run, and callers who know their input is
-rotated get a total win.
+tier-2 byte-identical contract without the ADR that contract requires.
 
 The false positive is pinned by
 `should_document_the_known_kannada_false_positive_when_enabled`, deliberately written as
@@ -120,11 +118,35 @@ a characterization test: if a future scorer stops flipping kannada, that test fa
 the correct response is to promote it to a `should_leave_*` case and revisit this
 default — not to treat it as a break.
 
+### Measured: the first implementation delivered no benefit, and why
+
+Placing the pre-pass inside `CraftDetector::detect` was wrong, and end-to-end measurement
+over the 27-image labeled corpus proved it. Enabling the flag moved **no** rotated or
+vertical image toward correctness (n=11, mean CER 0.909 → 0.935) and regressed four
+otherwise-fine upright images (`financial_table_1`, `layout_parser_paper_with_table`,
+`cord_receipt_01`, `invoice_image`; other-16 mean CER 0.360 → 0.448). Rotation
+*selection* was never the problem — the real-model selection test passes, and rotating a
+page externally still yields ground truth verbatim.
+
+The cause is structural. The detector rotated the image, ran CRAFT, and mapped regions
+back to the original frame — but `SceptreEngine::recognize` then grayscales and crops the
+**original** image. A 90° rotation maps an axis-aligned box to an axis-aligned box, so
+every line kept `axis_aligned: true` and hit `crop_axis_aligned`, which slices the
+bounding rectangle and discards corner order outright. Every crop therefore still held
+sideways glyphs, and `clockwise_from_top_left` made it strictly worse by normalizing
+corner order back into the original frame — erasing the only channel that could have
+carried orientation.
+
+The lesson generalizes past this feature: **an orientation decision cannot live in the
+detector, because recognition is what needs the rotated pixels.** It has to be hoisted so
+detection and recognition share one frame, with only the final output quads mapped back.
+That correction is tracked as the follow-up to this ADR; until it lands and is measured
+end to end, the flag's value is unproven and the `false` default is doing real work.
+
 ### Consequences
 
-- Good: the largest available quality win on rotated input, with no new model, no
-  registry entry, no new `candle` network, and no change to the backend matrix in
-  ADR 0035.
+- Good: no new model, no registry entry, no new `candle` network, and no change to the
+  backend matrix in ADR 0035 — the pre-pass reuses CRAFT through the existing seam.
 - Good: default output is bit-for-bit unchanged, so ADR 0021's parity gate and the
   tier-2 golden fixtures are unaffected.
 - Good: a capability EasyOCR does not have, which is a genuine differentiator rather
