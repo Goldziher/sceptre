@@ -92,6 +92,17 @@ def test_word_error_rate_is_none_for_empty_reference() -> None:
     assert b.word_error_rate("", "anything") is None
 
 
+def test_normalize_text_strips_markdown_table_line_breaks() -> None:
+    assert b.normalize_text("2025/26<br>Actual") == "2025/26 actual"
+    assert b.normalize_text("Prior Year<BR/>Actual") == "prior year actual"
+
+
+def test_normalize_text_does_not_treat_a_literal_placeholder_as_a_line_break() -> None:
+    # "<dataset-name>" is real printed text (a code placeholder), not a markdown table line
+    # break -- only the exact "<br>"/"<br/>" tag is stripped as a table artifact.
+    assert b.normalize_text("lp://<dataset-name>/<model-name>") == "lp://<dataset-name /<model-name"
+
+
 # -- percentile aggregation ---------------------------------------------------------------
 
 

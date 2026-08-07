@@ -175,6 +175,11 @@ def line_detection_scores(
 _MARKDOWN_CHARS = re.compile(r"[#|*`_>]")
 _LIST_BULLET = re.compile(r"^\s*(?:[-+•]|\d+[.)])\s+", re.MULTILINE)
 _WHITESPACE = re.compile(r"\s+")
+# A markdown table cell line break (e.g. "2025/26<br>Actual"), not visible text an OCR
+# engine could ever emit -- distinct from a literal angle-bracket placeholder that IS
+# printed in a source document (e.g. "lp://<dataset-name>/..."), which must survive
+# normalization untouched. ~keep
+_TABLE_LINE_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
 
 def normalize_text(text: str) -> str:
@@ -183,7 +188,8 @@ def normalize_text(text: str) -> str:
     Applied identically to reference and hypothesis before scoring so document markup
     and reading-order line breaks do not dominate the edit distance.
     """
-    without_bullets = _LIST_BULLET.sub(" ", text)
+    without_line_breaks = _TABLE_LINE_BREAK.sub(" ", text)
+    without_bullets = _LIST_BULLET.sub(" ", without_line_breaks)
     without_markup = _MARKDOWN_CHARS.sub(" ", without_bullets)
     collapsed = _WHITESPACE.sub(" ", without_markup)
     return collapsed.strip().lower()
