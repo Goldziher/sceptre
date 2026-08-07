@@ -223,7 +223,7 @@ def test_should_use_jsx_comments_for_mdx_and_html_comments_for_markdown(tmp_path
 
 def _repo(tmp_path: Path) -> Path:
     """A miniature repository with both marked documents and a comparison report."""
-    (tmp_path / "website/src/content/docs/reference").mkdir(parents=True)
+    (tmp_path / "docs-site/src/content/docs/reference").mkdir(parents=True)
     (tmp_path / "benchmark-results").mkdir()
     for region in p.marked_regions(tmp_path):
         region.path.write_text(f"intro\n\n{region.start()}\n\n{region.end()}\n\noutro\n", encoding="utf-8")
