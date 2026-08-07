@@ -1074,6 +1074,28 @@
       }
     ]
   },
+  "metadata": {
+    "easyocr": {
+      "easyocr_version": "1.7.2",
+      "generated_at": "2026-08-07T05:29:49Z",
+      "gpu": false,
+      "languages": [
+        "en"
+      ],
+      "python": "3.14.1",
+      "torch_version": "2.13.0"
+    },
+    "sceptre": {
+      "accelerator": "cpu",
+      "arch": "aarch64",
+      "backend": "ort",
+      "generated_at": "2026-08-07T05:31:06Z",
+      "git_commit": "f3b470fa96f85fa1c2a874fc4dfadc3b6ca3c6c7",
+      "onnxruntime_version": null,
+      "os": "macos",
+      "sceptre_version": "0.4.0"
+    }
+  },
   "placeholder": false,
   "sceptre": {
     "lines": [
@@ -1306,7 +1328,7 @@
             284.0
           ]
         ],
-        "text": "!"
+        "text": "8"
       },
       {
         "quad": [
@@ -1412,27 +1434,6 @@
           ]
         ],
         "text": "ti?laua"
-      },
-      {
-        "quad": [
-          [
-            1056.0,
-            216.0
-          ],
-          [
-            1120.0,
-            216.0
-          ],
-          [
-            1120.0,
-            244.0
-          ],
-          [
-            1056.0,
-            244.0
-          ]
-        ],
-        "text": "Ihiians-Royal "
       },
       {
         "quad": [
@@ -1689,27 +1690,6 @@
       {
         "quad": [
           [
-            814.0,
-            430.0
-          ],
-          [
-            910.0,
-            430.0
-          ],
-          [
-            910.0,
-            454.0
-          ],
-          [
-            814.0,
-            454.0
-          ]
-        ],
-        "text": "!Zumnvaq'"
-      },
-      {
-        "quad": [
-          [
             1038.0,
             420.0
           ],
@@ -1831,7 +1811,7 @@
             565.0
           ]
         ],
-        "text": "Z"
+        "text": "2"
       },
       {
         "quad": [
@@ -2063,27 +2043,6 @@
           ]
         ],
         "text": "'World Health' , 'organization'"
-      },
-      {
-        "quad": [
-          [
-            1076.93994140625,
-            108.30400085449219
-          ],
-          [
-            1109.908935546875,
-            113.40345001220703
-          ],
-          [
-            1107.06005859375,
-            127.69599914550781
-          ],
-          [
-            1074.091064453125,
-            124.59654998779297
-          ]
-        ],
-        "text": "[Palais {"
       },
       {
         "quad": [

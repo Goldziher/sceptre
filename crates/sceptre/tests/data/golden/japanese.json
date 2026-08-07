@@ -87,6 +87,29 @@
       }
     ]
   },
+  "metadata": {
+    "easyocr": {
+      "easyocr_version": "1.7.2",
+      "generated_at": "2026-08-07T05:29:54Z",
+      "gpu": false,
+      "languages": [
+        "ja",
+        "en"
+      ],
+      "python": "3.14.1",
+      "torch_version": "2.13.0"
+    },
+    "sceptre": {
+      "accelerator": "cpu",
+      "arch": "aarch64",
+      "backend": "ort",
+      "generated_at": "2026-08-07T05:31:08Z",
+      "git_commit": "f3b470fa96f85fa1c2a874fc4dfadc3b6ca3c6c7",
+      "onnxruntime_version": null,
+      "os": "macos",
+      "sceptre_version": "0.4.0"
+    }
+  },
   "placeholder": false,
   "sceptre": {
     "lines": [
