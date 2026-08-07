@@ -28,9 +28,20 @@ use sceptre::{Language, OcrConfig, ReadOptions, Reader};
 #[cfg(feature = "ort")]
 const WORD_F1_THRESHOLD: f32 = 0.8;
 
-/// Per-line box-IoU floor, matching the EasyOCR parity threshold.
+/// Recall floor for the greedy line-detection match: nearly every reference line must be
+/// covered. Not calibrated against a real `SCEPTRE_REQUIRE_MODELS=1` run in this change
+/// (no cached models / `ort` backend available where this was written) -- revisit against
+/// real golden output before treating this as load-bearing. ~keep
 #[cfg(feature = "ort")]
-const BOX_IOU_THRESHOLD: f32 = 0.5;
+const LINE_RECALL_THRESHOLD: f32 = 0.9;
+
+/// Precision floor for the greedy line-detection match. Set below the recall floor to
+/// tolerate the documented `parity_french_jpg` split (one reference line detected as two
+/// boxes, penalizing precision without indicating a real regression) -- see that test's
+/// doc comment. Likewise not calibrated against a real run; revisit together with
+/// [`LINE_RECALL_THRESHOLD`]. ~keep
+#[cfg(feature = "ort")]
+const LINE_PRECISION_THRESHOLD: f32 = 0.7;
 
 /// Whether `SCEPTRE_REQUIRE_MODELS` is set to a truthy value, forcing real-model
 /// tests to run (and fail loudly if models are missing) instead of skipping.
@@ -258,44 +269,32 @@ fn assert_easyocr_reference(
     );
 
     let sceptre_bboxes: Vec<sceptre::BBox> = result.lines.iter().map(|line| quad_bbox(&line.quad)).collect();
-    for (index, reference_line) in golden.easyocr.lines.iter().enumerate() {
-        let reference_bbox = reference_line.bbox();
-        let best_single = sceptre_bboxes
-            .iter()
-            .map(|bbox| helpers::box_iou(*bbox, reference_bbox))
-            .fold(0.0f32, f32::max);
-        // sceptre may split one reference line into several boxes when a knife-edge ~keep
-        // slope classification routes a rotated sub-box to the free list (imageproc's ~keep
-        // integer-rounded min-area-rect corners vs cv2's floats). Credit the combined ~keep
-        // bbox of the detections that overlap the reference; max(single, union) is >= ~keep
-        // best_single, so this can only pass split-but-covering lines, never regress. ~keep
-        let overlapping: Vec<sceptre::BBox> = sceptre_bboxes
-            .iter()
-            .copied()
-            .filter(|bbox| helpers::box_iou(*bbox, reference_bbox) > 0.0)
-            .collect();
-        let union_iou = union_bbox(&overlapping)
-            .map(|bbox| helpers::box_iou(bbox, reference_bbox))
-            .unwrap_or(0.0);
-        let best = best_single.max(union_iou);
+    let reference_bboxes: Vec<sceptre::BBox> = golden.easyocr.lines.iter().map(helpers::GoldenLine::bbox).collect();
+    // Greedy IoU matching replaces averaging the best IoU over reference lines only, which
+    // never penalized a hypothesis line with no reference match (recall-only). Reporting
+    // precision and recall separately means a low score reads as fabrication (low
+    // precision) vs omission (low recall) instead of collapsing both into one number. ~keep
+    let (line_f1, line_precision, line_recall) = helpers::line_detection_scores(&reference_bboxes, &sceptre_bboxes);
+    assert!(
+        line_recall >= LINE_RECALL_THRESHOLD,
+        "{image_file}: line recall {line_recall:.3} against the EasyOCR reference is below \
+         {LINE_RECALL_THRESHOLD} (precision {line_precision:.3}, f1 {line_f1:.3})"
+    );
+    assert!(
+        line_precision >= LINE_PRECISION_THRESHOLD,
+        "{image_file}: line precision {line_precision:.3} against the EasyOCR reference is below \
+         {LINE_PRECISION_THRESHOLD} (recall {line_recall:.3}, f1 {line_f1:.3})"
+    );
+
+    // Reading order is purely additive: logged for visibility, not gated, until a real
+    // corpus run establishes a floor. Catches column-order / vertical-script regressions
+    // that word-F1 and box-IoU are both blind to. ~keep
+    if let Some(reading_order) = helpers::reading_order_score(&actual_text, &reference_text) {
         assert!(
-            best >= BOX_IOU_THRESHOLD,
-            "{image_file}: reference line {index} (`{}`) has no detection covering it with box-IoU >= \
-             {BOX_IOU_THRESHOLD} (best single {best_single:.3}, union {union_iou:.3})",
-            reference_line.text
+            (0.0..=1.0).contains(&reading_order),
+            "{image_file}: reading-order score {reading_order:.3} must be in [0, 1]"
         );
     }
-}
-
-/// Axis-aligned bounding box enclosing every box in `boxes` (`None` if empty).
-#[cfg(feature = "ort")]
-fn union_bbox(boxes: &[sceptre::BBox]) -> Option<sceptre::BBox> {
-    boxes.iter().copied().reduce(|acc, bbox| sceptre::BBox {
-        x_min: acc.x_min.min(bbox.x_min),
-        y_min: acc.y_min.min(bbox.y_min),
-        x_max: acc.x_max.max(bbox.x_max),
-        y_max: acc.y_max.max(bbox.y_max),
-    })
 }
 
 /// Axis-aligned bounds of a recognized quad, for IoU against a reference box.

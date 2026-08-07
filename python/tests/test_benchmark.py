@@ -29,6 +29,53 @@ def test_char_f1_ignores_whitespace() -> None:
     assert b.char_f1("a b c", "abc") == 1.0
 
 
+def test_word_f1_bigram_expands_cjk_runs() -> None:
+    # 6 CJK chars -> 5 bigrams each side; hypothesis is a strict subset (precision 1, recall 5/6).
+    f1 = b.word_f1("ポイ橋て禁止", "ポイ橋て禁止』")
+    assert f1 == pytest.approx(5 / 5.5)
+
+
+def test_word_f1_keeps_latin_tokens_whole() -> None:
+    assert b.word_f1("Easy OCR rocks", "easy ocr rocks") == 1.0
+
+
+def test_word_f1_bigram_matches_char_f1_for_identical_cjk_lines() -> None:
+    assert b.word_f1("清潔できれいな", "清潔できれいな") == 1.0
+
+
+# -- line detection precision/recall/F1 --------------------------------------------------
+
+
+def test_line_detection_scores_of_identical_lines_is_perfect() -> None:
+    quad = [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]
+    f1, precision, recall = b.line_detection_scores([quad], [quad])
+    assert (f1, precision, recall) == (1.0, 1.0, 1.0)
+
+
+def test_line_detection_scores_penalizes_a_fabricated_hypothesis_line() -> None:
+    reference_quad = [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]
+    fabricated_quad = [[100.0, 100.0], [110.0, 100.0], [110.0, 104.0], [100.0, 104.0]]
+    f1, precision, recall = b.line_detection_scores([reference_quad], [reference_quad, fabricated_quad])
+    assert recall == 1.0
+    assert precision == pytest.approx(0.5)
+    assert f1 < 1.0
+
+
+def test_line_detection_scores_penalizes_an_omitted_reference_line() -> None:
+    reference_quad_a = [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]
+    reference_quad_b = [[20.0, 0.0], [30.0, 0.0], [30.0, 4.0], [20.0, 4.0]]
+    f1, precision, recall = b.line_detection_scores([reference_quad_a, reference_quad_b], [reference_quad_a])
+    assert precision == 1.0
+    assert recall == pytest.approx(0.5)
+    assert f1 < 1.0
+
+
+def test_line_detection_scores_of_empty_sides() -> None:
+    assert b.line_detection_scores([], []) == (1.0, 1.0, 1.0)
+    quad = [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]
+    assert b.line_detection_scores([quad], []) == (0.0, 0.0, 0.0)
+
+
 def test_box_iou_of_identical_boxes_is_one() -> None:
     assert b.box_iou((0.0, 0.0, 2.0, 2.0), (0.0, 0.0, 2.0, 2.0)) == 1.0
 

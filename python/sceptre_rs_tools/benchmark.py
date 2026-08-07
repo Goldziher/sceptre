@@ -47,6 +47,8 @@ from time import perf_counter
 
 from sceptre_rs_tools.corpus import CorpusEntry, build_corpus
 from sceptre_rs_tools.stats import P95_MIN_SAMPLES, P99_MIN_SAMPLES, integrate_cpu_core_seconds, suppressed_percentile
+from sceptre_rs_tools.text_metrics import f1_parts_from, greedy_match, reading_order_score
+from sceptre_rs_tools.text_metrics import tokenize as _cjk_bigram_tokenize
 
 # sceptre release binary produced by the ort-bundled CLI build.
 SCEPTRE_BIN = Path("target/release/sceptre")
@@ -83,8 +85,11 @@ def repo_root() -> Path:
 
 
 def _tokenize(text: str) -> list[str]:
-    """Whitespace-tokenize and case-fold, matching the Rust ``word_f1`` tokenizer."""
-    return [token.lower() for token in text.split()]
+    """NFKC-normalize, case-fold, and CJK-bigram-expand; matches the Rust ``word_f1`` tokenizer.
+
+    See ``sceptre_rs_tools.text_metrics.tokenize`` for the full contract.
+    """
+    return _cjk_bigram_tokenize(text)
 
 
 def _char_bag(text: str) -> list[str]:
@@ -141,18 +146,26 @@ def quad_bbox(quad: list[list[float]]) -> tuple[float, float, float, float]:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def mean_best_line_iou(reference_quads: list[list[list[float]]], hypothesis_quads: list[list[list[float]]]) -> float:
-    """Mean over reference lines of the best box-IoU against any hypothesis line."""
-    if not reference_quads:
-        return 1.0 if not hypothesis_quads else 0.0
-    if not hypothesis_quads:
-        return 0.0
+# IoU floor for a hypothesis/reference line pair to count as a match, matching the
+# Rust tier2_golden parity floor.
+LINE_IOU_THRESHOLD = 0.5
+
+
+def line_detection_scores(
+    reference_quads: list[list[list[float]]], hypothesis_quads: list[list[list[float]]]
+) -> tuple[float, float, float]:
+    """Greedy IoU-matched (f1, precision, recall) of hypothesis lines against reference lines.
+
+    Replaces `mean_best_line_iou`, which averaged over *reference* lines only and so never
+    penalized a hypothesis line with no reference match (recall-only -- no fabrication
+    penalty). Greedy matching (`greedy_match`) plus `f1_parts_from` reports precision and
+    recall separately, so a low score reads as fabrication (low precision) vs omission
+    (low recall) instead of collapsing both into one number.
+    """
+    reference_boxes = [quad_bbox(quad) for quad in reference_quads]
     hypothesis_boxes = [quad_bbox(quad) for quad in hypothesis_quads]
-    total = 0.0
-    for reference_quad in reference_quads:
-        reference_box = quad_bbox(reference_quad)
-        total += max(box_iou(reference_box, box) for box in hypothesis_boxes)
-    return total / len(reference_quads)
+    matches = greedy_match(hypothesis_boxes, reference_boxes, box_iou, LINE_IOU_THRESHOLD)
+    return f1_parts_from(float(len(matches)), len(hypothesis_boxes), len(reference_boxes))
 
 
 # --------------------------------------------------------------------------------------
@@ -845,7 +858,10 @@ class ImageRecord:
     sceptre_rss_mb: float | None = None
     agreement_char_f1: float | None = None
     agreement_word_f1: float | None = None
-    agreement_mean_iou: float | None = None
+    agreement_line_f1: float | None = None
+    agreement_line_precision: float | None = None
+    agreement_line_recall: float | None = None
+    agreement_reading_order: float | None = None
     easyocr_cer: float | None = None
     easyocr_wer: float | None = None
     easyocr_token_f1: float | None = None
@@ -860,10 +876,14 @@ class ImageRecord:
 
 
 def _score_agreement(record: ImageRecord, easyocr: ImageDetections, sceptre: ImageDetections) -> None:
-    """Populate cross-engine agreement metrics (char/word F1, mean best-line IoU)."""
+    """Populate cross-engine agreement metrics: char/word F1, line detection P/R/F1, reading order."""
     record.agreement_char_f1 = char_f1(sceptre.text, easyocr.text)
     record.agreement_word_f1 = word_f1(sceptre.text, easyocr.text)
-    record.agreement_mean_iou = mean_best_line_iou(easyocr.quads, sceptre.quads)
+    line_f1, line_precision, line_recall = line_detection_scores(easyocr.quads, sceptre.quads)
+    record.agreement_line_f1 = line_f1
+    record.agreement_line_precision = line_precision
+    record.agreement_line_recall = line_recall
+    record.agreement_reading_order = reading_order_score(sceptre.text, easyocr.text)
 
 
 def _score_accuracy(
@@ -976,7 +996,10 @@ AGGREGATE_FIELDS = (
     "sceptre_rss_mb",
     "agreement_char_f1",
     "agreement_word_f1",
-    "agreement_mean_iou",
+    "agreement_line_f1",
+    "agreement_line_precision",
+    "agreement_line_recall",
+    "agreement_reading_order",
     "easyocr_cer",
     "easyocr_wer",
     "easyocr_token_f1",
@@ -1027,7 +1050,10 @@ _UNIT_INTERVAL_FIELDS = frozenset(
     {
         "agreement_char_f1",
         "agreement_word_f1",
-        "agreement_mean_iou",
+        "agreement_line_f1",
+        "agreement_line_precision",
+        "agreement_line_recall",
+        "agreement_reading_order",
         "easyocr_token_f1",
         "sceptre_token_f1",
     }
@@ -1249,7 +1275,10 @@ PER_IMAGE_HEADER = [
     "sceptre amort s",
     "char-F1",
     "word-F1",
-    "mean IoU",
+    "line-F1",
+    "line-P",
+    "line-R",
+    "read-order",
     "Easy CER",
     "Scep CER",
     "Note",
@@ -1291,7 +1320,10 @@ def per_image_rows(records: list[ImageRecord], baseline: dict[str, dict[str, obj
                 _fmt(record.sceptre_amortized_seconds),
                 _fmt(record.agreement_char_f1),
                 _fmt(record.agreement_word_f1),
-                _fmt(record.agreement_mean_iou),
+                _fmt(record.agreement_line_f1),
+                _fmt(record.agreement_line_precision),
+                _fmt(record.agreement_line_recall),
+                _fmt(record.agreement_reading_order),
                 _fmt(record.easyocr_cer),
                 _fmt(record.sceptre_cer),
                 note,

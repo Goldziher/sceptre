@@ -7,16 +7,22 @@
 //! `tests/data/images/`, resolved directly by path — no runtime lookup helper needed.
 
 // Only a subset of these helpers is exercised by any single test binary or
-// feature configuration, so unused-symbol warnings here are expected. ~keep
-#![allow(dead_code)]
+// feature configuration, so unused-symbol warnings here are expected: e.g.
+// `reading_order_score` is only called from tier2_golden.rs's #[cfg(feature = "ort")]
+// real-model assertions, so a default (no-ort) build never touches this re-export. ~keep
+#![allow(dead_code, unused_imports)]
+
+mod text_metrics;
+
+pub use text_metrics::{f1_parts_from, greedy_match, reading_order_score, tokenize};
 
 use sceptre::BBox;
 
 /// Bag-of-words F1 between a hypothesis and a reference string.
 ///
-/// Whitespace-tokenized and case-folded; scores multiset precision/recall so
-/// repeated words count. Two empty strings score `1.0`; a single empty side
-/// scores `0.0`.
+/// NFKC-normalized, case-folded, and CJK-bigram-expanded (see [`tokenize`]); scores
+/// multiset precision/recall so repeated words count. Two empty strings score `1.0`;
+/// a single empty side scores `0.0`.
 pub fn word_f1(hypothesis: &str, reference: &str) -> f32 {
     let hypothesis_words = tokenize(hypothesis);
     let reference_words = tokenize(reference);
@@ -44,10 +50,6 @@ pub fn word_f1(hypothesis: &str, reference: &str) -> f32 {
     let precision = matched as f32 / hypothesis_words.len() as f32;
     let recall = matched as f32 / reference_words.len() as f32;
     2.0 * precision * recall / (precision + recall)
-}
-
-fn tokenize(text: &str) -> Vec<String> {
-    text.split_whitespace().map(str::to_lowercase).collect()
 }
 
 /// Bag-of-characters F1 between a hypothesis and a reference string.
@@ -107,6 +109,26 @@ pub fn box_iou(a: BBox, b: BBox) -> f32 {
     let union = area_a + area_b - intersection;
 
     if union <= 0.0 { 0.0 } else { intersection / union }
+}
+
+/// IoU floor for a hypothesis/reference line pair to count as a match.
+pub const LINE_IOU_THRESHOLD: f32 = 0.5;
+
+/// Greedy IoU-matched `(f1, precision, recall)` of hypothesis lines against reference lines.
+///
+/// Replaces averaging the best IoU over *reference* lines only, which never penalizes a
+/// fabricated hypothesis line with no reference match (recall-only -- no fabrication
+/// penalty). Greedy matching ([`greedy_match`]) plus [`f1_parts_from`] reports precision
+/// and recall separately, so a low score reads as fabrication (low precision) vs omission
+/// (low recall) instead of collapsing both into one number.
+pub fn line_detection_scores(reference: &[BBox], hypothesis: &[BBox]) -> (f32, f32, f32) {
+    let matches = greedy_match(
+        hypothesis,
+        reference,
+        |a: &BBox, b: &BBox| box_iou(*a, *b),
+        LINE_IOU_THRESHOLD,
+    );
+    f1_parts_from(matches.len() as f32, hypothesis.len(), reference.len())
 }
 
 /// A single golden line: recognized text plus its four-corner quad.
