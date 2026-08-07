@@ -16,7 +16,6 @@ use crate::inference::ModelBackend;
 use crate::types::{Image, QUAD_CORNERS as REGION_CORNERS};
 
 use super::group::Grouped;
-use super::orientation::{self, Rotation};
 
 /// Internal seam: turns a decoded image into candidate text regions.
 pub(crate) trait TextDetector: Send + Sync {
@@ -75,36 +74,15 @@ impl CraftDetector {
 }
 
 impl TextDetector for CraftDetector {
-    /// Run the full CRAFT pipeline: an optional orientation pre-pass, then
-    /// resize/normalize, forward pass to heat-maps, threshold into boxes, scale
-    /// back to image space, group into lines, and map regions back to the
-    /// caller's original coordinate frame (a no-op when the page was already
-    /// upright; see the `orientation` module for the pre-pass itself).
+    /// Run the full CRAFT pipeline: resize/normalize, forward pass to
+    /// heat-maps, threshold into boxes, scale back to image space, and group
+    /// into lines. `input.image` is detected exactly as given — any whole-page
+    /// orientation decision is the caller's job (see `engine::sceptre_engine`
+    /// and the `orientation` module), so both detection and recognition agree
+    /// on which frame they are running in.
     fn detect(&self, input: &DetectorInput) -> Result<DetectedRegions> {
-        let rotation = if self.config.detect_orientation {
-            orientation::select_rotation(
-                self.backend.as_ref(),
-                input.image,
-                self.config.orientation_probe_canvas_size,
-                self.config.low_text,
-                self.config.link_threshold,
-                self.config.orientation_margin,
-            )?
-        } else {
-            Rotation::Deg0
-        };
-
-        let rotated_image;
-        let image = match rotation {
-            Rotation::Deg0 => input.image,
-            other => {
-                rotated_image = orientation::rotate_image(input.image, other)?;
-                &rotated_image
-            }
-        };
-
         let prepared = super::preprocess::prepare_with_canvas(
-            image,
+            input.image,
             self.config.canvas_size,
             self.config.mag_ratio,
             self.fixed_canvas,
@@ -120,7 +98,6 @@ impl TextDetector for CraftDetector {
         super::postprocess::adjust_coordinates(&mut boxes, prepared.inv_ratio);
         let grouped = super::group::group_boxes(&boxes, &self.config);
         let regions = map_grouped_to_regions(grouped, self.config.min_size);
-        let regions = orientation::unrotate_regions(regions, rotation, input.image.width(), input.image.height());
         Ok(DetectedRegions { regions })
     }
 }
@@ -282,139 +259,6 @@ mod tests {
         let regions = detector.detect(&input).expect("detection succeeds");
 
         assert!(!regions.regions.is_empty(), "expected at least one region");
-    }
-
-    /// A backend that returns a different fixed heat-map per call, in order: the
-    /// four orientation probes (index 0..3, matching [`Rotation::ALL`]), then the
-    /// real detection pass. Exercises the orientation pre-pass wiring in
-    /// [`CraftDetector::detect`] without a real ONNX model.
-    struct RotationAwareBackend {
-        call: std::sync::atomic::AtomicUsize,
-        probe_outputs: [ArrayD<f32>; 4],
-        final_output: ArrayD<f32>,
-    }
-
-    impl ModelBackend for RotationAwareBackend {
-        fn name(&self) -> &str {
-            "rotation-aware"
-        }
-
-        fn run(&self, _input: Tensor) -> Result<Tensor> {
-            let index = self.call.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(if index < self.probe_outputs.len() {
-                self.probe_outputs[index].clone()
-            } else {
-                self.final_output.clone()
-            })
-        }
-    }
-
-    /// A channel-last `[1, H, W, 2]` heat-map that is all zero (empty), so its
-    /// [`heat_mass_score`](super::super::orientation) mass is zero.
-    // 4x4 spatial with a trailing channel axis of 2: only the channel axis has extent 2,
-    // so `find_channel_axis` (craft.rs) doesn't see it as ambiguous. ~keep
-    fn empty_probe_output() -> ArrayD<f32> {
-        ArrayD::<f32>::zeros(IxDyn(&[1, 4, 4, 2]))
-    }
-
-    /// A channel-last `[1, H, W, 2]` heat-map saturated above every threshold,
-    /// so its mass is unambiguously the largest among [`empty_probe_output`]s.
-    fn saturated_probe_output() -> ArrayD<f32> {
-        ArrayD::<f32>::from_elem(IxDyn(&[1, 4, 4, 2]), 0.9)
-    }
-
-    #[test]
-    fn should_run_the_orientation_pre_pass_and_unrotate_regions_back_into_bounds() {
-        // Non-square original, generously larger than the hand-crafted heat-map's own
-        // coordinate range, so CRAFT's dilation/margin expansion (which legitimately
-        // pushes a box's coordinates around near an edge) can't produce a false failure:
-        // a forgotten (or backwards) unrotate would still land the region far outside
-        // these bounds, not just off by a few pixels. ~keep
-        let (original_width, original_height) = (200u32, 100u32);
-        let image = solid_image(original_width, original_height);
-
-        // Only the Deg270 probe (index 3) has any activation, so it wins outright. ~keep
-        let probe_outputs = [
-            empty_probe_output(),
-            empty_probe_output(),
-            empty_probe_output(),
-            saturated_probe_output(),
-        ];
-        // Channel-last [1, 40, 20, 2]: a region block at rows 15..25, cols 5..15, well ~keep
-        // clear of every edge. ~keep
-        let (height, width) = (40usize, 20usize);
-        let mut final_output = ArrayD::<f32>::zeros(IxDyn(&[1, height, width, 2]));
-        for row in 15..25 {
-            for col in 5..15 {
-                final_output[[0, row, col, 0]] = 1.0;
-            }
-        }
-
-        let backend = Arc::new(RotationAwareBackend {
-            call: std::sync::atomic::AtomicUsize::new(0),
-            probe_outputs,
-            final_output,
-        });
-        let config = DetectionConfig {
-            min_size: 0,
-            detect_orientation: true,
-            orientation_probe_canvas_size: 8,
-            orientation_margin: 0.05,
-            ..DetectionConfig::default()
-        };
-        let detector = CraftDetector::new(backend.clone(), config, None);
-
-        let input = DetectorInput { image: &image };
-        let regions = detector.detect(&input).expect("detection succeeds");
-
-        assert_eq!(
-            backend.call.load(std::sync::atomic::Ordering::SeqCst),
-            5,
-            "four probes plus one real detection pass"
-        );
-        assert!(!regions.regions.is_empty(), "expected at least one region");
-        for region in &regions.regions {
-            for [x, y] in region.corners {
-                assert!(
-                    (0.0..=original_width as f32).contains(&x),
-                    "x {x} must fall within the original width {original_width}, not the rotated frame"
-                );
-                assert!(
-                    (0.0..=original_height as f32).contains(&y),
-                    "y {y} must fall within the original height {original_height}, not the rotated frame"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn should_skip_the_orientation_pre_pass_when_disabled() {
-        let backend = Arc::new(RotationAwareBackend {
-            call: std::sync::atomic::AtomicUsize::new(0),
-            probe_outputs: [
-                saturated_probe_output(),
-                saturated_probe_output(),
-                saturated_probe_output(),
-                saturated_probe_output(),
-            ],
-            final_output: empty_probe_output(),
-        });
-        let config = DetectionConfig {
-            min_size: 0,
-            detect_orientation: false,
-            ..DetectionConfig::default()
-        };
-        let detector = CraftDetector::new(backend.clone(), config, None);
-
-        let image = solid_image(16, 16);
-        let input = DetectorInput { image: &image };
-        let _ = detector.detect(&input).expect("detection succeeds");
-
-        assert_eq!(
-            backend.call.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "no probe calls when detect_orientation is disabled"
-        );
     }
 
     /// End-to-end detection over a real CRAFT ONNX model.

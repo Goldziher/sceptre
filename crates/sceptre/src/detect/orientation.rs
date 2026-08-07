@@ -2,14 +2,15 @@
 //!
 //! Probes 0/90/180/270° rotations of the page at a smaller canvas, scores each
 //! by CRAFT's own region + link heat-map mass, and — when a rotation clears a
-//! margin over the unrotated score — runs the real detection pass on that
-//! rotation instead. Detected regions are then mapped back into the caller's
-//! original coordinate frame: coordinates are inverse-rotated *and* each quad's
-//! corners are cyclically re-indexed, so "clockwise from top-left" still means
-//! top-left of the original image (not of the rotated probe frame). Getting the
-//! re-indexing wrong would still produce a valid quadrilateral but crop it
-//! sideways downstream. See ADR 0037 for the scoring function, its cost, and a
-//! known false-positive risk on small, dense-glyph scripts.
+//! margin over the unrotated score — picks that rotation instead of the page as
+//! given. The caller (the engine) rotates the whole page once and runs both
+//! detection and recognition entirely in that rotated frame, so this module's
+//! only remaining cross-frame job is mapping a final, already-recognized quad
+//! back into the caller's original frame for reporting: [`unrotate_corners`]
+//! inverse-rotates its coordinates *and* cyclically re-indexes its corners, so
+//! "clockwise from top-left" still means top-left of the original image (not of
+//! the rotated working frame). See ADR 0037 for the scoring function, its cost,
+//! and a known false-positive risk on small, dense-glyph scripts.
 
 use image::imageops::{rotate90, rotate180, rotate270};
 use image::{ImageBuffer, Rgb};
@@ -19,14 +20,13 @@ use crate::inference::ModelBackend;
 use crate::types::{Image, QUAD_CORNERS as REGION_CORNERS};
 
 use super::craft::{self, HeatMaps};
-use super::detector::DetectedRegion;
 use super::preprocess;
 
 /// One of the four axis-preserving whole-image rotations the pre-pass chooses
 /// between. All rotations are clockwise, matching
 /// `image::imageops::rotate90`/`rotate180`/`rotate270`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Rotation {
+pub(crate) enum Rotation {
     Deg0,
     Deg90,
     Deg180,
@@ -42,7 +42,7 @@ impl Rotation {
 
 /// Rotate `image` clockwise by `rotation`, returning a new owned image (`Deg0`
 /// clones the input unchanged). `Deg90`/`Deg270` swap width and height.
-pub(super) fn rotate_image(image: &Image, rotation: Rotation) -> Result<Image> {
+pub(crate) fn rotate_image(image: &Image, rotation: Rotation) -> Result<Image> {
     if rotation == Rotation::Deg0 {
         return Ok(image.clone());
     }
@@ -106,7 +106,7 @@ fn pick_rotation(scores: [f32; 4], margin: f32) -> Rotation {
 
 /// Probe all four rotations of `image` at `probe_canvas` and pick the
 /// best-scoring one per [`pick_rotation`].
-pub(super) fn select_rotation(
+pub(crate) fn select_rotation(
     backend: &dyn ModelBackend,
     image: &Image,
     probe_canvas: u32,
@@ -124,18 +124,23 @@ pub(super) fn select_rotation(
     Ok(pick_rotation(scores, margin))
 }
 
-/// Map one region's corners, detected in the rotated probe frame, back into the
-/// original coordinate frame. Two things happen together: the coordinates are
-/// inverse-rotated, and the corners are re-indexed so index 0 is top-left *of
-/// the original image* again — rotating the whole page clockwise cycles which
-/// physical corner counts as "top-left", so undoing the rotation must cycle it
-/// back. Getting only the coordinates right (and not the index order) would
-/// still yield a valid quadrilateral, but recognition would crop it sideways or
-/// upside-down. Re-indexing is done by re-deriving "clockwise from top-left"
-/// fresh in the original frame (see [`clockwise_from_top_left`]) rather than a
-/// fixed per-rotation offset, so it holds for any quad shape, not just the
-/// elongated axis-aligned/free boxes this pipeline actually produces.
-fn unrotate_corners(
+/// Map one *final* quad's corners — already detected and recognized in the
+/// rotated working frame the engine ran the pipeline in — back into the
+/// caller's original coordinate frame, purely for reporting. This runs once per
+/// output quad, after detection, cropping, and recognition are already done
+/// entirely in the working frame; it never feeds back into cropping. Two things
+/// happen together: the coordinates are inverse-rotated, and the corners are
+/// re-indexed so index 0 is top-left *of the original image* again — rotating
+/// the whole page clockwise cycles which physical corner counts as "top-left",
+/// so undoing the rotation must cycle it back. Getting only the coordinates
+/// right (and not the index order) would still yield a valid quadrilateral, but
+/// would violate [`Quad`](crate::types::Quad)'s "clockwise from top-left"
+/// contract for a caller reading the reported corners back in the original
+/// image. Re-indexing is done by re-deriving "clockwise from top-left" fresh in
+/// the original frame (see [`clockwise_from_top_left`]) rather than a fixed
+/// per-rotation offset, so it holds for any quad shape, not just the elongated
+/// axis-aligned/free boxes this pipeline actually produces.
+pub(crate) fn unrotate_corners(
     corners: [[f32; 2]; REGION_CORNERS],
     rotation: Rotation,
     original_width: u32,
@@ -160,10 +165,11 @@ fn unrotate_corners(
 }
 
 /// Cyclically rotate an already clockwise-wound quad so index 0 becomes its
-/// top-left-most corner (minimum `y`, ties broken by minimum `x`) — the
-/// convention [`DetectedRegion::corners`] documents. A rigid rotation, forward
-/// or inverse, never flips winding direction, so a cyclic rotation (not a full
-/// re-sort) is enough to restore the convention after coordinates move frames.
+/// top-left-most corner (minimum `y`, ties broken by minimum `x`) — the same
+/// convention [`Quad`](crate::types::Quad) documents publicly. A rigid rotation,
+/// forward or inverse, never flips winding direction, so a cyclic rotation (not
+/// a full re-sort) is enough to restore the convention after coordinates move
+/// frames.
 fn clockwise_from_top_left(corners: [[f32; 2]; REGION_CORNERS]) -> [[f32; 2]; REGION_CORNERS] {
     let start = corners
         .iter()
@@ -172,23 +178,6 @@ fn clockwise_from_top_left(corners: [[f32; 2]; REGION_CORNERS]) -> [[f32; 2]; RE
         .map(|(index, _)| index)
         .expect("exactly four corners");
     std::array::from_fn(|i| corners[(start + i) % REGION_CORNERS])
-}
-
-/// Map every region's corners back into the original coordinate frame (see
-/// [`unrotate_corners`]); a no-op for `Deg0`.
-pub(super) fn unrotate_regions(
-    regions: Vec<DetectedRegion>,
-    rotation: Rotation,
-    original_width: u32,
-    original_height: u32,
-) -> Vec<DetectedRegion> {
-    regions
-        .into_iter()
-        .map(|region| DetectedRegion {
-            corners: unrotate_corners(region.corners, rotation, original_width, original_height),
-            axis_aligned: region.axis_aligned,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -285,25 +274,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn should_preserve_axis_aligned_flag_when_unrotating_regions() {
-        let regions = vec![
-            DetectedRegion {
-                corners: ORIGINAL,
-                axis_aligned: true,
-            },
-            DetectedRegion {
-                corners: ORIGINAL,
-                axis_aligned: false,
-            },
-        ];
-
-        let unrotated = unrotate_regions(regions, Rotation::Deg90, ORIGINAL_WIDTH, ORIGINAL_HEIGHT);
-
-        assert!(unrotated[0].axis_aligned);
-        assert!(!unrotated[1].axis_aligned);
     }
 
     #[test]

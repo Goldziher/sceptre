@@ -7,11 +7,16 @@
 //!
 //! The detector seam and its stage DTOs live in [`detector`]; the individual
 //! stages are module-private helpers wired together by [`detector::CraftDetector`].
+//!
+//! [`orientation`] is `pub(crate)`: the whole-page rotation decision has moved up
+//! to the engine (see `engine::sceptre_engine`), so both detection and recognition
+//! run in the same rotated frame, and only the final reported quads are mapped
+//! back to the caller's original frame.
 
 mod craft;
 mod detector;
 mod group;
-mod orientation;
+pub(crate) mod orientation;
 mod postprocess;
 mod preprocess;
 
