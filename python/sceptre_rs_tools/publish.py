@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sceptre_rs_tools.benchmark import (
+    MIN_CLAIMABLE_RATIO,
     HeadlineTotals,
     _batch_totals,
     _mean_of,
@@ -42,6 +43,11 @@ from sceptre_rs_tools.benchmark import (
     _warm_speedup,
 )
 
+#: Bumped only when an artifact written by an older tool can no longer be rendered
+#: correctly — a renamed or removed field, or one whose meaning changed. Adding an
+#: *optional* field is not such a change: ``check_docs`` rejects any mismatch, so a bump
+#: for a purely additive field would fail the pull-request gate against a perfectly
+#: readable committed artifact and demand a full re-measurement to clear it.
 SCHEMA_VERSION = 1
 
 PUBLISHED_RELATIVE_PATH = Path("benchmarks/published/latest.json")
@@ -149,15 +155,19 @@ def published_payload(report: dict) -> dict:
     measured = None
     if isinstance(labeled_scored, int) and isinstance(breadth_scored, int):
         measured = labeled_scored + breadth_scored
+    run: dict[str, object] = {
+        "platform": metadata.get("platform"),
+        "group": metadata.get("group"),
+        "repeats": metadata.get("repeats"),
+        "threads": metadata.get("threads"),
+    }
+    runner_label = environment.get("runner_label")
+    if isinstance(runner_label, str) and runner_label:
+        run["runner_label"] = runner_label
     return {
         "schema_version": SCHEMA_VERSION,
         "environment": {key: value for key, value in environment.items() if key not in LOCAL_ONLY_ENVIRONMENT_FIELDS},
-        "run": {
-            "platform": metadata.get("platform"),
-            "group": metadata.get("group"),
-            "repeats": metadata.get("repeats"),
-            "threads": metadata.get("threads"),
-        },
+        "run": run,
         "corpus": {
             "total": metadata.get("corpus_total"),
             "measured": measured,
@@ -207,11 +217,18 @@ def _rss_cell(megabytes: object, *, unit: str) -> str:
     return f"{megabytes:,.1f}"
 
 
-def _ratio(value: object, digits: int = 1) -> str:
-    """Render a speed or memory ratio, or an em dash if unmeasured."""
-    if not isinstance(value, (int, float)):
-        return "—"
-    return f"{value:.{digits}f}×"
+def _ratio_parenthetical(value: object, suffix: str = "") -> str:
+    """The ``(~2.3×)`` aside for a ratio, or nothing when there is no claim to make.
+
+    Unmeasured, and too close to parity to distinguish from run-to-run noise
+    (:data:`~sceptre_rs_tools.benchmark.MIN_CLAIMABLE_RATIO`), both render as an absent
+    aside: a cell that says nothing beats one asserting a non-difference. One decimal
+    place, never zero — rounding 1.08 to ``1×`` reads as "1× lower", which claims an
+    advantage and states equality in the same breath.
+    """
+    if not isinstance(value, (int, float)) or value < MIN_CLAIMABLE_RATIO:
+        return ""
+    return f" (~{value:.1f}×{suffix})"
 
 
 def render_headline_table(payload: dict, *, unit: str) -> str:
@@ -224,15 +241,9 @@ def render_headline_table(payload: dict, *, unit: str) -> str:
     warm_speedup = headline.get("warm_speedup")
     cold_speedup = headline.get("cold_speedup")
     rss_ratio = headline.get("rss_ratio")
-    warm_throughput = f"**{_number(warm['throughput_img_s'], 2)}**"
-    if isinstance(warm_speedup, (int, float)):
-        warm_throughput += f" (~{_ratio(warm_speedup)})"
-    cold_throughput = _number(cold["throughput_img_s"], 2)
-    if isinstance(cold_speedup, (int, float)):
-        cold_throughput += f" (~{_ratio(cold_speedup)})"
-    warm_rss = f"**{_rss_cell(warm['peak_rss_mb'], unit=unit)}**"
-    if isinstance(rss_ratio, (int, float)):
-        warm_rss += f" (~{_ratio(rss_ratio, 0)} lower)"
+    warm_throughput = f"**{_number(warm['throughput_img_s'], 2)}**" + _ratio_parenthetical(warm_speedup)
+    cold_throughput = _number(cold["throughput_img_s"], 2) + _ratio_parenthetical(cold_speedup)
+    warm_rss = f"**{_rss_cell(warm['peak_rss_mb'], unit=unit)}**" + _ratio_parenthetical(rss_ratio, " lower")
     rows = [
         [
             "EasyOCR (warm/batch)",
@@ -267,6 +278,22 @@ def render_headline_table(payload: dict, *, unit: str) -> str:
     return "\n".join(lines)
 
 
+def _host_description(payload: dict) -> str:
+    """The host these numbers were measured on, named by runner label where there is one.
+
+    ``Linux/x86_64`` cannot distinguish one CI runner class from another, and different
+    classes do not produce comparable figures, so the label leads when the run recorded one
+    (ADR 0035). A local run records none and reads exactly as it did before.
+    """
+    environment = payload["environment"]
+    host = f"{environment.get('os') or 'unknown'}/{environment.get('arch') or 'unknown'}"
+    run = payload.get("run")
+    runner_label = run.get("runner_label") if isinstance(run, dict) else None
+    if isinstance(runner_label, str) and runner_label:
+        return f"{runner_label} ({host})"
+    return host
+
+
 def _provenance_line(payload: dict) -> str:
     """One line naming the runtimes and corpus behind the table above it."""
     environment = payload["environment"]
@@ -281,7 +308,7 @@ def _provenance_line(payload: dict) -> str:
     onnxruntime = onnxruntime or "unknown"
     easyocr = reference.get("easyocr_version") or "unknown"
     torch = reference.get("torch_version") or "unknown"
-    host = f"{environment.get('os') or 'unknown'}/{environment.get('arch') or 'unknown'}"
+    host = _host_description(payload)
     measured = corpus.get("measured")
     total = corpus.get("total")
     line = (
@@ -290,7 +317,8 @@ def _provenance_line(payload: dict) -> str:
         f"{measured if measured is not None else '—'} of {total if total is not None else '—'} "
         "corpus entries. Regenerate with `task python:benchmark` then `task python:publish`."
     )
-    return "\n".join(textwrap.wrap(line, width=PROSE_LINE_WIDTH, break_long_words=False))
+    # break_on_hyphens would split a runner label such as `runner-medium` across lines. ~keep
+    return "\n".join(textwrap.wrap(line, width=PROSE_LINE_WIDTH, break_long_words=False, break_on_hyphens=False))
 
 
 def inject(text: str, region: MarkedRegion, body: str) -> str:

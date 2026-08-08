@@ -148,6 +148,47 @@ def test_should_name_both_runtimes_in_the_provenance_line() -> None:
     assert "40 of 43" in table
 
 
+def _unwrapped(table: str) -> str:
+    """The table with its whitespace flattened, so the wrapped provenance line reads as one."""
+    return " ".join(table.split())
+
+
+def _report_from_a_labeled_runner(label: str) -> dict:
+    """A report as the CI job produces it, with BENCHMARK_RUNNER_LABEL recorded."""
+    report = _report()
+    report["metadata"]["environment"]["runner_label"] = label
+    report["metadata"]["environment"]["os"] = "Linux"
+    report["metadata"]["environment"]["arch"] = "x86_64"
+    return report
+
+
+def test_should_carry_the_runner_label_into_the_published_run_block() -> None:
+    payload = p.published_payload(_report_from_a_labeled_runner("runner-medium"))
+    assert payload["run"]["runner_label"] == "runner-medium"
+
+
+def test_should_name_the_runner_in_the_provenance_line() -> None:
+    table = p.render_headline_table(p.published_payload(_report_from_a_labeled_runner("runner-medium")), unit="GB")
+    assert "on runner-medium (Linux/x86_64)," in _unwrapped(table)
+
+
+def test_should_omit_the_runner_label_for_a_local_run() -> None:
+    payload = p.published_payload(_report())
+    assert "runner_label" not in payload["run"]
+
+
+def test_should_leave_a_local_provenance_line_untouched_by_the_runner_label_support() -> None:
+    table = p.render_headline_table(p.published_payload(_report()), unit="GB")
+    assert "on Darwin/arm64," in _unwrapped(table)
+    assert "runner" not in table
+
+
+def test_should_ignore_a_blank_runner_label_rather_than_rendering_an_empty_host() -> None:
+    table = p.render_headline_table(p.published_payload(_report_from_a_labeled_runner("")), unit="GB")
+    assert "on Linux/x86_64," in _unwrapped(table)
+    assert "()" not in table
+
+
 def test_should_unwrap_the_nested_onnxruntime_version_rather_than_the_object() -> None:
     table = p.render_headline_table(p.published_payload(_report()), unit="GB")
     assert "ONNX Runtime 1.28.0" in table
@@ -164,6 +205,48 @@ def test_should_keep_the_model_pins_and_runtime_fields_it_does_publish() -> None
     payload = p.published_payload(_report())
     assert payload["environment"]["onnxruntime"]["version"] == "1.28.0"
     assert payload["environment"]["reference"]["easyocr_version"] == "1.7.2"
+
+
+def _report_with_peak_rss(sceptre_mb: float, easyocr_mb: float) -> dict:
+    """A report whose only interesting property is the peak-RSS ratio it implies."""
+    return _report(
+        sceptre_batch={"english": {"total_seconds": 50.0, "image_count": 20, "rss_mb": sceptre_mb}},
+        easyocr_batch={"en": {"total_seconds": 200.0, "image_count": 20, "rss_mb": easyocr_mb}},
+    )
+
+
+def test_should_state_a_large_rss_ratio_to_one_decimal_place() -> None:
+    table = p.render_headline_table(p.published_payload(_report_with_peak_rss(1000.0, 22000.0)), unit="GB")
+    assert "(~22.0× lower)" in table
+
+
+def test_should_state_a_two_fold_rss_ratio_rather_than_rounding_it_away() -> None:
+    table = p.render_headline_table(p.published_payload(_report_with_peak_rss(6624.0, 13248.0)), unit="GB")
+    assert "(~2.0× lower)" in table
+
+
+def test_should_drop_the_rss_aside_when_the_ratio_is_too_close_to_parity() -> None:
+    """1.08x is a real measured value; rounded to no decimals it published as "1× lower"."""
+    table = p.render_headline_table(p.published_payload(_report_with_peak_rss(6624.0, 7153.92)), unit="GB")
+    assert "lower" not in table
+    assert "1×" not in table
+    assert "**6.5 GB**" in table
+
+
+def test_should_drop_the_throughput_aside_when_the_speedup_is_too_close_to_parity() -> None:
+    payload = p.published_payload(
+        _report(easyocr_batch={"en": {"total_seconds": 54.0, "image_count": 20, "rss_mb": 22626.0}})
+    )
+    assert payload["headline"]["warm_speedup"] == pytest.approx(1.08)
+    table = p.render_headline_table(payload, unit="GB")
+    warm_row = next(line for line in table.splitlines() if line.startswith("| **sceptre** (warm/batch)"))
+    throughput_cell = warm_row.split("|")[2]
+    assert "(~" not in throughput_cell
+
+
+def test_should_keep_stating_a_speedup_above_the_claim_threshold() -> None:
+    table = p.render_headline_table(p.published_payload(_report()), unit="GB")
+    assert "(~4.0×)" in table
 
 
 def test_should_render_an_em_dash_for_an_unmeasured_figure() -> None:

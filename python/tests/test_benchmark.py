@@ -298,9 +298,37 @@ def test_check_thresholds_passes_a_healthy_run() -> None:
 
 
 def test_check_thresholds_flags_rss_regression() -> None:
-    # rss ratio 1.1x is below the 5x floor.
-    breaches = b.check_thresholds(_report(0.9, 0.8, 10000.0, 11000.0))
+    # Equal peak RSS: a ratio of exactly 1.0 is below any floor worth setting, so this
+    # exercises the gate itself rather than sitting near a measured value. ~keep
+    breaches = b.check_thresholds(_report(0.9, 0.8, 11000.0, 11000.0))
     assert any("peak-RSS ratio" in breach for breach in breaches)
+
+
+def test_speedup_summary_states_a_large_ratio_to_one_decimal() -> None:
+    # warm speedup = (5/2)/(1/2) = 5x; rss ratio = 11000/500 = 22x.
+    summary = b.speedup_summary(_report(0.9, 0.8, 500.0, 11000.0))
+    assert "~5.0x faster warm" in summary
+    assert "~22.0x less peak RSS" in summary
+
+
+def test_speedup_summary_keeps_a_ratio_just_above_the_claim_threshold() -> None:
+    summary = b.speedup_summary(_report(0.9, 0.8, 10000.0, 20000.0))
+    assert "~2.0x less peak RSS" in summary
+
+
+def test_speedup_summary_drops_a_ratio_too_close_to_parity_to_claim() -> None:
+    # 10800/10000 = 1.08x, which must not be published as "~1x less peak RSS". ~keep
+    summary = b.speedup_summary(_report(0.9, 0.8, 10000.0, 10800.0))
+    assert "peak RSS" not in summary
+    assert "1x" not in summary
+
+
+def test_ratio_claim_renders_and_suppresses_around_the_threshold() -> None:
+    assert b.ratio_claim(22.0) == "22.0x"
+    assert b.ratio_claim(2.04) == "2.0x"
+    assert b.ratio_claim(b.MIN_CLAIMABLE_RATIO) == f"{b.MIN_CLAIMABLE_RATIO:.1f}x"
+    assert b.ratio_claim(1.08) is None
+    assert b.ratio_claim(None) is None
 
 
 # -- per-image guardrail contract (replaces the corpus-mean quality check) --------------
@@ -451,6 +479,28 @@ def test_environment_metadata_prefers_the_env_subcommand(tmp_path: Path) -> None
     assert environment["onnxruntime"] == {"version": "1.22.0"}
     assert environment["models"][0]["sha256"] == "159f5f"
     assert environment["probe"] == "sceptre env --format json"
+
+
+def test_environment_metadata_records_the_ci_runner_label_when_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(b.RUNNER_LABEL_ENV, "runner-medium")
+    environment = b.environment_metadata(tmp_path / "sceptre", tmp_path, ["english"], {})
+    assert environment["runner_label"] == "runner-medium"
+
+
+def test_environment_metadata_omits_the_runner_label_off_ci(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(b.RUNNER_LABEL_ENV, raising=False)
+    environment = b.environment_metadata(tmp_path / "sceptre", tmp_path, ["english"], {})
+    assert "runner_label" not in environment
+
+
+def test_environment_metadata_treats_a_blank_runner_label_as_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(b.RUNNER_LABEL_ENV, "   ")
+    environment = b.environment_metadata(tmp_path / "sceptre", tmp_path, ["english"], {})
+    assert "runner_label" not in environment
 
 
 def test_environment_metadata_leaves_unprobeable_fields_none(tmp_path: Path) -> None:

@@ -57,6 +57,15 @@ OUTPUT_DIR = Path("benchmark-results")
 OVERHEAD_RUNS = 3  # process launches used to estimate sceptre's fixed startup cost
 DEFAULT_REPEATS = 3  # per-measurement repeats: median wall time, max peak RSS
 
+# Smallest ratio worth stating as a comparative claim. Below it, "~1.1x lower" reads as an
+# advantage while being indistinguishable from parity and from run-to-run noise, so the claim
+# is dropped rather than rounded. Presentation only — it feeds no regression gate. ~keep
+MIN_CLAIMABLE_RATIO = 1.15
+
+# Environment variable naming the CI runner that produced a run (see .github/workflows/
+# benchmarks.yaml). Unset locally, in which case no runner label is recorded at all. ~keep
+RUNNER_LABEL_ENV = "BENCHMARK_RUNNER_LABEL"
+
 # Regression-gate floors, asserted with --assert (see ADR 0021). Set below the measured
 # like-for-like margins so normal variation does not trip the gate; tighten after a stable
 # full-corpus baseline. Peak RSS is a whole-process max, so a single large image sets it.
@@ -828,7 +837,21 @@ def environment_metadata(
             "corpus": _corpus_provenance(root, entries or []),
         }
     )
+    runner_label = runner_label_from_environment()
+    if runner_label is not None:
+        environment["runner_label"] = runner_label
     return environment
+
+
+def runner_label_from_environment() -> str | None:
+    """The CI runner label for this run, or None when it was not run on a labeled runner.
+
+    ``os`` and ``arch`` cannot tell ``runner-medium`` from ``ubuntu-latest``, and the two
+    do not produce comparable numbers, so a published figure needs the label to be
+    attributable to a host (ADR 0035). Absent locally, where there is no runner to name.
+    """
+    label = os.environ.get(RUNNER_LABEL_ENV, "").strip()
+    return label or None
 
 
 # --------------------------------------------------------------------------------------
@@ -1206,18 +1229,31 @@ def _throughput(count: int, total_seconds: float) -> float | None:
     return count / total_seconds
 
 
+def ratio_claim(value: float | None) -> str | None:
+    """Render a ratio as ``2.3x``, or None when it is too close to parity to be a claim.
+
+    One decimal place, never zero: rounding 1.08 to ``1x`` produces "1x lower", which
+    asserts an advantage and states equality at the same time.
+    """
+    if value is None or value < MIN_CLAIMABLE_RATIO:
+        return None
+    return f"{value:.1f}x"
+
+
 def speedup_summary(report: RunReport) -> str:
     """One-line warm speedup and peak-RSS ratio versus EasyOCR."""
     totals = headline_totals(report)
     parts: list[str] = []
-    warm_speedup = _warm_speedup(totals)
+    warm_speedup = ratio_claim(_warm_speedup(totals))
     if warm_speedup is not None:
-        parts.append(f"~{warm_speedup:.1f}x faster warm")
+        parts.append(f"~{warm_speedup} faster warm")
     if totals.sceptre_cold_total > 0 and totals.easyocr_warm_total > 0:
-        parts.append(f"~{totals.easyocr_warm_total / totals.sceptre_cold_total:.1f}x faster cold")
-    rss_ratio = _rss_ratio(totals)
+        cold_speedup = ratio_claim(totals.easyocr_warm_total / totals.sceptre_cold_total)
+        if cold_speedup is not None:
+            parts.append(f"~{cold_speedup} faster cold")
+    rss_ratio = ratio_claim(_rss_ratio(totals))
     if rss_ratio is not None:
-        parts.append(f"~{rss_ratio:.0f}x less peak RSS")
+        parts.append(f"~{rss_ratio} less peak RSS")
     if not parts:
         return ""
     return "sceptre is " + ", ".join(parts) + " vs EasyOCR (per-image normalized, both warm/batch subprocesses)."
