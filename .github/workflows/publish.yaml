@@ -152,6 +152,37 @@ jobs:
           esac
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@v6
+
+      # `finalize-release` only flips the draft flag — it has no notes input — so whatever
+      # body is set here is what ships. Without this the release published as a bare
+      # "Release vX.Y.Z" with none of the changelog. `generate-notes` is not a substitute:
+      # it lists raw commit subjects, and CHANGELOG.md is the curated, ADR-linked record. ~keep
+      - name: Extract the changelog section for this tag
+        id: notes
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          body="$(awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/       { exit }
+            found                   { print }
+          ' CHANGELOG.md)"
+          # A release whose notes silently degrade to a bare tag is the defect this step
+          # exists to prevent, so an unmatched heading fails loudly instead. ~keep
+          if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section to publish as release notes."
+            exit 1
+          fi
+          {
+            echo "body<<SCEPTRE_NOTES_EOF"
+            printf '%s\n' "$body"
+            echo "**Full changelog:** https://github.com/${{ github.repository }}/blob/${TAG}/CHANGELOG.md"
+            echo "SCEPTRE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       # Create as a DRAFT: the build matrix uploads binaries to it, but it stays hidden
       # until finalize promotes it — and finalize only runs once checksums (which requires
       # all platform binaries) succeeds. A failed platform build leaves a hidden draft, not
@@ -162,7 +193,7 @@ jobs:
         with:
           tag: ${{ needs.meta.outputs.tag }}
           title: ${{ needs.meta.outputs.tag }}
-          notes: "Release ${{ needs.meta.outputs.tag }}"
+          notes: ${{ steps.notes.outputs.body }}
           draft: "true"
           prerelease: ${{ steps.prerelease.outputs.prerelease }}
 
