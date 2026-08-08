@@ -76,10 +76,13 @@ registered accelerator, the ONNX Runtime provisioning strategy and version, and 
 the environment any parity or benchmark artifact has to record alongside its numbers.
 
 <Aside type="caution">
-  **`candle` is not the fast option, on a GPU or otherwise.** Measured on Apple Silicon, its CPU
-  path is roughly 10x slower than `ort` on the CPU, and Metal closes only part of that — still
-  ~3-4x slower than `ort`. Choose it for what it removes (no ONNX Runtime, no provider-specific
-  runtime build), not for speed. It is excluded from the published benchmark gate for that reason.
+  **`candle` is not the fast option, on a GPU or otherwise.** Measured on a local Apple Silicon
+  machine at the default canvas, its CPU path is roughly 10x slower than `ort` on the CPU, and
+  Metal closes only part of that — still ~3-4x slower than `ort`. The size of that gap is
+  host-dependent: on a core-constrained CI runner it narrows to roughly 2x and 1x, because `ort`
+  has fewer cores to exploit. The ordering holds regardless. Choose `candle` for what it removes
+  (no ONNX Runtime, no provider-specific runtime build), not for speed. It is excluded from the
+  published benchmark gate for that reason.
 </Aside>
 
 <Aside type="caution">

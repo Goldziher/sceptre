@@ -130,7 +130,15 @@ Measured on this repository's images (release build, Apple Silicon, best of runs
 
 **`candle` on a GPU is still slower than `ort` on the CPU**, by roughly 3–4× here, and its
 CPU path is ~10× slower — consistent with ADR 0009's measurement, which stands. Metal buys
-~2.5× over candle's own CPU path and nothing relative to `ort`. `candle` is a compatibility
+~2.5× over candle's own CPU path and nothing relative to `ort`.
+
+> **Status update (2026-08-08).** These ratios are host-dependent and the numbers above are
+> specific to the stated setup. The ADR 0035 backend matrix, measuring `english.png` on a
+> `macos-latest` runner at `canvas_size` 1024, reports `candle`/cpu at ~2× and `candle`/metal at
+> ~1× against `ort`/cpu. The absolute times there are roughly an order of magnitude slower for
+> every leg, so the compression is the constrained host neutralizing `ort`'s multithreading
+> advantage rather than a change in either backend. The ordering — `ort` fastest on CPU, `candle`
+> a compatibility option — is unchanged, and this ADR's decision stands as written. `candle` is a compatibility
 and deployment option, never a performance one, and it is excluded from
 [ADR 0030](0030-published-benchmark-artifact-and-drift-gate.md)'s benchmark drift gate.
 

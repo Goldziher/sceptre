@@ -144,10 +144,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- `candle` is **not** the fast backend. On Apple Silicon its CPU path measures ~10× slower than
-  `ort` on the CPU, and Metal is still ~3–4× slower than `ort` on the CPU. Choose it for what it
-  removes — the ONNX Runtime dependency and its provisioning matrix — not for speed. It is excluded
-  from the published benchmark drift gate.
+- `candle` is **not** the fast backend. Measured on a local Apple Silicon machine at the default
+  canvas ([ADR 0031](https://github.com/xberg-io/sceptre/blob/main/adrs/0031-hand-written-candle-networks.md)), its CPU path is ~10× slower than
+  `ort` on the CPU and Metal ~3–4× slower. **That ratio is host-dependent, not a property of the
+  backend**: the same comparison on a `macos-latest` runner, where the whole machine is roughly an
+  order of magnitude slower, narrows to ~2× and ~1× because `ort`'s multithreading has fewer cores
+  to exploit while `candle`'s kernels do not. Either way the ordering holds — choose `candle` for
+  what it removes, the ONNX Runtime dependency and its provisioning matrix, not for speed. It is
+  excluded from the published benchmark drift gate.
 - `candle` is not a pure-Rust backend: `candle-core` 0.10+ pulls `tokenizers`, which compiles
   oniguruma from C. `tract` remains the pure-Rust path. The 0.11 pin is deliberate — 0.9.x
   miscomputes one of CRAFT's convolutions.
