@@ -104,3 +104,14 @@ The labeled-quality floor above ("labeled token-F1 within 0.05 of EasyOCR") is l
 longer a corpus mean in `check_thresholds`: the harness enforces per-image guardrail contracts
 (`derive_guardrails`, checked with `--guardrails`), since a corpus mean cannot see a regression
 isolated to one image or one language.
+
+The **warm-speedup floor is superseded by ADR 0043**, which applies ADR 0042's reasoning to it.
+"Warm speedup ≥ 2.0×" is a cross-engine ratio, so a faster EasyOCR release lowers it without
+sceptre changing; and it is host-dependent, because sceptre's advantage on this corpus is almost
+entirely parallel scaling (a 1.064× core-seconds work ratio against 5.92 versus 3.23 effective
+cores), which an 8-core runner caps. It read 2.28× on the macOS/arm64 0.4.0 baseline and 1.95× on
+the `runner-medium` 0.6.0 one — two points that differ in version as well as host, so ADR 0043
+rests on the within-run core-seconds decomposition rather than on that pair.
+`check_thresholds` now gates an absolute, host-scoped floor on sceptre's own warm/batch
+throughput against the committed published baseline; `warm_speedup` remains a reported figure.
+With that, none of the three floors named above survives in its original form.

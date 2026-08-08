@@ -318,18 +318,21 @@ def _host(os_name: str = "Linux", arch: str = "x86_64", runner_label: str | None
     return b._host_identity(os_name, arch, runner_label)
 
 
-def _published(peak_rss_mb: float | None = 500.0) -> dict:
+def _published(peak_rss_mb: float | None = 500.0, throughput_img_s: float | None = 2.0) -> dict:
     """A committed published artifact, shaped like `publish.published_payload`'s output."""
+    warm: dict = {"peak_rss_mb": peak_rss_mb}
+    if throughput_img_s is not None:
+        warm["throughput_img_s"] = throughput_img_s
     return {
         "schema_version": 2,
         "environment": {"os": _HOST["os"], "arch": _HOST["arch"]},
         "run": {"runner_label": _HOST["runner_label"]},
-        "headline": {"sceptre_warm": {"peak_rss_mb": peak_rss_mb}},
+        "headline": {"sceptre_warm": warm},
     }
 
 
 def test_check_thresholds_passes_a_run_within_the_published_rss_ceiling() -> None:
-    # warm speedup = (5/2)/(1/2) = 5x; sceptre peak RSS 500 MB against a 500 MB baseline.
+    # sceptre peak RSS 500 MB and 2 img/s (2 images / 1.0 s) against a 500 MB, 2 img/s baseline. ~keep
     report = _report(0.9, 0.8, 500.0, 11000.0, environment=_HOST)
     assert b.check_thresholds(report, _published(500.0)) == []
 
@@ -384,11 +387,69 @@ def test_check_rss_ceiling_flags_a_run_that_measured_no_sceptre_rss() -> None:
     assert any("no sceptre peak RSS" in breach for breach in breaches)
 
 
-def test_check_thresholds_still_flags_a_warm_speedup_regression() -> None:
+def test_check_warm_throughput_floor_passes_a_run_at_the_published_throughput() -> None:
+    assert b.check_warm_throughput_floor(2.0, _host(), _published()) == []
+
+
+def test_check_warm_throughput_floor_tolerates_degradation_inside_the_factor() -> None:
+    """Wall-clock wobbles a few percent run to run; the floor leaves room for that, and no more."""
+    assert b.check_warm_throughput_floor(2.0 * b.SCEPTRE_THROUGHPUT_FLOOR_FACTOR, _host(), _published()) == []
+    assert b.check_warm_throughput_floor(2.0 * b.SCEPTRE_THROUGHPUT_FLOOR_FACTOR - 0.01, _host(), _published()) != []
+
+
+def test_check_warm_throughput_floor_flags_a_sceptre_speed_regression() -> None:
+    breaches = b.check_warm_throughput_floor(1.5, _host(), _published())
+    assert breaches == [
+        "sceptre warm throughput 1.500 img/s < floor 1.800 img/s "
+        "(published baseline 2.000 img/s x 0.90, runner-medium (Linux/x86_64))"
+    ]
+
+
+def test_check_warm_throughput_floor_flags_an_absent_baseline_rather_than_passing() -> None:
+    breaches = b.check_warm_throughput_floor(2.0, _host(), None)
+    assert any("unmeasurable" in breach and str(b.PUBLISHED_RELATIVE_PATH) in breach for breach in breaches)
+
+
+def test_check_warm_throughput_floor_flags_a_baseline_that_carries_no_throughput() -> None:
+    breaches = b.check_warm_throughput_floor(2.0, _host(), _published(throughput_img_s=None))
+    assert any("headline.sceptre_warm.throughput_img_s" in breach for breach in breaches)
+
+
+def test_check_warm_throughput_floor_refuses_a_baseline_measured_on_another_host() -> None:
+    """sceptre's warm advantage is parallel scaling, so it is a property of the host (ADR 0043)."""
+    breaches = b.check_warm_throughput_floor(2.0, _host("Darwin", "arm64", None), _published())
+    assert any("scoped to a host" in breach and "runner-medium" in breach for breach in breaches)
+
+
+def test_check_warm_throughput_floor_distinguishes_two_runner_classes_of_the_same_os() -> None:
+    assert b.check_warm_throughput_floor(2.0, _host(runner_label="runner-large"), _published()) != []
+
+
+def test_check_warm_throughput_floor_flags_a_run_that_measured_no_throughput() -> None:
+    breaches = b.check_warm_throughput_floor(None, _host(), _published())
+    assert any("no sceptre warm throughput" in breach for breach in breaches)
+
+
+def test_check_thresholds_flags_a_sceptre_warm_throughput_regression() -> None:
     report = _report(0.9, 0.8, 500.0, 11000.0, environment=_HOST)
-    report.metadata["easyocr_batch"]["en"]["total_seconds"] = 1.0
+    report.metadata["sceptre_batch"]["english"]["total_seconds"] = 2.0
     breaches = b.check_thresholds(report, _published(500.0))
-    assert any("warm speedup" in breach for breach in breaches)
+    assert breaches == [
+        "sceptre warm throughput 1.000 img/s < floor 1.800 img/s "
+        "(published baseline 2.000 img/s x 0.90, runner-medium (Linux/x86_64))"
+    ]
+
+
+@pytest.mark.parametrize("easyocr_seconds", [1.0, 5.0, 50.0])
+def test_check_thresholds_ignores_an_easyocr_speed_change(easyocr_seconds: float) -> None:
+    """The speed gate is self-referential: only sceptre's own throughput can trip it (ADR 0043).
+
+    A faster EasyOCR release lowers the cross-engine warm speedup through any floor without
+    sceptre changing at all, and the old gate reported that as a sceptre regression.
+    """
+    report = _report(0.9, 0.8, 500.0, 11000.0, environment=_HOST)
+    report.metadata["easyocr_batch"]["en"]["total_seconds"] = easyocr_seconds
+    assert b.check_thresholds(report, _published(500.0)) == []
 
 
 def test_load_published_baseline_returns_none_when_absent(tmp_path: Path) -> None:

@@ -72,11 +72,6 @@ MIN_CLAIMABLE_RATIO = 1.15
 # benchmarks.yaml). Unset locally, in which case no runner label is recorded at all. ~keep
 RUNNER_LABEL_ENV = "BENCHMARK_RUNNER_LABEL"
 
-# Regression-gate floors, asserted with --assert (see ADR 0021, amended by ADR 0042). Set below
-# the measured like-for-like margins so normal variation does not trip the gate; tighten after a
-# stable full-corpus baseline.
-WARM_SPEEDUP_FLOOR = 2.0  # sceptre warm/batch must be at least this much faster than EasyOCR
-
 # sceptre's own peak RSS must stay within this multiple of the figure the committed baseline
 # published for the same host (ADR 0042). The mirror image of GUARDRAIL_THRESHOLD_FACTOR's 10%
 # slack, for the same reason: peak RSS is a max over repeats of a whole-process max, driven by
@@ -84,6 +79,12 @@ WARM_SPEEDUP_FLOOR = 2.0  # sceptre warm/batch must be at least this much faster
 # fixed host and corpus. 10% clears that without hiding the growth an extra resident model or a
 # leaked buffer would cause. ~keep
 SCEPTRE_RSS_CEILING_FACTOR = 1.1
+
+# sceptre's own warm/batch throughput must stay at least this fraction of the figure the committed
+# baseline published for the same host (ADR 0043). Symmetric with SCEPTRE_RSS_CEILING_FACTOR's 1.10:
+# 10% of run-to-run degradation is tolerated, which covers a shared runner's timing noise without
+# hiding the slowdown an extra pass over the image or a lost parallel stage would cause. ~keep
+SCEPTRE_THROUGHPUT_FLOOR_FACTOR = 0.9
 
 # Per-image quality floors (see GuardrailContract below) replace a single corpus-mean quality
 # check: a corpus mean cannot catch a regression isolated to one language or one image. ~keep
@@ -1580,6 +1581,16 @@ def published_sceptre_peak_rss(published: dict[str, object]) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+def published_sceptre_warm_throughput(published: dict[str, object]) -> float | None:
+    """The sceptre warm/batch throughput a published baseline carries, or None if it has none."""
+    headline = published.get("headline")
+    headline = headline if isinstance(headline, dict) else {}
+    warm = headline.get("sceptre_warm")
+    warm = warm if isinstance(warm, dict) else {}
+    value = warm.get("throughput_img_s")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
 def load_published_baseline(path: Path) -> dict[str, object] | None:
     """Read the committed published artifact, or None when it is absent or unreadable.
 
@@ -1640,18 +1651,59 @@ def check_rss_ceiling(
     return []
 
 
+def check_warm_throughput_floor(
+    measured_img_s: float | None,
+    host: tuple[str, str, str],
+    published: dict[str, object] | None,
+    factor: float = SCEPTRE_THROUGHPUT_FLOOR_FACTOR,
+) -> list[str]:
+    """Breaches of the absolute, host-scoped floor on sceptre's own warm throughput (ADR 0043).
+
+    Self-referential by construction: it compares this run's sceptre warm/batch throughput
+    against the figure the committed baseline published for the same host, so a faster EasyOCR
+    release cannot report itself as a sceptre regression, and the parallel scaling a host's core
+    count allows is baked into both sides rather than into a cross-engine ratio. Every way of not
+    being able to evaluate it -- no baseline, no field in the baseline, a baseline from another
+    host, or a run with no timings -- is a breach.
+    """
+    floor_of = f"sceptre warm-throughput floor ({_host_label(host)})"
+    if published is None:
+        return [
+            f"{floor_of} unmeasurable: no committed baseline at {PUBLISHED_RELATIVE_PATH}; "
+            "measure this host and run `task python:publish`"
+        ]
+    baseline_host = published_host(published)
+    if baseline_host != host:
+        return [
+            f"{floor_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} was measured on "
+            f"{_host_label(baseline_host)}; absolute floors are scoped to a host (ADR 0043), so "
+            "re-publish from a run on this one"
+        ]
+    baseline_img_s = published_sceptre_warm_throughput(published)
+    if baseline_img_s is None or baseline_img_s <= 0:
+        return [
+            f"{floor_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} carries no "
+            "headline.sceptre_warm.throughput_img_s to gate against"
+        ]
+    if measured_img_s is None:
+        return [f"{floor_of} unmeasurable: this run measured no sceptre warm throughput (missing batch timings)"]
+    floor_img_s = baseline_img_s * factor
+    if measured_img_s < floor_img_s:
+        return [
+            f"sceptre warm throughput {measured_img_s:,.3f} img/s < floor {floor_img_s:,.3f} img/s "
+            f"(published baseline {baseline_img_s:,.3f} img/s x {factor:.2f}, {_host_label(host)})"
+        ]
+    return []
+
+
 def check_thresholds(report: RunReport, published: dict[str, object] | None = None) -> list[str]:
     """Return a list of threshold breaches (empty when the run clears the gate)."""
     totals = headline_totals(report)
-    breaches: list[str] = []
+    host = run_host(report)
+    measured_throughput = _throughput(totals.sceptre_warm_imgs, totals.sceptre_warm_total)
 
-    warm_speedup = _warm_speedup(totals)
-    if warm_speedup is None:
-        breaches.append("warm speedup unmeasurable (missing batch timings)")
-    elif warm_speedup < WARM_SPEEDUP_FLOOR:
-        breaches.append(f"warm speedup {warm_speedup:.2f}x < floor {WARM_SPEEDUP_FLOOR:.2f}x")
-
-    breaches.extend(check_rss_ceiling(totals.sceptre_peak_rss, run_host(report), published))
+    breaches = check_warm_throughput_floor(measured_throughput, host, published)
+    breaches.extend(check_rss_ceiling(totals.sceptre_peak_rss, host, published))
 
     return breaches
 
