@@ -168,7 +168,7 @@ by `task python:publish`; CI fails if the two drift apart. Do not edit it by han
 | Engine | Throughput (img/s) | Peak RSS | Mean CER | Mean token-F1 |
 |---|---|---|---|---|
 | EasyOCR (warm/batch) | 0.47 | 20.2 GB | 0.554 | 0.348 |
-| **sceptre** (warm/batch) | **1.07** (~2.3×) | **6.5 GB** (~3.1× lower) | 0.570 | 0.361 |
+| **sceptre** (warm/batch) | **1.07** (~2.3×) | **6.5 GB** (~3.8× lower, per-image median) | 0.570 | 0.361 |
 | sceptre (cold CLI run) | 1.12 (~2.4×) | 6.5 GB | 0.570 | 0.361 |
 
 Measured with sceptre 0.4.0 (ort/cpu, ONNX Runtime 1.28.0) against EasyOCR 1.7.2 (torch 2.13.0) on

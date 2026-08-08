@@ -34,13 +34,14 @@ from pathlib import Path
 
 from sceptre_rs_tools.benchmark import (
     MIN_CLAIMABLE_RATIO,
+    PUBLISHED_RELATIVE_PATH,
     HeadlineTotals,
     _batch_totals,
     _mean_of,
     _peak_rss,
-    _rss_ratio,
     _throughput,
     _warm_speedup,
+    paired_rss_ratio,
 )
 
 #: Bumped only when an artifact written by an older tool can no longer be rendered
@@ -48,9 +49,13 @@ from sceptre_rs_tools.benchmark import (
 #: *optional* field is not such a change: ``check_docs`` rejects any mismatch, so a bump
 #: for a purely additive field would fail the pull-request gate against a perfectly
 #: readable committed artifact and demand a full re-measurement to clear it.
-SCHEMA_VERSION = 1
-
-PUBLISHED_RELATIVE_PATH = Path("benchmarks/published/latest.json")
+#:
+#: 2 — ``headline.rss_ratio`` went from the quotient of the two engines' corpus-wide peak-RSS
+#: maxima to the median of the per-image ratios (ADR 0042). A version-1 artifact still has
+#: every field this renderer reads, but its ``rss_ratio`` would be printed under the new
+#: statistic's label and would be a different, unpaired number: rendered, not rendered
+#: correctly. The bump forces the re-publish that makes the artifact and its label agree.
+SCHEMA_VERSION = 2
 
 MEGABYTES_PER_GIGABYTE = 1024.0
 
@@ -150,6 +155,7 @@ def published_payload(report: dict) -> dict:
         )
     labeled = report.get("aggregates", {}).get("labeled", {})
     totals = totals_from_report(report)
+    scored = [record for record in report.get("records", []) if record.get("skipped") is None]
     labeled_scored = metadata.get("labeled_scored")
     breadth_scored = metadata.get("breadth_scored")
     measured = None
@@ -196,7 +202,9 @@ def published_payload(report: dict) -> dict:
             },
             "warm_speedup": _warm_speedup(totals),
             "cold_speedup": _cold_speedup(totals),
-            "rss_ratio": _rss_ratio(totals),
+            "rss_ratio": paired_rss_ratio(
+                (record.get("sceptre_rss_mb"), record.get("easyocr_rss_mb")) for record in scored
+            ),
         },
     }
 
@@ -243,7 +251,12 @@ def render_headline_table(payload: dict, *, unit: str) -> str:
     rss_ratio = headline.get("rss_ratio")
     warm_throughput = f"**{_number(warm['throughput_img_s'], 2)}**" + _ratio_parenthetical(warm_speedup)
     cold_throughput = _number(cold["throughput_img_s"], 2) + _ratio_parenthetical(cold_speedup)
-    warm_rss = f"**{_rss_cell(warm['peak_rss_mb'], unit=unit)}**" + _ratio_parenthetical(rss_ratio, " lower")
+    # The aside names its own statistic because it is not the quotient of the two cells beside
+    # it: those are each engine's corpus-wide maximum, picked independently, while the ratio is
+    # the median over images measured in the same batch (ADR 0042). ~keep
+    warm_rss = f"**{_rss_cell(warm['peak_rss_mb'], unit=unit)}**" + _ratio_parenthetical(
+        rss_ratio, " lower, per-image median"
+    )
     rows = [
         [
             "EasyOCR (warm/batch)",

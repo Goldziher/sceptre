@@ -109,7 +109,7 @@
       "peak_rss_mb": 20691.320832,
       "throughput_img_s": 0.4689641664035982
     },
-    "rss_ratio": 3.1092383597258335,
+    "rss_ratio": 3.7699598801284613,
     "sceptre_cold": {
       "mean_cer": 0.5696392408977318,
       "mean_token_f1": 0.36074361204527156,
@@ -130,5 +130,5 @@
     "repeats": 3,
     "threads": "engine default (all cores)"
   },
-  "schema_version": 1
+  "schema_version": 2
 }

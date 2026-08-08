@@ -55,8 +55,8 @@ tasks:
   benchmark:check:
     desc: >-
       Head-to-head benchmark with the regression gate (forwards extra CLI args): fails if
-      sceptre's warm speedup, peak-RSS ratio, or labeled token-F1 falls below the floors
-      in benchmark.py
+      sceptre's warm speedup falls below the floor in benchmark.py, or its own peak RSS
+      exceeds the published baseline for this host (ADR 0042)
     cmds:
       - uv run python -m sceptre_rs_tools.benchmark --assert {{.CLI_ARGS}}
 

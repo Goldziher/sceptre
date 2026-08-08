@@ -42,6 +42,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
@@ -54,6 +55,11 @@ from sceptre_rs_tools.text_metrics import tokenize as _cjk_bigram_tokenize
 # sceptre release binary produced by the ort-bundled CLI build.
 SCEPTRE_BIN = Path("target/release/sceptre")
 OUTPUT_DIR = Path("benchmark-results")
+
+# The committed, published benchmark artifact, relative to the repository root. It is written
+# by `sceptre_rs_tools.publish` and read back here as the baseline for the absolute peak-RSS
+# ceiling, so the constant lives with the harness both sides share. ~keep
+PUBLISHED_RELATIVE_PATH = Path("benchmarks/published/latest.json")
 OVERHEAD_RUNS = 3  # process launches used to estimate sceptre's fixed startup cost
 DEFAULT_REPEATS = 3  # per-measurement repeats: median wall time, max peak RSS
 
@@ -66,11 +72,18 @@ MIN_CLAIMABLE_RATIO = 1.15
 # benchmarks.yaml). Unset locally, in which case no runner label is recorded at all. ~keep
 RUNNER_LABEL_ENV = "BENCHMARK_RUNNER_LABEL"
 
-# Regression-gate floors, asserted with --assert (see ADR 0021). Set below the measured
-# like-for-like margins so normal variation does not trip the gate; tighten after a stable
-# full-corpus baseline. Peak RSS is a whole-process max, so a single large image sets it.
+# Regression-gate floors, asserted with --assert (see ADR 0021, amended by ADR 0042). Set below
+# the measured like-for-like margins so normal variation does not trip the gate; tighten after a
+# stable full-corpus baseline.
 WARM_SPEEDUP_FLOOR = 2.0  # sceptre warm/batch must be at least this much faster than EasyOCR
-RSS_RATIO_FLOOR = 3.0  # EasyOCR peak RSS must be at least this many times sceptre's
+
+# sceptre's own peak RSS must stay within this multiple of the figure the committed baseline
+# published for the same host (ADR 0042). The mirror image of GUARDRAIL_THRESHOLD_FACTOR's 10%
+# slack, for the same reason: peak RSS is a max over repeats of a whole-process max, driven by
+# allocator and canvas rounding rather than by timing noise, so it repeats to a few percent on a
+# fixed host and corpus. 10% clears that without hiding the growth an extra resident model or a
+# leaked buffer would cause. ~keep
+SCEPTRE_RSS_CEILING_FACTOR = 1.1
 
 # Per-image quality floors (see GuardrailContract below) replace a single corpus-mean quality
 # check: a corpus mean cannot catch a regression isolated to one language or one image. ~keep
@@ -1251,9 +1264,9 @@ def speedup_summary(report: RunReport) -> str:
         cold_speedup = ratio_claim(totals.easyocr_warm_total / totals.sceptre_cold_total)
         if cold_speedup is not None:
             parts.append(f"~{cold_speedup} faster cold")
-    rss_ratio = ratio_claim(_rss_ratio(totals))
+    rss_ratio = ratio_claim(paired_rss_ratio(_record_rss_pairs(report.records)))
     if rss_ratio is not None:
-        parts.append(f"~{rss_ratio} less peak RSS")
+        parts.append(f"~{rss_ratio} less peak RSS (per-image median)")
     if not parts:
         return ""
     return "sceptre is " + ", ".join(parts) + " vs EasyOCR (per-image normalized, both warm/batch subprocesses)."
@@ -1270,11 +1283,31 @@ def _warm_speedup(totals: HeadlineTotals) -> float | None:
     )
 
 
-def _rss_ratio(totals: HeadlineTotals) -> float | None:
-    """Ratio of EasyOCR peak RSS to sceptre peak RSS, or None."""
-    if totals.sceptre_peak_rss and totals.easyocr_peak_rss and totals.sceptre_peak_rss > 0:
-        return totals.easyocr_peak_rss / totals.sceptre_peak_rss
-    return None
+def paired_rss_ratio(pairs: Iterable[tuple[float | None, float | None]]) -> float | None:
+    """Median of the per-image EasyOCR-over-sceptre peak-RSS ratios, or None if unmeasurable.
+
+    Each pair is one image's ``(sceptre, easyocr)`` peak RSS, taken from the batch that image
+    was actually measured in, so numerator and denominator describe the same page. The corpus
+    maxima do not: each engine's max is picked independently, so their quotient can compare two
+    measurements that never co-occurred, and it collapses toward 1 as the largest page grows
+    because peak RSS is dominated by the CRAFT canvas both engines allocate (ADR 0042).
+
+    The median is the central tendency because these are ratios: it is robust to a single
+    outlying batch, and it is invariant under inversion, so the sceptre-over-EasyOCR median is
+    exactly the reciprocal of this one. Taking it over images rather than over batches weights
+    each language group by how much of the corpus it covers.
+    """
+    ratios = [
+        easyocr / sceptre
+        for sceptre, easyocr in pairs
+        if isinstance(sceptre, (int, float)) and isinstance(easyocr, (int, float)) and sceptre > 0
+    ]
+    return statistics.median(ratios) if ratios else None
+
+
+def _record_rss_pairs(records: list[ImageRecord]) -> list[tuple[float | None, float | None]]:
+    """Each scored image's ``(sceptre, easyocr)`` peak RSS, as :func:`paired_rss_ratio` wants."""
+    return [(record.sceptre_rss_mb, record.easyocr_rss_mb) for record in records if record.skipped is None]
 
 
 # --------------------------------------------------------------------------------------
@@ -1497,7 +1530,117 @@ def render_markdown(report: RunReport, baseline: dict[str, object] | None = None
 # --------------------------------------------------------------------------------------
 
 
-def check_thresholds(report: RunReport) -> list[str]:
+def _host_identity(os_name: object, arch: object, runner_label: object) -> tuple[str, str, str]:
+    """Normalize a host into the identity a floor is scoped to (ADR 0042).
+
+    A runner class is part of the identity, not a detail of it: ``Linux/x86_64`` names two
+    machines whose absolute memory and timing figures are not comparable (ADR 0035).
+    """
+    os_text, arch_text, label_text = (
+        value.strip() if isinstance(value, str) and value.strip() else UNKNOWN
+        for value in (os_name, arch, runner_label)
+    )
+    return (os_text, arch_text, label_text)
+
+
+def _host_label(identity: tuple[str, str, str]) -> str:
+    """A host identity as one readable phrase, naming the runner class when there is one."""
+    os_name, arch, runner_label = identity
+    host = f"{os_name}/{arch}"
+    return host if runner_label == UNKNOWN else f"{runner_label} ({host})"
+
+
+def run_host(report: RunReport) -> tuple[str, str, str]:
+    """The host a measured report was produced on."""
+    environment = report.metadata.get("environment")
+    environment = environment if isinstance(environment, dict) else {}
+    return _host_identity(environment.get("os"), environment.get("arch"), environment.get("runner_label"))
+
+
+def published_host(published: dict[str, object]) -> tuple[str, str, str]:
+    """The host a published baseline artifact was measured on.
+
+    ``publish`` splits the provenance: the operating system and architecture stay in
+    ``environment``, while the runner label is lifted into the ``run`` block.
+    """
+    environment = published.get("environment")
+    environment = environment if isinstance(environment, dict) else {}
+    run = published.get("run")
+    run = run if isinstance(run, dict) else {}
+    return _host_identity(environment.get("os"), environment.get("arch"), run.get("runner_label"))
+
+
+def published_sceptre_peak_rss(published: dict[str, object]) -> float | None:
+    """The sceptre warm/batch peak RSS a published baseline carries, or None if it has none."""
+    headline = published.get("headline")
+    headline = headline if isinstance(headline, dict) else {}
+    warm = headline.get("sceptre_warm")
+    warm = warm if isinstance(warm, dict) else {}
+    value = warm.get("peak_rss_mb")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def load_published_baseline(path: Path) -> dict[str, object] | None:
+    """Read the committed published artifact, or None when it is absent or unreadable.
+
+    Returning None is not a pass: :func:`check_rss_ceiling` turns it into a breach naming the
+    path, because a gate that cannot be evaluated must not read as a gate that was cleared.
+    """
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as error:
+        print(f"sceptre_rs_tools.benchmark: could not read published baseline {path}: {error}", file=sys.stderr)
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def check_rss_ceiling(
+    measured_mb: float | None,
+    host: tuple[str, str, str],
+    published: dict[str, object] | None,
+    factor: float = SCEPTRE_RSS_CEILING_FACTOR,
+) -> list[str]:
+    """Breaches of the absolute, host-scoped ceiling on sceptre's own peak RSS (ADR 0042).
+
+    Self-referential by construction: it compares this run's sceptre peak RSS against the
+    figure the committed baseline published for the same host, so an EasyOCR release that
+    changes torch's footprint cannot move it, and the corpus's own image sizes cancel out on
+    both sides. Every way of not being able to evaluate it -- no baseline, no field in the
+    baseline, a baseline from another host, or a run with no RSS measured -- is a breach.
+    """
+    ceiling_of = f"sceptre peak-RSS ceiling ({_host_label(host)})"
+    if published is None:
+        return [
+            f"{ceiling_of} unmeasurable: no committed baseline at {PUBLISHED_RELATIVE_PATH}; "
+            "measure this host and run `task python:publish`"
+        ]
+    baseline_host = published_host(published)
+    if baseline_host != host:
+        return [
+            f"{ceiling_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} was measured on "
+            f"{_host_label(baseline_host)}; absolute floors are scoped to a host (ADR 0042), so "
+            "re-publish from a run on this one"
+        ]
+    baseline_mb = published_sceptre_peak_rss(published)
+    if baseline_mb is None or baseline_mb <= 0:
+        return [
+            f"{ceiling_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} carries no "
+            "headline.sceptre_warm.peak_rss_mb to gate against"
+        ]
+    if measured_mb is None:
+        return [f"{ceiling_of} unmeasurable: this run measured no sceptre peak RSS (is /usr/bin/time present?)"]
+    ceiling_mb = baseline_mb * factor
+    if measured_mb > ceiling_mb:
+        return [
+            f"sceptre peak RSS {measured_mb:,.1f} MB > ceiling {ceiling_mb:,.1f} MB "
+            f"(published baseline {baseline_mb:,.1f} MB x {factor:.2f}, {_host_label(host)})"
+        ]
+    return []
+
+
+def check_thresholds(report: RunReport, published: dict[str, object] | None = None) -> list[str]:
     """Return a list of threshold breaches (empty when the run clears the gate)."""
     totals = headline_totals(report)
     breaches: list[str] = []
@@ -1508,11 +1651,7 @@ def check_thresholds(report: RunReport) -> list[str]:
     elif warm_speedup < WARM_SPEEDUP_FLOOR:
         breaches.append(f"warm speedup {warm_speedup:.2f}x < floor {WARM_SPEEDUP_FLOOR:.2f}x")
 
-    rss_ratio = _rss_ratio(totals)
-    if rss_ratio is None:
-        breaches.append("peak-RSS ratio unmeasurable (missing RSS)")
-    elif rss_ratio < RSS_RATIO_FLOOR:
-        breaches.append(f"peak-RSS ratio {rss_ratio:.2f}x < floor {RSS_RATIO_FLOOR:.2f}x")
+    breaches.extend(check_rss_ceiling(totals.sceptre_peak_rss, run_host(report), published))
 
     return breaches
 
@@ -1730,7 +1869,7 @@ def run_benchmark(
         print(f"Wrote {write_guardrails_path} ({len(guardrails['contracts'])} contracts)", file=sys.stderr)
 
     if assert_gate:
-        breaches = check_thresholds(report)
+        breaches = check_thresholds(report, load_published_baseline(root / PUBLISHED_RELATIVE_PATH))
         if guardrails_path is not None:
             guardrails = load_guardrails(guardrails_path)
             if guardrails is None:

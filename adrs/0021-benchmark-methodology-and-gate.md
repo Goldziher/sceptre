@@ -83,3 +83,24 @@ and mixed undecodable-format failures into the results as opaque skips.
   the same corpus, HF-cache model resolution, and `SCEPTRE_REQUIRE_MODELS` opt-in philosophy.
 - ADR 0015 (criterion bench seam) — orthogonal: those microbenchmark internal hot paths, this
   measures end-to-end OCR against EasyOCR.
+
+## Status update (2026-08-08)
+
+The **peak-RSS floor is amended by ADR 0042**. The "peak-RSS ratio ≥ 3×" floor above divides
+EasyOCR's peak RSS by sceptre's, where each side is a maximum taken independently over language
+groups: the two are not a paired measurement, the quotient compounds two extreme-value
+statistics, and peak RSS is dominated by the CRAFT canvas *both* engines allocate, so the ratio
+tends toward 1 as pages grow. Measured on `runner-medium` it is 1.08×, against the 3.11×
+recorded on macOS/arm64 — so the claim above that "the floors sit below the measured
+like-for-like margins" no longer holds, and the gate could be tripped by adding one large image
+to the corpus or by an EasyOCR release, neither of which is a sceptre regression. The gate is
+now an absolute ceiling on sceptre's *own* peak RSS relative to the committed published
+baseline for the same host; the cross-engine ratio remains a reported figure, computed as the
+median of the per-image ratios. Everything else here — the like-for-like measurement
+methodology, the threading choice, the quality signal, the capability-gap handling, and the
+warm-speedup floor — is unchanged.
+
+The labeled-quality floor above ("labeled token-F1 within 0.05 of EasyOCR") is likewise no
+longer a corpus mean in `check_thresholds`: the harness enforces per-image guardrail contracts
+(`derive_guardrails`, checked with `--guardrails`), since a corpus mean cannot see a regression
+isolated to one image or one language.

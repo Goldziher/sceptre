@@ -240,10 +240,26 @@ def test_batch_summary_includes_cpu_core_seconds() -> None:
 # -- report rendering + regression gate -------------------------------------------------
 
 
-def _report(sceptre_f1: float, easyocr_f1: float, sceptre_rss: float, easyocr_rss: float) -> b.RunReport:
-    """Build a minimal report with one labeled record and both batch summaries."""
+def _report(
+    sceptre_f1: float,
+    easyocr_f1: float,
+    sceptre_rss: float,
+    easyocr_rss: float,
+    environment: dict | None = None,
+) -> b.RunReport:
+    """Build a minimal report with one labeled record and both batch summaries.
+
+    The record carries the same peak-RSS figures as the batch summary, which is how the harness
+    fills it in: each image is stamped with the peak RSS of the batch it was measured in.
+    """
     record = b.ImageRecord(
-        stem="doc", group="labeled", languages=["english"], sceptre_token_f1=sceptre_f1, sceptre_cold_seconds=0.4
+        stem="doc",
+        group="labeled",
+        languages=["english"],
+        sceptre_token_f1=sceptre_f1,
+        sceptre_cold_seconds=0.4,
+        sceptre_rss_mb=sceptre_rss,
+        easyocr_rss_mb=easyocr_rss,
     )
     capability = b.ImageRecord(
         stem="probe.avif",
@@ -263,6 +279,8 @@ def _report(sceptre_f1: float, easyocr_f1: float, sceptre_rss: float, easyocr_rs
         "sceptre_batch": {"english": {"total_seconds": 1.0, "image_count": 2, "rss_mb": sceptre_rss}},
         "easyocr_batch": {"en": {"total_seconds": 5.0, "image_count": 2, "rss_mb": easyocr_rss}},
     }
+    if environment is not None:
+        metadata["environment"] = environment
     return b.RunReport(
         metadata=metadata,
         records=[record, capability],
@@ -292,23 +310,165 @@ def test_render_markdown_shows_baseline_delta() -> None:
     assert "ΔtokF1 +0.200" in markdown
 
 
-def test_check_thresholds_passes_a_healthy_run() -> None:
-    # warm speedup = (5/2)/(1/2) = 5x; rss ratio = 22x.
-    assert b.check_thresholds(_report(0.9, 0.8, 500.0, 11000.0)) == []
+_HOST = {"os": "Linux", "arch": "x86_64", "runner_label": "runner-medium"}
 
 
-def test_check_thresholds_flags_rss_regression() -> None:
-    # Equal peak RSS: a ratio of exactly 1.0 is below any floor worth setting, so this
-    # exercises the gate itself rather than sitting near a measured value. ~keep
-    breaches = b.check_thresholds(_report(0.9, 0.8, 11000.0, 11000.0))
-    assert any("peak-RSS ratio" in breach for breach in breaches)
+def _host(os_name: str = "Linux", arch: str = "x86_64", runner_label: str | None = "runner-medium") -> tuple:
+    """The normalized host identity a floor is scoped to."""
+    return b._host_identity(os_name, arch, runner_label)
+
+
+def _published(peak_rss_mb: float | None = 500.0) -> dict:
+    """A committed published artifact, shaped like `publish.published_payload`'s output."""
+    return {
+        "schema_version": 2,
+        "environment": {"os": _HOST["os"], "arch": _HOST["arch"]},
+        "run": {"runner_label": _HOST["runner_label"]},
+        "headline": {"sceptre_warm": {"peak_rss_mb": peak_rss_mb}},
+    }
+
+
+def test_check_thresholds_passes_a_run_within_the_published_rss_ceiling() -> None:
+    # warm speedup = (5/2)/(1/2) = 5x; sceptre peak RSS 500 MB against a 500 MB baseline.
+    report = _report(0.9, 0.8, 500.0, 11000.0, environment=_HOST)
+    assert b.check_thresholds(report, _published(500.0)) == []
+
+
+@pytest.mark.parametrize("easyocr_rss", [500.0, 11000.0, 40000.0])
+def test_check_thresholds_ignores_an_easyocr_memory_change(easyocr_rss: float) -> None:
+    """The gate is self-referential: only sceptre's own peak RSS can trip it.
+
+    An EasyOCR or torch release that halves (or quadruples) the reference engine's footprint
+    moves the old cross-engine ratio through any floor without sceptre changing at all.
+    """
+    report = _report(0.9, 0.8, 500.0, easyocr_rss, environment=_HOST)
+    assert b.check_thresholds(report, _published(500.0)) == []
+
+
+def test_check_rss_ceiling_flags_a_sceptre_memory_regression() -> None:
+    breaches = b.check_rss_ceiling(700.0, _host(), _published(500.0))
+    assert breaches == [
+        "sceptre peak RSS 700.0 MB > ceiling 550.0 MB "
+        "(published baseline 500.0 MB x 1.10, runner-medium (Linux/x86_64))"
+    ]
+
+
+def test_check_rss_ceiling_tolerates_growth_inside_the_factor() -> None:
+    """Peak RSS wobbles a few percent run to run; the ceiling leaves room for that, and no more."""
+    assert b.check_rss_ceiling(500.0 * b.SCEPTRE_RSS_CEILING_FACTOR, _host(), _published(500.0)) == []
+    assert b.check_rss_ceiling(500.0 * b.SCEPTRE_RSS_CEILING_FACTOR + 0.1, _host(), _published(500.0)) != []
+
+
+def test_check_rss_ceiling_flags_an_absent_baseline_rather_than_passing() -> None:
+    breaches = b.check_rss_ceiling(500.0, _host(), None)
+    assert any("unmeasurable" in breach and str(b.PUBLISHED_RELATIVE_PATH) in breach for breach in breaches)
+
+
+def test_check_rss_ceiling_flags_a_baseline_that_carries_no_peak_rss() -> None:
+    breaches = b.check_rss_ceiling(500.0, _host(), _published(None))
+    assert any("headline.sceptre_warm.peak_rss_mb" in breach for breach in breaches)
+
+
+def test_check_rss_ceiling_refuses_a_baseline_measured_on_another_host() -> None:
+    """An absolute floor only means something on the host it was measured on (ADR 0042)."""
+    breaches = b.check_rss_ceiling(500.0, _host("Darwin", "arm64", None), _published(500.0))
+    assert any("scoped to a host" in breach and "runner-medium" in breach for breach in breaches)
+
+
+def test_check_rss_ceiling_distinguishes_two_runner_classes_of_the_same_os() -> None:
+    assert b.check_rss_ceiling(500.0, _host(runner_label="runner-large"), _published(500.0)) != []
+
+
+def test_check_rss_ceiling_flags_a_run_that_measured_no_sceptre_rss() -> None:
+    breaches = b.check_rss_ceiling(None, _host(), _published(500.0))
+    assert any("no sceptre peak RSS" in breach for breach in breaches)
+
+
+def test_check_thresholds_still_flags_a_warm_speedup_regression() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0, environment=_HOST)
+    report.metadata["easyocr_batch"]["en"]["total_seconds"] = 1.0
+    breaches = b.check_thresholds(report, _published(500.0))
+    assert any("warm speedup" in breach for breach in breaches)
+
+
+def test_load_published_baseline_returns_none_when_absent(tmp_path: Path) -> None:
+    assert b.load_published_baseline(tmp_path / "latest.json") is None
+
+
+def test_load_published_baseline_returns_none_for_unparseable_json(tmp_path: Path) -> None:
+    path = tmp_path / "latest.json"
+    path.write_text("{not json", encoding="utf-8")
+    assert b.load_published_baseline(path) is None
+
+
+def test_published_host_reads_the_runner_label_from_the_run_block() -> None:
+    assert b.published_host(_published()) == ("Linux", "x86_64", "runner-medium")
+
+
+def test_run_host_is_unknown_without_a_provenance_block() -> None:
+    assert b.run_host(_report(0.9, 0.8, 500.0, 11000.0)) == ("unknown", "unknown", "unknown")
+
+
+# -- reported peak-RSS ratio (a figure, not a gate) --------------------------------------
+
+
+def test_paired_rss_ratio_is_the_median_of_the_per_image_ratios() -> None:
+    assert b.paired_rss_ratio([(100.0, 200.0), (100.0, 300.0), (100.0, 900.0)]) == pytest.approx(3.0)
+
+
+def test_paired_rss_ratio_is_none_without_a_paired_measurement() -> None:
+    assert b.paired_rss_ratio([]) is None
+    assert b.paired_rss_ratio([(100.0, None), (None, 200.0)]) is None
+
+
+def test_paired_rss_ratio_ignores_a_zero_denominator() -> None:
+    assert b.paired_rss_ratio([(0.0, 200.0), (100.0, 400.0)]) == pytest.approx(4.0)
+
+
+def test_paired_rss_ratio_pairs_images_across_engine_specific_batch_keys() -> None:
+    """sceptre keys its batches `english`/`english+korean`, EasyOCR keys the same images `en`/`en+ko`.
+
+    Nothing in the report lines those two key spaces up, so a ratio computed by pairing batch
+    keys would drop or mismatch groups. Pairing per image is what makes the figure well-defined.
+    """
+    records = [
+        b.ImageRecord(stem="a", group="labeled", languages=["english"], sceptre_rss_mb=100.0, easyocr_rss_mb=400.0),
+        b.ImageRecord(
+            stem="b",
+            group="breadth",
+            languages=["english", "korean"],
+            sceptre_rss_mb=200.0,
+            easyocr_rss_mb=400.0,
+        ),
+        b.ImageRecord(stem="c", group="labeled", languages=["english"], skipped="no image"),
+    ]
+    assert b.paired_rss_ratio(b._record_rss_pairs(records)) == pytest.approx(3.0)
+
+
+def test_paired_rss_ratio_does_not_collapse_the_way_the_max_of_maxes_does() -> None:
+    """The runner-medium shape: one heavy shared-CRAFT batch drags max/max to ~1.08x.
+
+    Both engines allocate the same CRAFT canvas for the largest page, so their corpus maxima
+    converge and their quotient says nothing about sceptre. The paired median keeps saying what
+    the typical image costs.
+    """
+    pairs = [(1000.0, 1080.0), (100.0, 325.0), (100.0, 266.0), (100.0, 200.0), (100.0, 137.0)]
+    max_of_maxes = max(easyocr for _, easyocr in pairs) / max(sceptre for sceptre, _ in pairs)
+    assert max_of_maxes == pytest.approx(1.08)
+    assert b.paired_rss_ratio(pairs) == pytest.approx(2.0)
 
 
 def test_speedup_summary_states_a_large_ratio_to_one_decimal() -> None:
-    # warm speedup = (5/2)/(1/2) = 5x; rss ratio = 11000/500 = 22x.
+    # warm speedup = (5/2)/(1/2) = 5x; per-image rss ratio = 11000/500 = 22x.
     summary = b.speedup_summary(_report(0.9, 0.8, 500.0, 11000.0))
     assert "~5.0x faster warm" in summary
-    assert "~22.0x less peak RSS" in summary
+    assert "~22.0x less peak RSS (per-image median)" in summary
+
+
+def test_speedup_summary_omits_the_rss_claim_when_no_image_was_measured_on_both_engines() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.records[0].easyocr_rss_mb = None
+    assert "peak RSS" not in b.speedup_summary(report)
 
 
 def test_speedup_summary_keeps_a_ratio_just_above_the_claim_threshold() -> None:

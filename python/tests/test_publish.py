@@ -58,9 +58,23 @@ def _report(**overrides: object) -> dict:
             },
             "all": {},
         },
+        # Each record carries the peak RSS of the batch it was measured in, which is what makes
+        # the published ratio a paired figure rather than a quotient of two independent maxima.
         "records": [
-            {"stem": "a", "skipped": None, "sceptre_cold_seconds": 2.0},
-            {"stem": "b", "skipped": None, "sceptre_cold_seconds": 2.0},
+            {
+                "stem": "a",
+                "skipped": None,
+                "sceptre_cold_seconds": 2.0,
+                "sceptre_rss_mb": 6624.0,
+                "easyocr_rss_mb": 22626.0,
+            },
+            {
+                "stem": "b",
+                "skipped": None,
+                "sceptre_cold_seconds": 2.0,
+                "sceptre_rss_mb": 6624.0,
+                "easyocr_rss_mb": 22626.0,
+            },
             {"stem": "c", "skipped": "unsupported", "sceptre_cold_seconds": None},
         ],
     }
@@ -116,9 +130,55 @@ def test_should_exclude_skipped_records_from_the_cold_figure() -> None:
     assert payload["headline"]["sceptre_cold"]["throughput_img_s"] == pytest.approx(2 / 4.0)
 
 
-def test_should_compute_the_peak_rss_ratio() -> None:
+def test_should_compute_the_peak_rss_ratio_from_paired_per_image_records() -> None:
     payload = p.published_payload(_report())
     assert payload["headline"]["rss_ratio"] == pytest.approx(22626.0 / 6624.0)
+
+
+def _report_with_two_language_groups() -> dict:
+    """A report whose two engines key the same images under their own language codes.
+
+    sceptre batches are keyed `english` / `english+korean`; EasyOCR keys the very same images
+    `en` / `en+ko`. Nothing in the report maps one key space onto the other, so a ratio built by
+    pairing batch keys would compare unrelated groups. The per-image records are the pairing.
+    """
+    report = _report(
+        sceptre_batch={
+            "english": {"total_seconds": 50.0, "image_count": 10, "rss_mb": 1000.0},
+            "english+korean": {"total_seconds": 50.0, "image_count": 10, "rss_mb": 100.0},
+        },
+        easyocr_batch={
+            "en": {"total_seconds": 200.0, "image_count": 10, "rss_mb": 1080.0},
+            "en+ko": {"total_seconds": 200.0, "image_count": 10, "rss_mb": 300.0},
+        },
+    )
+    report["records"] = [
+        {"stem": "big", "skipped": None, "sceptre_rss_mb": 1000.0, "easyocr_rss_mb": 1080.0},
+        {"stem": "small-a", "skipped": None, "sceptre_rss_mb": 100.0, "easyocr_rss_mb": 300.0},
+        {"stem": "small-b", "skipped": None, "sceptre_rss_mb": 100.0, "easyocr_rss_mb": 300.0},
+    ]
+    return report
+
+
+def test_should_not_publish_the_quotient_of_the_two_corpus_maxima() -> None:
+    """max(EasyOCR)/max(sceptre) here is 1.08x, drawn from batches that never co-occurred."""
+    payload = p.published_payload(_report_with_two_language_groups())
+    assert payload["headline"]["easyocr_warm"]["peak_rss_mb"] == pytest.approx(1080.0)
+    assert payload["headline"]["sceptre_warm"]["peak_rss_mb"] == pytest.approx(1000.0)
+    assert payload["headline"]["rss_ratio"] == pytest.approx(3.0)
+
+
+def test_should_ignore_skipped_records_when_pairing_the_rss_ratio() -> None:
+    report = _report_with_two_language_groups()
+    report["records"].append({"stem": "gap", "skipped": "unsupported", "sceptre_rss_mb": 1.0, "easyocr_rss_mb": 900.0})
+    assert p.published_payload(report)["headline"]["rss_ratio"] == pytest.approx(3.0)
+
+
+def test_should_leave_the_rss_ratio_unmeasured_when_no_record_carries_both_figures() -> None:
+    report = _report()
+    for record in report["records"]:
+        record.pop("easyocr_rss_mb", None)
+    assert p.published_payload(report)["headline"]["rss_ratio"] is None
 
 
 def test_should_pin_the_schema_version() -> None:
@@ -209,20 +269,31 @@ def test_should_keep_the_model_pins_and_runtime_fields_it_does_publish() -> None
 
 def _report_with_peak_rss(sceptre_mb: float, easyocr_mb: float) -> dict:
     """A report whose only interesting property is the peak-RSS ratio it implies."""
-    return _report(
+    report = _report(
         sceptre_batch={"english": {"total_seconds": 50.0, "image_count": 20, "rss_mb": sceptre_mb}},
         easyocr_batch={"en": {"total_seconds": 200.0, "image_count": 20, "rss_mb": easyocr_mb}},
     )
+    for record in report["records"]:
+        if record["skipped"] is None:
+            record["sceptre_rss_mb"] = sceptre_mb
+            record["easyocr_rss_mb"] = easyocr_mb
+    return report
 
 
 def test_should_state_a_large_rss_ratio_to_one_decimal_place() -> None:
     table = p.render_headline_table(p.published_payload(_report_with_peak_rss(1000.0, 22000.0)), unit="GB")
-    assert "(~22.0× lower)" in table
+    assert "(~22.0× lower, per-image median)" in table
+
+
+def test_should_name_the_statistic_the_rss_aside_reports() -> None:
+    """The aside is not the quotient of the two cells beside it, so it must not read as one."""
+    table = p.render_headline_table(p.published_payload(_report_with_two_language_groups()), unit="GB")
+    assert "(~3.0× lower, per-image median)" in table
 
 
 def test_should_state_a_two_fold_rss_ratio_rather_than_rounding_it_away() -> None:
     table = p.render_headline_table(p.published_payload(_report_with_peak_rss(6624.0, 13248.0)), unit="GB")
-    assert "(~2.0× lower)" in table
+    assert "(~2.0× lower, per-image median)" in table
 
 
 def test_should_drop_the_rss_aside_when_the_ratio_is_too_close_to_parity() -> None:
@@ -361,6 +432,21 @@ def test_should_still_detect_drift_without_a_measurement_report(tmp_path: Path) 
         readme.read_text(encoding="utf-8").replace("EasyOCR (warm/batch)", "EasyOCR (hand-edited)"),
         encoding="utf-8",
     )
+    assert p.check_docs(root) == 1
+
+
+def test_should_reject_a_schema_version_1_artifact_whose_rss_ratio_meant_something_else(tmp_path: Path) -> None:
+    """Version 1 published max(EasyOCR)/max(sceptre) under the same key (ADR 0042).
+
+    Every field this renderer reads is present in such an artifact, so nothing else would stop
+    it being rendered -- with its old, unpaired number under the new statistic's label.
+    """
+    root = _repo(tmp_path)
+    p.publish(root, root / "benchmark-results/comparison.json", check=False)
+    artifact = root / p.PUBLISHED_RELATIVE_PATH
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    payload["schema_version"] = 1
+    artifact.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     assert p.check_docs(root) == 1
 
 

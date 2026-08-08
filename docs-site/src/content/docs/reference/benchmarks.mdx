@@ -21,7 +21,7 @@ The table below is generated from the committed `benchmarks/published/latest.jso
 | Engine | Throughput (img/s) | Peak RSS (MB) | Mean CER | Mean token-F1 |
 |---|---|---|---|---|
 | EasyOCR (warm/batch) | 0.47 | 20,691.3 | 0.554 | 0.348 |
-| **sceptre** (warm/batch) | **1.07** (~2.3×) | **6,654.8** (~3.1× lower) | 0.570 | 0.361 |
+| **sceptre** (warm/batch) | **1.07** (~2.3×) | **6,654.8** (~3.8× lower, per-image median) | 0.570 | 0.361 |
 | sceptre (cold CLI run) | 1.12 (~2.4×) | 6,654.8 | 0.570 | 0.361 |
 
 Measured with sceptre 0.4.0 (ort/cpu, ONNX Runtime 1.28.0) against EasyOCR 1.7.2 (torch 2.13.0) on
@@ -90,8 +90,11 @@ measures end-to-end OCR against EasyOCR. Parity fixtures backing the quality sig
 [`crates/sceptre/tests/data/golden/`](https://github.com/xberg-io/sceptre/tree/main/crates/sceptre/tests/data/golden).
 
 <Aside type="note">
-  The regression gate (`--assert`) enforces floors on warm speedup, peak-RSS ratio, and labeled
-  token-F1 against EasyOCR — the exact thresholds live in the harness, not here, since peak-RSS
-  parity narrows as page size grows. Run manually via `workflow_dispatch` in CI, not on every PR
-  (the reference run needs torch, easyocr, and the full model set).
+  The regression gate (`--assert`) enforces a floor on warm speedup against EasyOCR, and a ceiling
+  on sceptre's *own* peak RSS relative to the published baseline for the same host — a cross-engine
+  memory ratio makes a poor gate, since peak RSS is dominated by the CRAFT detector both engines
+  share ([ADR 0042](https://github.com/xberg-io/sceptre/blob/main/adrs/0042-host-scoped-benchmark-floors.md)).
+  Labeled quality is held by per-image guardrail contracts. The exact thresholds live in the
+  harness, not here. Run manually via `workflow_dispatch` in CI, not on every PR (the reference
+  run needs torch, easyocr, and the full model set).
 </Aside>
