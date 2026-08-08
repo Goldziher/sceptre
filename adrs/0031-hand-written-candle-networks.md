@@ -133,12 +133,18 @@ CPU path is ~10× slower — consistent with ADR 0009's measurement, which stand
 ~2.5× over candle's own CPU path and nothing relative to `ort`.
 
 > **Status update (2026-08-08).** These ratios are host-dependent and the numbers above are
-> specific to the stated setup. The ADR 0035 backend matrix, measuring `english.png` on a
-> `macos-latest` runner at `canvas_size` 1024, reports `candle`/cpu at ~2× and `candle`/metal at
-> ~1× against `ort`/cpu. The absolute times there are roughly an order of magnitude slower for
-> every leg, so the compression is the constrained host neutralizing `ort`'s multithreading
-> advantage rather than a change in either backend. The ordering — `ort` fastest on CPU, `candle`
-> a compatibility option — is unchanged, and this ADR's decision stands as written. `candle` is a compatibility
+> specific to the stated setup. The ADR 0035 backend matrix measures `candle`/cpu against
+> `ort`/cpu at **~3.6×** on `runner-large-arm64` and **~1.8–2.0×** on `macos-latest`
+> (`canvas_size` 1024), against the ~10× recorded here — three aarch64 hosts, three different
+> ratios. The absolute times move with them: `ort`/cpu takes 1154 ms on `runner-large-arm64` and
+> 2269–2632 ms on `macos-latest` for the same work, so the gap compresses on constrained hosts
+> where `ort`'s multithreading has fewer cores to exploit, rather than because either backend
+> changed. `tract` spans even wider — 4.2× to 26.5× — on the same two runners.
+>
+> The **ordering is invariant across every host measured**: `ort` fastest on CPU, then `candle`,
+> then `tract`. That ordering, not any particular multiple, is what this ADR's decision rests on,
+> and it stands as written. The lesson for anyone quoting these numbers is that the multiple is
+> meaningless without its host. `candle` is a compatibility
 and deployment option, never a performance one, and it is excluded from
 [ADR 0030](0030-published-benchmark-artifact-and-drift-gate.md)'s benchmark drift gate.
 
