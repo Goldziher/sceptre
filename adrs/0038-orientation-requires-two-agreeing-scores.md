@@ -61,6 +61,35 @@ false positives (link picks `Deg0` for `financial_table_1` and
 the link score's lead is 4.16%, under the margin. Both rejection paths are load-bearing;
 neither alone is sufficient.
 
+## Considered and rejected
+
+**An absolute floor on the winning score.** `invoice_image`'s winning score is 0.00163,
+roughly 7× below the lowest true-positive winning score of 0.01167, so a floor near 0.005
+rejects it with no risk to any true positive. It does not generalize: the other four false
+positives score 0.017–0.12, squarely inside normal-content range, so a floor catches one
+of five. The agreement rule subsumes it, and stacking both would add a magic constant that
+earns nothing.
+
+**Weighting or ratioing the two heads instead of intersecting them.** Scoring link mass
+alone fixes three of five false positives but newly flips `textocr_scene_03` (+14% on link
+mass), and scoring the link/region ratio fixes three but *loses* the `ocr_test_rotated_180`
+true positive, whose ratio margin is 4.78% — under the 5% gate. Every single-series
+formula tried trades one failure mode for the other; only requiring both to agree avoids
+the trade.
+
+## Unexplained
+
+All five false positives, plus the `cord_receipt_04` near-miss, selected `Deg270` as their
+single highest-scoring rotation — under a uniform null that is about a 0.4% coincidence.
+A preprocessing artifact is ruled out: `Deg90` and `Deg270` produce identical padded canvas
+dimensions, so top-left-anchored padding cannot make the two asymmetric, and the scorer is
+exactly rotation-equivariant (a rotated variant's score set is a cyclic shift of the
+original's). The pattern correlates with dense periodic structure — table and receipt rule
+lines, `kannada.png`'s loopy strokes — which is consistent with a directional response
+asymmetry in CRAFT's learned weights, but the mechanism inside the network was not pinned
+down. The agreement rule makes it harmless without explaining it, which is worth stating
+plainly rather than leaving implied.
+
 ## Consequences
 
 Over the 23 orientation-labeled images (the five vertical-Japanese pages are excluded —
