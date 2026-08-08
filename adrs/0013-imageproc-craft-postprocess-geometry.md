@@ -69,3 +69,13 @@ backend seam and does not touch `config`/`types`.
 The dilation step is **amended by ADR 0018**: it now uses a custom cv2-exact `MORPH_RECT(1 + niter)`
 kernel instead of `imageproc`'s `LInf` dilation, closing the "differs slightly from OpenCV"
 limitation above. Connected-component labelling and min-area rectangle fitting stay on `imageproc`.
+
+## Status update (2026-08-08)
+
+The min-area-rect step is **superseded by ADR 0039**: `imageproc::geometry::min_area_rect`
+snapped each rotated-rectangle corner outward with a per-corner `.floor()`/`.ceil()`, which
+OpenCV's `minAreaRect`/`boxPoints` never does; that snap was measurably fragmenting rotated text
+lines (`french.jpg`). Rotated-quad fitting now uses an in-crate rotating-calipers implementation
+that reuses `imageproc`'s (unaffected) `convex_hull` but keeps corners in floating point with no
+outward rounding. Connected-component labelling and the ADR 0018 dilation kernel are unaffected
+and remain as described above.

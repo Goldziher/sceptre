@@ -16,6 +16,7 @@
 mod craft;
 mod detector;
 mod group;
+mod min_area_rect;
 pub(crate) mod orientation;
 mod postprocess;
 mod preprocess;

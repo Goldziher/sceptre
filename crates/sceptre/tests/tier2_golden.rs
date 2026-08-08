@@ -211,13 +211,13 @@ fn parity_kannada() {
     run_dual_golden_parity("kannada.png", "kannada", Language::Kannada);
 }
 
-/// The rotated french sign: sceptre detects and recognizes every reference line at
-/// parity, but splits `[Palais du LOUVRE` into two boxes (`[Palais du` + a rotated
-/// `LOUVRE`) where EasyOCR keeps one. The split is a knife-edge slope classification
-/// — imageproc's integer-rounded `min_area_rect` corners push `LOUVRE`'s slope from
-/// cv2's 0.096 to 0.129, just over `slope_ths` (0.1), routing it to the free list so
-/// it never merges. The two boxes jointly cover the reference (union IoU 0.966), so
-/// the union-coverage check ([`assert_easyocr_reference`]) passes it.
+/// The rotated french sign. Previously sceptre split `[Palais du LOUVRE` into two
+/// boxes (`[Palais du` + a rotated `LOUVRE`) where EasyOCR keeps one: a knife-edge
+/// slope classification where `imageproc`'s integer-rounded `min_area_rect` corners
+/// pushed `LOUVRE`'s slope from cv2's 0.096 to 0.129, just over `slope_ths` (0.1),
+/// routing it to the free list so it never merged. Fixed by sceptre's own
+/// OpenCV-faithful rotating-calipers fit (`detect::min_area_rect`, ADR 0039), which
+/// drops the per-corner outward snap; this now matches the reference at full parity.
 #[test]
 #[cfg(feature = "ort")]
 fn parity_french_jpg() {

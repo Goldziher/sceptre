@@ -187,11 +187,11 @@
       "accelerator": "cpu",
       "arch": "aarch64",
       "backend": "ort",
-      "generated_at": "2026-08-07T05:31:07Z",
-      "git_commit": "f3b470fa96f85fa1c2a874fc4dfadc3b6ca3c6c7",
+      "generated_at": "2026-08-08T06:09:28Z",
+      "git_commit": "61f7bef4fa8a7c076ee2164d13d7406b70d08efd",
       "onnxruntime_version": null,
       "os": "macos",
-      "sceptre_version": "0.4.0"
+      "sceptre_version": "0.5.1"
     }
   },
   "placeholder": false,
@@ -326,23 +326,23 @@
       {
         "quad": [
           [
-            226.0,
-            170.0
+            226.33444213867188,
+            171.04647827148438
           ],
           [
             414.0,
-            170.0
+            171.04647827148438
           ],
           [
             414.0,
-            222.0
+            220.36183166503906
           ],
           [
-            226.0,
-            222.0
+            226.33444213867188,
+            220.36183166503906
           ]
         ],
-        "text": "Yuyuan Rd:"
+        "text": "Yuyuan Rd"
       },
       {
         "quad": [

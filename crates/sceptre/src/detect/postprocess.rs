@@ -4,16 +4,18 @@
 //! Threshold the region/link maps, run connected components, fit min-area
 //! rectangles, then scale coordinates back to input space (`ratio_net = 2`).
 //!
-//! Connected-component labelling and minimum-area rectangle fitting are provided
-//! by the `imageproc` crate (see ADR 0013); the CRAFT dilation is a custom
-//! cv2-exact box kernel (see ADR 0018, superseding the imageproc dilation).
+//! Connected-component labelling is provided by the `imageproc` crate (see ADR
+//! 0013); the CRAFT dilation is a custom cv2-exact box kernel (see ADR 0018,
+//! superseding the imageproc dilation); minimum-area rectangle fitting is our own
+//! OpenCV-faithful rotating-calipers implementation ([`super::min_area_rect`], see
+//! ADR 0039, superseding ADR 0013's min-area-rect half).
 
 use image::{GrayImage, ImageBuffer, Luma};
-use imageproc::geometry::min_area_rect;
 use imageproc::point::Point;
 use imageproc::region_labelling::{Connectivity, connected_components};
 use ndarray::Array2;
 
+use super::min_area_rect::min_area_rect;
 use crate::error::{OcrError, Result};
 
 /// Ratio between the CRAFT heat-map resolution and the network input: the
@@ -371,15 +373,14 @@ fn collect_points(segmap: &GrayImage, window: &Window) -> Vec<Point<i32>> {
 /// Fit a minimum-area rectangle, apply diamond re-alignment, and order the
 /// corners clockwise starting at the corner with the smallest `x + y`.
 fn fit_box(points: &[Point<i32>]) -> Option<BoxPoints> {
-    if points.is_empty() {
-        return None;
-    }
-    let rect = min_area_rect(points);
+    let rect = min_area_rect(points)?;
+    // The single final cast to f32 (mirroring cv2.boxPoints' float32 output) — no
+    // per-corner floor/ceil, unlike the imageproc rectangle this replaced. ~keep
     let mut corners: BoxPoints = [
-        [rect[0].x as f32, rect[0].y as f32],
-        [rect[1].x as f32, rect[1].y as f32],
-        [rect[2].x as f32, rect[2].y as f32],
-        [rect[3].x as f32, rect[3].y as f32],
+        [rect[0][0] as f32, rect[0][1] as f32],
+        [rect[1][0] as f32, rect[1][1] as f32],
+        [rect[2][0] as f32, rect[2][1] as f32],
+        [rect[3][0] as f32, rect[3][1] as f32],
     ];
 
     let edge_w = distance(corners[0], corners[1]);

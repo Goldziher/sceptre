@@ -111,6 +111,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Rotated text boxes now match OpenCV's geometry.** `imageproc`'s `min_area_rect` snapped every
+  rectangle corner outward with a per-corner `floor`/`ceil`; OpenCV's `minAreaRect`/`boxPoints`,
+  which EasyOCR uses, never does. Axis-aligned boxes were unaffected — they already matched
+  bit-for-bit — but a rotated box inflated by up to ~1px per corner in heat-map space and ~2px
+  after the `x2` scale-up, enough to flip borderline line merges: `french.jpg`'s `LOUVRE` box came
+  out at slope 0.129 against cv2's 0.096, just over `slope_ths`, splitting one reference line into
+  two. Replaced with in-crate rotating calipers over `imageproc`'s (unaffected) convex hull,
+  keeping corners in `f64` with a single final cast, and testing every hull edge including the
+  closing one that `imageproc`'s `windows(2)` scan omits. Line recall, precision and F1 are now
+  **1.000 on all eight parity images** (`french.jpg` from 0.833/0.625, `english.png` from
+  1.000/0.923), with `word_f1` unchanged everywhere. See
+  [ADR 0039](adrs/0039-opencv-faithful-min-area-rect.md).
 - `wide` moved off the yanked 1.6.0.
 - **Beam-search decoding was nondeterministic**: the same crop could recognize to different text
   across runs of the same binary. Beam pruning and the final labeling-selection step both broke
