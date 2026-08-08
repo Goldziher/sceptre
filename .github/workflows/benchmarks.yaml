@@ -180,6 +180,12 @@ jobs:
     env:
       HF_HOME: ${{ github.workspace }}/.hf
       SCEPTRE_REQUIRE_MODELS: "1"
+      # candle -> gemm-f16 emits `fmla vN.8h` inline asm, which the assembler rejects on the
+      # aarch64-linux baseline ("instruction requires: fullfp16"). rustc spells that feature
+      # `fp16`. Apple Silicon has it in the target default, which is why only this leg breaks.
+      # It applies to every leg in this job, so the ort and tract numbers here are also
+      # measured with fp16 enabled. ~keep
+      RUSTFLAGS: "-C target-feature=+fp16"
       SCEPTRE_BACKEND_MATRIX_OUTPUT_DIR: ${{ github.workspace }}/benchmark-results/backends
     steps:
       - uses: actions/checkout@v6
