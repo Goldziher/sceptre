@@ -224,8 +224,8 @@ mod tests {
         // becomes 1x2 with the original top-left pixel now at the top-right, i.e. ~keep
         // row 0 (red moves to (0,0) since the 1-wide output only has column 0). ~keep
         let mut pixels = Vec::with_capacity(6);
-        pixels.extend_from_slice(&[255, 0, 0]); // (0,0) red
-        pixels.extend_from_slice(&[0, 0, 255]); // (1,0) blue
+        pixels.extend_from_slice(&[255, 0, 0]);
+        pixels.extend_from_slice(&[0, 0, 255]);
         let image = Image::from_rgb8(2, 1, pixels).expect("valid rgb buffer");
 
         let rotated = rotate_image(&image, Rotation::Deg90).expect("rotate");
@@ -431,15 +431,15 @@ mod real_model_selection {
     #[test]
     #[ignore = "requires the real cached CRAFT model; run with --ignored"]
     fn should_document_the_known_kannada_false_positive_when_enabled() {
-        // Honest limitation, not a regression: kannada.png's short lines and dense,
-        // loopy glyph strokes give it an unusually high baseline CRAFT activation in
-        // every orientation, so the margin gate that protects the other seven parity
-        // images doesn't protect this one — it flips to Deg270 by a ~12% margin, over
-        // the 5% default. This is why `detect_orientation` defaults to off: with the
-        // pre-pass disabled by default, this case never affects a real pipeline run.
-        // A future scorer change that fixes this may turn this into a `should_leave_*`
-        // case instead; if it starts failing because kannada stopped flipping, that's
-        // good news — update the test rather than treating it as a break. See ADR 0037.
+        // Honest limitation, not a regression: kannada.png's short lines and dense, ~keep
+        // loopy glyph strokes give it an unusually high baseline CRAFT activation in ~keep
+        // every orientation, so the margin gate that protects the other seven parity ~keep
+        // images doesn't protect this one — it flips to Deg270 by a ~12% margin, over ~keep
+        // the 5% default. This is why `detect_orientation` defaults to off: with the ~keep
+        // pre-pass disabled by default, this case never affects a real pipeline run. ~keep
+        // A future scorer change that fixes this may turn this into a `should_leave_*` ~keep
+        // case instead; if it starts failing because kannada stopped flipping, that's ~keep
+        // good news — update the test rather than treating it as a break. ADR 0037. ~keep
         let backend = craft_backend();
         let config = DetectionConfig::default();
         assert_eq!(pick(backend.as_ref(), "kannada.png", &config), Rotation::Deg270);
