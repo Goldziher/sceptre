@@ -9,8 +9,9 @@
 //! back into the caller's original frame for reporting: [`unrotate_corners`]
 //! inverse-rotates its coordinates *and* cyclically re-indexes its corners, so
 //! "clockwise from top-left" still means top-left of the original image (not of
-//! the rotated working frame). See ADR 0037 for the scoring function, its cost,
-//! and a known false-positive risk on small, dense-glyph scripts.
+//! the rotated working frame). See ADR 0037 for the scoring function and its
+//! cost, and ADR 0038 for why a rotation is applied only when the combined and
+//! link-only scores independently agree on it.
 
 use image::imageops::{rotate90, rotate180, rotate270};
 use image::{ImageBuffer, Rgb};
@@ -60,33 +61,38 @@ pub(crate) fn rotate_image(image: &Image, rotation: Rotation) -> Result<Image> {
     Image::from_rgb8(rotated_width, rotated_height, rotated.into_raw())
 }
 
-/// CRAFT region+link heat-map "mass" for one candidate rotation: the sum of
-/// region-score values above `low_text` plus the sum of link-score values above
-/// `link_threshold`, normalized by pixel count so probes of different
-/// (rotation-dependent) shapes are comparable.
+/// CRAFT region and link heat-map "mass" for one candidate rotation, returned
+/// separately: the sum of region-score values above `low_text`, and the sum of
+/// link-score values above `link_threshold`, each normalized by pixel count so
+/// probes of different (rotation-dependent) shapes are comparable.
 ///
-/// The link (affinity) term is what makes this discriminate 180° rotations: an
+/// The link (affinity) term is what discriminates orientation at all. An
 /// upside-down line of text still looks like "text" to CRAFT's region head (it
 /// responds to stroke density more than glyph orientation), but the affinity
 /// head is trained on horizontally-flowing character pairs and its response
 /// drops for any of the three wrong rotations, including 180° (measured on the
 /// tier-2 corpus, see ADR 0037).
-fn heat_mass_score(heat: &HeatMaps, low_text: f32, link_threshold: f32) -> f32 {
+///
+/// The two are kept apart rather than summed because [`pick_rotation`] needs to
+/// ask them independently — the sum alone lets the orientation-blind region term
+/// outvote the link term on dense pages (ADR 0038).
+fn heat_mass_parts(heat: &HeatMaps, low_text: f32, link_threshold: f32) -> (f32, f32) {
     let total = heat.region.len().max(1) as f32;
     let region_mass: f32 = heat.region.iter().filter(|&&value| value > low_text).sum();
     let link_mass: f32 = heat.link.iter().filter(|&&value| value > link_threshold).sum();
-    (region_mass + link_mass) / total
+    (region_mass / total, link_mass / total)
 }
 
 /// Floor added to the `Deg0` baseline before applying `margin`, so a
 /// near-blank page (baseline mass ~0) doesn't flip on noise alone.
 const BASELINE_FLOOR: f32 = 1e-6;
 
-/// Choose the best-scoring rotation, requiring a non-zero rotation to beat the
-/// `Deg0` score by at least `margin` (a relative improvement) before it
-/// overrides — an outright tie, or a marginal win, keeps the page as-is. Among
-/// the non-zero rotations, an earlier entry in [`Rotation::ALL`] wins a tie.
-fn pick_rotation(scores: [f32; 4], margin: f32) -> Rotation {
+/// Choose the best-scoring rotation from one score series, requiring a non-zero
+/// rotation to beat the `Deg0` score by at least `margin` (a relative
+/// improvement) before it overrides — an outright tie, or a marginal win, keeps
+/// the page as-is. Among the non-zero rotations, an earlier entry in
+/// [`Rotation::ALL`] wins a tie.
+fn best_rotation(scores: [f32; 4], margin: f32) -> Rotation {
     let baseline = scores[0];
     let mut best = Rotation::Deg0;
     let mut best_score = baseline;
@@ -104,6 +110,28 @@ fn pick_rotation(scores: [f32; 4], margin: f32) -> Rotation {
     }
 }
 
+/// Pick a rotation only when the combined region+link score and the link score
+/// *independently* select the same one, each clearing `margin`; otherwise keep
+/// the page as given.
+///
+/// Requiring the two to agree is what makes the pre-pass safe on upright pages.
+/// Neither series is trustworthy alone, and they fail in opposite directions:
+/// the region head responds to stroke density rather than glyph orientation, so
+/// on dense tables and receipts the combined score drifts to a wrong rotation;
+/// the link head discriminates orientation but is noisy on photographed scenes,
+/// where it alone would flip an upright page. A decision the orientation-blind
+/// half proposes and the orientation-sensitive half refuses is exactly the
+/// signature of a false positive. Measured over the labeled corpus this holds
+/// every correcting rotation and drops every wrong one — see ADR 0038.
+fn pick_rotation(combined: [f32; 4], link: [f32; 4], margin: f32) -> Rotation {
+    let by_combined = best_rotation(combined, margin);
+    if by_combined != Rotation::Deg0 && by_combined == best_rotation(link, margin) {
+        by_combined
+    } else {
+        Rotation::Deg0
+    }
+}
+
 /// Probe all four rotations of `image` at `probe_canvas` and pick the
 /// best-scoring one per [`pick_rotation`].
 pub(crate) fn select_rotation(
@@ -114,14 +142,17 @@ pub(crate) fn select_rotation(
     link_threshold: f32,
     margin: f32,
 ) -> Result<Rotation> {
-    let mut scores = [0.0f32; 4];
+    let mut combined = [0.0f32; 4];
+    let mut link = [0.0f32; 4];
     for (index, rotation) in Rotation::ALL.into_iter().enumerate() {
         let rotated = rotate_image(image, rotation)?;
         let prepared = preprocess::prepare_with_canvas(&rotated, probe_canvas, 1.0, None)?;
         let heat = craft::run_craft(backend, prepared.tensor)?;
-        scores[index] = heat_mass_score(&heat, low_text, link_threshold);
+        let (region_mass, link_mass) = heat_mass_parts(&heat, low_text, link_threshold);
+        combined[index] = region_mass + link_mass;
+        link[index] = link_mass;
     }
-    Ok(pick_rotation(scores, margin))
+    Ok(pick_rotation(combined, link, margin))
 }
 
 /// Map one *final* quad's corners — already detected and recognized in the
@@ -303,33 +334,35 @@ mod tests {
         let low = heat_maps(0.1, 0.1, (4, 4));
         let high = heat_maps(0.9, 0.9, (4, 4));
 
-        assert!(heat_mass_score(&high, 0.4, 0.4) > heat_mass_score(&low, 0.4, 0.4));
+        let (high_region, high_link) = heat_mass_parts(&high, 0.4, 0.4);
+        let (low_region, low_link) = heat_mass_parts(&low, 0.4, 0.4);
+        assert!(high_region + high_link > low_region + low_link);
     }
 
     #[test]
     fn should_ignore_values_at_or_below_threshold() {
         let heat = heat_maps(0.4, 0.4, (4, 4));
-        assert_eq!(heat_mass_score(&heat, 0.4, 0.4), 0.0);
+        assert_eq!(heat_mass_parts(&heat, 0.4, 0.4), (0.0, 0.0));
     }
 
     #[test]
     fn should_keep_deg0_when_no_rotation_clears_the_margin() {
         // Deg90 edges Deg0 out by only 2%, under a 5% margin. ~keep
         let scores = [1.00, 1.02, 0.90, 0.80];
-        assert_eq!(pick_rotation(scores, 0.05), Rotation::Deg0);
+        assert_eq!(pick_rotation(scores, scores, 0.05), Rotation::Deg0);
     }
 
     #[test]
     fn should_switch_when_a_rotation_clears_the_margin() {
         // Deg270 beats Deg0 by 20%, clearing a 5% margin. ~keep
         let scores = [1.00, 0.90, 0.95, 1.20];
-        assert_eq!(pick_rotation(scores, 0.05), Rotation::Deg270);
+        assert_eq!(pick_rotation(scores, scores, 0.05), Rotation::Deg270);
     }
 
     #[test]
     fn should_favor_deg0_on_an_exact_tie() {
         let scores = [1.00, 1.00, 1.00, 1.00];
-        assert_eq!(pick_rotation(scores, 0.0), Rotation::Deg0);
+        assert_eq!(pick_rotation(scores, scores, 0.0), Rotation::Deg0);
     }
 
     #[test]
@@ -337,7 +370,42 @@ mod tests {
         // Deg0 is ~0; Deg90's tiny absolute score would clear a naive relative ~keep
         // margin against a raw-zero baseline, but the floor keeps it at Deg0. ~keep
         let scores = [0.0000001, 0.000001, 0.0, 0.0];
-        assert_eq!(pick_rotation(scores, 0.05), Rotation::Deg0);
+        assert_eq!(pick_rotation(scores, scores, 0.05), Rotation::Deg0);
+    }
+
+    #[test]
+    fn should_keep_deg0_when_the_link_score_refuses_the_combined_pick() {
+        // The dense-table false positive: the region-dominated combined score ~keep
+        // flips to Deg270 while the orientation-sensitive link score still reads ~keep
+        // the page as upright, so the two disagree and the page is left alone. ~keep
+        let combined = [1.00, 0.90, 0.95, 1.20];
+        let link = [1.00, 0.80, 0.90, 0.85];
+        assert_eq!(pick_rotation(combined, link, 0.05), Rotation::Deg0);
+    }
+
+    #[test]
+    fn should_keep_deg0_when_the_two_scores_pick_different_rotations() {
+        // Both halves want to rotate, but not to the same place; that is not a ~keep
+        // decision, so the page is left alone. ~keep
+        let combined = [1.00, 0.90, 0.95, 1.20];
+        let link = [1.00, 0.90, 1.30, 0.95];
+        assert_eq!(pick_rotation(combined, link, 0.05), Rotation::Deg0);
+    }
+
+    #[test]
+    fn should_switch_when_both_scores_agree_on_the_same_rotation() {
+        let combined = [1.00, 0.90, 0.95, 1.20];
+        let link = [1.00, 0.85, 0.90, 1.35];
+        assert_eq!(pick_rotation(combined, link, 0.05), Rotation::Deg270);
+    }
+
+    #[test]
+    fn should_keep_deg0_when_the_link_score_agrees_but_misses_the_margin() {
+        // The invoice_image false positive: both halves favor Deg270, but the ~keep
+        // link score's lead is under the margin, so it is not corroboration. ~keep
+        let combined = [1.00, 0.90, 0.95, 1.20];
+        let link = [1.00, 0.90, 0.95, 1.02];
+        assert_eq!(pick_rotation(combined, link, 0.05), Rotation::Deg0);
     }
 }
 
@@ -430,22 +498,39 @@ mod real_model_selection {
 
     #[test]
     #[ignore = "requires the real cached CRAFT model; run with --ignored"]
-    fn should_document_the_known_kannada_false_positive_when_enabled() {
-        // Honest limitation, not a regression: kannada.png's short lines and dense, ~keep
-        // loopy glyph strokes give it an unusually high baseline CRAFT activation in ~keep
-        // every orientation, so the margin gate that protects the other seven parity ~keep
-        // images doesn't protect this one — it flips to Deg270 by a ~12% margin, over ~keep
-        // the 5% default. This is why `detect_orientation` defaults to off: with the ~keep
-        // pre-pass disabled by default, this case never affects a real pipeline run. ~keep
-        // A future scorer change that fixes this may turn this into a `should_leave_*` ~keep
-        // case instead; if it starts failing because kannada stopped flipping, that's ~keep
-        // good news — update the test rather than treating it as a break. ADR 0037. ~keep
+    fn should_leave_dense_layouts_unrotated() {
         let backend = craft_backend();
         let config = DetectionConfig::default();
-        assert_eq!(pick(backend.as_ref(), "kannada.png", &config), Rotation::Deg270);
+        // Every upright page the region-dominated combined score alone flipped: dense ~keep
+        // tables, an invoice and a receipt. Each is held upright by the link score ~keep
+        // refusing the combined score's pick, so this is the regression coverage for ~keep
+        // the agreement rule itself, not incidental corpus breadth. ADR 0038. ~keep
+        let names = [
+            "financial_table_1.png",
+            "invoice_image.png",
+            "layout_parser_paper_with_table.jpg",
+            "cord_receipt_01.jpg",
+        ];
+        for name in names {
+            assert_eq!(pick(backend.as_ref(), name, &config), Rotation::Deg0, "{name}");
+        }
     }
 
-    /// One row per corpus image: `heat_mass_score` at all four rotations plus the
+    #[test]
+    #[ignore = "requires the real cached CRAFT model; run with --ignored"]
+    fn should_leave_kannada_unrotated_now_that_the_two_scores_must_agree() {
+        // kannada.png's short lines and dense, loopy glyph strokes give it a high ~keep
+        // baseline CRAFT activation in every orientation, and the combined score ~keep
+        // still flips it to Deg270 by ~12%. It stays upright only because the link ~keep
+        // score independently picks Deg180 instead, so the two disagree and the ~keep
+        // page is left alone — this is the case that motivated the agreement rule. ~keep
+        // ADR 0038. ~keep
+        let backend = craft_backend();
+        let config = DetectionConfig::default();
+        assert_eq!(pick(backend.as_ref(), "kannada.png", &config), Rotation::Deg0);
+    }
+
+    /// One row per corpus image: the combined region+link mass at all four rotations plus the
     /// relative margin the best-scoring *rotated* candidate holds over `Deg0`
     /// (the same quantity [`pick_rotation`] gates on), independent of any
     /// threshold. Diagnostic only, not an assertion: dumps the table so a human
@@ -503,7 +588,8 @@ mod real_model_selection {
                     preprocess::prepare_with_canvas(&rotated, config.orientation_probe_canvas_size, 1.0, None)
                         .expect("preprocess");
                 let heat = craft::run_craft(backend.as_ref(), prepared.tensor).expect("run craft");
-                scores[index] = heat_mass_score(&heat, config.low_text, config.link_threshold);
+                let (region_mass, link_mass) = heat_mass_parts(&heat, config.low_text, config.link_threshold);
+                scores[index] = region_mass + link_mass;
             }
             let (best_rotation, best_score) = Rotation::ALL.iter().zip(scores.iter()).skip(1).fold(
                 (Rotation::Deg90, scores[1]),

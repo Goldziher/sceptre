@@ -56,3 +56,4 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0035](0035-backend-accelerator-benchmark-matrix.md) | Backend × accelerator benchmark matrix (amends ADR 0032) | Accepted |
 | [0036](0036-opt-in-ctc-beam-search-decoding.md) | Opt-in CTC beam-search decoding, greedy stays default | Accepted |
 | [0037](0037-opt-in-whole-page-orientation-pre-pass.md) | Opt-in whole-page orientation pre-pass, disabled by default | Accepted |
+| [0038](0038-orientation-requires-two-agreeing-scores.md) | Orientation applies only when two independent scores agree (amends ADR 0037) | Accepted |

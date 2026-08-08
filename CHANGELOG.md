@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   total loss rather than a degradation — see
   [ADR 0037](adrs/0037-opt-in-whole-page-orientation-pre-pass.md) for the measured before/after
   tables and the false-positive analysis.
+- **The orientation pre-pass no longer rotates upright pages.** A rotation is applied only when the
+  combined region+link score and the link-only score independently select the same one, each
+  clearing `orientation_margin`. The two CRAFT heads fail in opposite directions — the region head
+  responds to stroke density rather than glyph orientation and drifts on dense tables and receipts,
+  while the link head discriminates orientation but is noisy on photographed scenes — so a rotation
+  one proposes and the other refuses is the signature of a false positive. Over the 23
+  orientation-labeled corpus images this goes from 18/23 to **23/23**: all five wrong rotations are
+  dropped, all six correcting rotations are kept, and no new false positive appears. No extra CRAFT
+  pass and no new config field. `detect_orientation` still defaults to `false`. See
+  [ADR 0038](adrs/0038-orientation-requires-two-agreeing-scores.md).
 - **Opt-in CTC beam-search decoding.** `RecognitionConfig::decoder` accepts `Decoder::BeamSearch`,
   a faithful port of EasyOCR's `ctcBeamSearch` (`recognize/beam.rs`), reusing the greedy path's
   probability matrix and `custom_mean` confidence so confidence stays comparable across decoders.
