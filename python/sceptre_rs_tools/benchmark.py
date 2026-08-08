@@ -41,6 +41,7 @@ import re
 import statistics
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
@@ -527,9 +528,11 @@ def measure_sceptre_overhead(binary: Path, entries: list[CorpusEntry], root: Pat
 # --------------------------------------------------------------------------------------
 
 
-def _easyocr_runner_command(images: list[Path], easyocr_codes: list[str], threads: int | None) -> list[str]:
+def _easyocr_runner_command(
+    images: list[Path], easyocr_codes: list[str], threads: int | None, output: Path
+) -> list[str]:
     """Build the ``_easyocr_runner`` argument vector for a batch sharing one language set."""
-    command = [sys.executable, "-m", "sceptre_rs_tools._easyocr_runner"]
+    command = [sys.executable, "-m", "sceptre_rs_tools._easyocr_runner", "--output", str(output)]
     for code in easyocr_codes:
         command += ["--lang", code]
     if threads is not None:
@@ -562,17 +565,28 @@ def _run_easyocr_batch_once(
     images: list[Path], easyocr_codes: list[str], root: Path, threads: int | None
 ) -> tuple[float, float | None, float | None, float | None, dict[str, str], dict[str, ImageDetections]]:
     """One warm ``_easyocr_runner`` subprocess; (seconds, rss, cpu_core_seconds, build, versions, per_image)."""
-    wrapped = _time_wrapper() + _easyocr_runner_command(images, easyocr_codes, threads)
-    start = perf_counter()
-    completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
-    seconds = perf_counter() - start
-    rss = _parse_child_rss(completed.stderr)
-    cpu_core_seconds = _parse_child_cpu_seconds(completed.stderr)
-    try:
-        build_seconds, versions, per_image = _parse_easyocr_runner_json(completed.stdout)
-    except json.JSONDecodeError as error:
-        clean = _strip_time_stats(completed.stderr)[-300:]
-        raise RuntimeError(f"easyocr runner produced no JSON (exit {completed.returncode}): {clean}") from error
+    with tempfile.TemporaryDirectory(prefix="sceptre-easyocr-") as tmp:
+        payload_path = Path(tmp) / "result.json"
+        wrapped = _time_wrapper() + _easyocr_runner_command(images, easyocr_codes, threads, payload_path)
+        start = perf_counter()
+        completed = subprocess.run(wrapped, capture_output=True, text=True, cwd=root, check=False)
+        seconds = perf_counter() - start
+        rss = _parse_child_rss(completed.stderr)
+        cpu_core_seconds = _parse_child_cpu_seconds(completed.stderr)
+        payload = payload_path.read_text(encoding="utf-8") if payload_path.is_file() else ""
+        try:
+            build_seconds, versions, per_image = _parse_easyocr_runner_json(payload)
+        except json.JSONDecodeError as error:
+            # Report both streams: the payload is what failed to parse, but the reason the
+            # runner produced none is almost always in its stderr. ~keep
+            out = _strip_time_stats(completed.stdout)[-300:]
+            err = _strip_time_stats(completed.stderr)[-600:]
+            raise RuntimeError(
+                f"easyocr runner produced no JSON (exit {completed.returncode})\n"
+                f"  payload ({len(payload)} chars): {payload[:200]!r}\n"
+                f"  stdout tail: {out!r}\n"
+                f"  stderr tail: {err!r}"
+            ) from error
     return seconds, rss, cpu_core_seconds, build_seconds, versions, per_image
 
 

@@ -103,12 +103,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--lang", action="append", dest="languages", default=[], help="EasyOCR language code (repeatable)."
     )
     parser.add_argument("--threads", type=int, default=None, help="Pin torch/OMP to N threads (default: torch native).")
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Write the result JSON to this file instead of stdout (the benchmark always passes it).",
+    )
     parser.add_argument("images", nargs="+", help="Image paths to recognize.")
     return parser.parse_args(argv)
 
 
 def main() -> None:
-    """CLI entry point: emit the batch result JSON on stdout."""
+    """CLI entry point: emit the batch result JSON to ``--output``, or stdout when unset."""
     args = parse_args()
     try:
         import easyocr  # noqa: F401 - probe availability before doing any work
@@ -122,8 +127,17 @@ def main() -> None:
 
     languages = args.languages or ["en"]
     result = run(languages, args.images, args.threads)
-    json.dump(result, sys.stdout, ensure_ascii=False)
-    sys.stdout.write("\n")
+    payload = json.dumps(result, ensure_ascii=False)
+    # torch and easyocr both write to stdout (a DataLoader pin_memory warning, model-download
+    # progress), so stdout is not a trustworthy data channel for this subprocess. Writing to a
+    # file the caller names keeps the payload out of their way and survives a dropped buffer. ~keep
+    if args.output is not None:
+        with open(args.output, "w", encoding="utf-8") as handle:
+            handle.write(payload + "\n")
+            handle.flush()
+        return
+    sys.stdout.write(payload + "\n")
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":

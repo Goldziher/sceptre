@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -500,3 +502,51 @@ def test_render_markdown_reports_the_runtime_line() -> None:
 def test_render_markdown_omits_the_runtime_line_without_an_environment() -> None:
     markdown = b.render_markdown(_report(0.9, 0.8, 500.0, 11000.0))
     assert "- Runtime:" not in markdown
+
+
+def test_easyocr_runner_command_names_the_output_file(tmp_path: Path) -> None:
+    out = tmp_path / "result.json"
+    command = b._easyocr_runner_command([Path("a.png")], ["en"], None, out)
+    assert "--output" in command
+    assert command[command.index("--output") + 1] == str(out)
+
+
+def test_easyocr_runner_writes_json_to_output_despite_stdout_noise(tmp_path: Path) -> None:
+    """The runner's payload must survive a dependency writing to stdout.
+
+    torch's DataLoader emits a `pin_memory` UserWarning on any accelerator-less host, and
+    easyocr prints model-download progress. Both land on stdout, so a runner that returned
+    its payload there produced unparseable output on exactly the CPU-only Linux runners the
+    benchmark is measured on. This stubs `easyocr` with a module that pollutes stdout the
+    same way and asserts the payload still arrives intact.
+    """
+    stub = tmp_path / "stub"
+    stub.mkdir()
+    (stub / "easyocr.py").write_text(
+        "import sys\n"
+        "__version__ = '1.7.2'\n"
+        "sys.stdout.write('pinned memory will not be used.\\n')\n"
+        "class Reader:\n"
+        "    def __init__(self, languages, gpu=False):\n"
+        "        sys.stdout.write('Progress: 100%\\n')\n"
+        "    def readtext(self, image):\n"
+        "        return [([[0, 0], [1, 0], [1, 1], [0, 1]], 'HI', 0.9)]\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "result.json"
+    package_root = Path(b.__file__).resolve().parent.parent
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(stub), str(package_root)]))
+    completed = subprocess.run(
+        [sys.executable, "-m", "sceptre_rs_tools._easyocr_runner", "--output", str(out), "a.png"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "pinned memory" in completed.stdout
+    build, versions, per_image = b._parse_easyocr_runner_json(out.read_text(encoding="utf-8"))
+    assert build is not None
+    assert versions["easyocr"] == "1.7.2"
+    assert per_image["a.png"].text == "HI"
