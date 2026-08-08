@@ -86,6 +86,7 @@ impl TextDetector for CraftDetector {
             self.config.canvas_size,
             self.config.mag_ratio,
             self.fixed_canvas,
+            self.config.max_megapixels,
         )?;
         let heat = super::craft::run_craft(self.backend.as_ref(), prepared.tensor)?;
         let mut boxes = super::postprocess::get_det_boxes(

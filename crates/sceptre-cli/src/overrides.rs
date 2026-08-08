@@ -56,6 +56,13 @@ pub struct OcrOverrides {
     #[arg(long)]
     canvas_size: Option<u32>,
 
+    /// Cap the padded detection input's area, in megapixels, bounding peak detection
+    /// memory directly instead of indirectly through `--canvas-size`. Composes with
+    /// `--canvas-size`: whichever constraint is more restrictive wins. Unset by
+    /// default (see `sceptre::DetectionConfig::max_megapixels`).
+    #[arg(long)]
+    max_megapixels: Option<f32>,
+
     /// Enable a whole-page orientation pre-pass before detection: probe 0/90/180/270°
     /// rotations and run detection on the best-scoring one. Off by default (see
     /// `sceptre::DetectionConfig::detect_orientation`).
@@ -205,6 +212,9 @@ impl OcrOverrides {
         if let Some(canvas_size) = self.canvas_size {
             config.detection.canvas_size = canvas_size;
         }
+        if let Some(max_megapixels) = self.max_megapixels {
+            config.detection.max_megapixels = Some(max_megapixels);
+        }
         if self.detect_orientation {
             config.detection.detect_orientation = true;
         }
@@ -289,5 +299,28 @@ mod tests {
         assert!(config.detection.detect_orientation);
         assert_eq!(config.detection.orientation_probe_canvas_size, 640);
         assert_eq!(config.detection.orientation_margin, 0.1);
+    }
+
+    #[test]
+    fn should_leave_max_megapixels_unset_by_default() {
+        let overrides = OcrOverrides::default();
+        let mut config = sceptre::OcrConfig::default();
+
+        overrides.apply(&mut config);
+
+        assert_eq!(config.detection.max_megapixels, None);
+    }
+
+    #[test]
+    fn should_apply_max_megapixels_override_when_set() {
+        let overrides = OcrOverrides {
+            max_megapixels: Some(4.0),
+            ..OcrOverrides::default()
+        };
+        let mut config = sceptre::OcrConfig::default();
+
+        overrides.apply(&mut config);
+
+        assert_eq!(config.detection.max_megapixels, Some(4.0));
     }
 }

@@ -137,6 +137,7 @@ impl ReaderBuilder {
     /// [`SceptreEngine`] is constructed from the config and the resolved model
     /// provider and progress sink.
     pub fn build(self) -> Result<Reader> {
+        self.config.detection.validate()?;
         self.config.recognition.validate()?;
         self.config.model.validate()?;
         let budget = resolve_thread_budget(Some(&self.config.concurrency));

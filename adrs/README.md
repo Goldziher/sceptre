@@ -59,4 +59,4 @@ This directory holds the project's Architecture Decision Records (ADRs) in
 | [0038](0038-orientation-requires-two-agreeing-scores.md) | Orientation applies only when two independent scores agree (amends ADR 0037) | Accepted |
 | [0039](0039-opencv-faithful-min-area-rect.md) | OpenCV-faithful min-area-rect fitting (supersedes ADR 0013's min-area-rect step) | Accepted |
 | [0040](0040-models-hosted-under-the-xberg-io-hf-org.md) | Model artifacts hosted under the `xberg-io` Hugging Face org (amends ADR 0025) | Accepted |
-| [0042](0042-host-scoped-benchmark-floors.md) | Host-scoped absolute benchmark floors (amends ADR 0021) | Accepted |
+| [0041](0041-detection-megapixel-budget.md) | Opt-in megapixel budget for detection, `canvas_size` default unchanged | Accepted |

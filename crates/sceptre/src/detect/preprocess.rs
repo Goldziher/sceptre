@@ -20,6 +20,11 @@ const CHANNELS: usize = 3;
 const U8_MAX: f32 = 255.0;
 /// CRAFT requires spatial dimensions to be multiples of this alignment.
 const ALIGN: u32 = 32;
+/// Pixels per megapixel, for converting [`DetectionConfig::max_megapixels`]
+/// (a fractional megapixel count) into a pixel-area budget.
+///
+/// [`DetectionConfig::max_megapixels`]: crate::config::DetectionConfig::max_megapixels
+const PIXELS_PER_MEGAPIXEL: f64 = 1_000_000.0;
 /// ImageNet per-channel mean (RGB order), in `[0, 1]`.
 const IMAGENET_MEAN: [f32; CHANNELS] = [0.485, 0.456, 0.406];
 /// ImageNet per-channel standard deviation (RGB order), in `[0, 1]`.
@@ -48,7 +53,7 @@ pub(super) struct Prepared {
 // preprocess shim; production detection calls `prepare_with_canvas` directly. ~keep
 #[cfg(any(test, feature = "bench"))]
 pub(super) fn prepare(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result<Prepared> {
-    prepare_with_canvas(image, canvas_size, mag_ratio, None)
+    prepare_with_canvas(image, canvas_size, mag_ratio, None, None)
 }
 
 /// [`prepare`], but with an optional fixed square output canvas.
@@ -60,11 +65,18 @@ pub(super) fn prepare(image: &Image, canvas_size: u32, mag_ratio: f32) -> Result
 /// by the `tract` backend, which cannot shape-infer CRAFT under dynamic H/W and is instead
 /// pinned to this one shape (see ADR 0027). `canvas` must be a multiple of 32 and at least
 /// as large as the resized image; otherwise this errors.
+///
+/// `max_megapixels`, when set, further constrains the resize target so the padded
+/// output area stays within the budget (see [`resize_dimensions_within_budget`]);
+/// `None` reproduces the unconstrained `canvas_size`/`mag_ratio` sizing exactly. On
+/// the `fixed_canvas` path the padded output area is pinned by `canvas` regardless,
+/// so the budget only shrinks the real (unpadded) content pasted into that square.
 pub(super) fn prepare_with_canvas(
     image: &Image,
     canvas_size: u32,
     mag_ratio: f32,
     fixed_canvas: Option<u32>,
+    max_megapixels: Option<f32>,
 ) -> Result<Prepared> {
     let width = image.width();
     let height = image.height();
@@ -72,7 +84,8 @@ pub(super) fn prepare_with_canvas(
         return Err(OcrError::image("cannot preprocess an image with zero width or height"));
     }
 
-    let (ratio, target_h, target_w) = resize_dimensions(height, width, canvas_size, mag_ratio);
+    let (ratio, target_h, target_w) =
+        resize_dimensions_within_budget(height, width, canvas_size, mag_ratio, max_megapixels);
     let source = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, image.as_rgb8())
         .ok_or_else(|| OcrError::image("failed to build RGB image view from raw RGB8 buffer"))?;
     let resized = resize(&source, target_w, target_h, FilterType::Triangle);
@@ -133,6 +146,57 @@ fn resize_dimensions(height: u32, width: u32, canvas_size: u32, mag_ratio: f32) 
     let target_h = ((height as f32) * ratio).trunc().max(1.0) as u32;
     let target_w = ((width as f32) * ratio).trunc().max(1.0) as u32;
     (ratio, target_h, target_w)
+}
+
+/// [`resize_dimensions`], further capped so the padded output area stays within
+/// `max_megapixels` (`None` is a no-op, reproducing [`resize_dimensions`] exactly).
+///
+/// `canvas_size` already caps the resize target's longest side; as that cap shrinks,
+/// [`resize_dimensions`]'s target dimensions (and therefore the padded area) are
+/// monotonically non-decreasing, so binary-searching the largest effective cap in
+/// `[1, canvas_size]` whose padded area fits the budget finds the least-restrictive
+/// size satisfying it, without ever exceeding what `canvas_size` alone allows — the
+/// two constraints compose as their minimum. A budget too small for even a
+/// single-pixel image (padded to `ALIGN × ALIGN`) is a best-effort floor, not an
+/// error: the search still returns the smallest achievable size.
+fn resize_dimensions_within_budget(
+    height: u32,
+    width: u32,
+    canvas_size: u32,
+    mag_ratio: f32,
+    max_megapixels: Option<f32>,
+) -> (f32, u32, u32) {
+    let unconstrained = resize_dimensions(height, width, canvas_size, mag_ratio);
+    let Some(max_megapixels) = max_megapixels else {
+        return unconstrained;
+    };
+    let budget_pixels = f64::from(max_megapixels) * PIXELS_PER_MEGAPIXEL;
+    let (_, unconstrained_h, unconstrained_w) = unconstrained;
+    if padded_area_pixels(unconstrained_h, unconstrained_w) <= budget_pixels {
+        return unconstrained;
+    }
+
+    let mut lo: u32 = 1;
+    let mut hi: u32 = canvas_size.max(1);
+    while lo < hi {
+        // Bias the midpoint up so the loop converges on the largest cap that fits,
+        // rather than looping forever narrowing toward `lo`. ~keep
+        let mid = lo + (hi - lo).div_ceil(2);
+        let (_, mid_h, mid_w) = resize_dimensions(height, width, mid, mag_ratio);
+        if padded_area_pixels(mid_h, mid_w) <= budget_pixels {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    resize_dimensions(height, width, lo, mag_ratio)
+}
+
+/// The padded (multiple-of-32) area, in pixels, that `resize_dimensions` output of
+/// `target_h × target_w` would occupy once padded — the quantity the megapixel
+/// budget bounds, since that is what the RSS-vs-area fit in ADR 0041 measured.
+fn padded_area_pixels(target_h: u32, target_w: u32) -> f64 {
+    f64::from(pad_to_multiple(target_h, ALIGN)) * f64::from(pad_to_multiple(target_w, ALIGN))
 }
 
 /// Round `value` up to the next multiple of `align` (leaving multiples unchanged).
@@ -214,6 +278,145 @@ mod tests {
             pixels.extend_from_slice(&rgb);
         }
         Image::from_rgb8(width, height, pixels).expect("valid rgb buffer")
+    }
+
+    /// Sizes exercised by the megapixel-budget tests, chosen to cover square,
+    /// landscape, portrait, sub-alignment, and already-aligned dimensions.
+    const BUDGET_TEST_SIZES: [(u32, u32); 6] =
+        [(100, 50), (50, 100), (2560, 2560), (4000, 3000), (33, 17), (1024, 1024)];
+
+    /// Assert two `resize_dimensions`-shaped tuples are identical: bit-exact on the
+    /// `f32` ratio (both sides come from the same deterministic formula, so bitwise
+    /// equality — not an epsilon compare — is the right bar) and exact on target
+    /// height/width.
+    fn assert_dimensions_identical(actual: (f32, u32, u32), expected: (f32, u32, u32), context: &str) {
+        assert_eq!(
+            actual.0.to_bits(),
+            expected.0.to_bits(),
+            "{context}: ratio differs ({} vs {})",
+            actual.0,
+            expected.0
+        );
+        assert_eq!(
+            (actual.1, actual.2),
+            (expected.1, expected.2),
+            "{context}: target dimensions differ"
+        );
+    }
+
+    #[test]
+    fn should_leave_resize_dimensions_unchanged_when_budget_is_none() {
+        for (width, height) in BUDGET_TEST_SIZES {
+            let unconstrained = resize_dimensions(height, width, 2560, 1.0);
+            let with_budget = resize_dimensions_within_budget(height, width, 2560, 1.0, None);
+            assert_dimensions_identical(
+                with_budget,
+                unconstrained,
+                &format!("width={width} height={height}: absent budget must reproduce today's sizing exactly"),
+            );
+        }
+    }
+
+    #[test]
+    fn should_leave_prepare_with_canvas_tensor_shape_unchanged_when_budget_is_none() {
+        for (width, height) in BUDGET_TEST_SIZES {
+            let image = solid_image(width, height, [7, 8, 9]);
+            let without_field = prepare_with_canvas(&image, 2560, 1.0, None, None).expect("prepare succeeds");
+            let baseline = prepare(&image, 2560, 1.0).expect("prepare succeeds");
+            assert_eq!(
+                without_field.tensor.shape(),
+                baseline.tensor.shape(),
+                "width={width} height={height}: an absent budget must not change the padded tensor shape"
+            );
+        }
+    }
+
+    #[test]
+    fn should_be_a_no_op_when_budget_exceeds_the_image() {
+        // 4000x3000 padded is well under 100 MP, so a 100 MP budget must never bind. ~keep
+        for (width, height) in BUDGET_TEST_SIZES {
+            let unconstrained = resize_dimensions(height, width, 2560, 1.0);
+            let with_budget = resize_dimensions_within_budget(height, width, 2560, 1.0, Some(100.0));
+            assert_dimensions_identical(
+                with_budget,
+                unconstrained,
+                &format!("width={width} height={height}: a budget larger than the image must be a no-op"),
+            );
+        }
+    }
+
+    #[test]
+    fn should_shrink_to_fit_a_restrictive_budget() {
+        let (width, height) = (4000u32, 3000u32);
+        let budget_mp = 0.5f32;
+        let (ratio, target_h, target_w) = resize_dimensions_within_budget(height, width, 2560, 1.0, Some(budget_mp));
+
+        let padded_h = pad_to_multiple(target_h, ALIGN);
+        let padded_w = pad_to_multiple(target_w, ALIGN);
+        assert!(
+            f64::from(padded_h) * f64::from(padded_w) <= f64::from(budget_mp) * PIXELS_PER_MEGAPIXEL,
+            "padded area {padded_h}x{padded_w} must fit the {budget_mp} MP budget"
+        );
+        assert_eq!(padded_h % ALIGN, 0);
+        assert_eq!(padded_w % ALIGN, 0);
+        assert!(
+            ratio > 0.0,
+            "a satisfiable budget must not collapse the image to nothing"
+        );
+
+        let expected_aspect = height as f64 / width as f64;
+        let actual_aspect = target_h as f64 / target_w as f64;
+        assert!(
+            (actual_aspect - expected_aspect).abs() < 0.01,
+            "budget-constrained resize must preserve aspect ratio: expected {expected_aspect}, got {actual_aspect}"
+        );
+    }
+
+    #[test]
+    fn should_compose_with_canvas_size_as_a_minimum() {
+        let (width, height) = (4000u32, 3000u32);
+
+        // A tight canvas_size is the binding constraint when the budget is generous. ~keep
+        let canvas_only = resize_dimensions(height, width, 200, 1.0);
+        let with_generous_budget = resize_dimensions_within_budget(height, width, 200, 1.0, Some(1000.0));
+        assert_dimensions_identical(
+            with_generous_budget,
+            canvas_only,
+            "a generous budget must not override a tighter canvas_size",
+        );
+
+        // A tight budget is the binding constraint when canvas_size is generous, and
+        // raising canvas_size further changes nothing once the budget already binds. ~keep
+        let (_, tight_budget_h, tight_budget_w) = resize_dimensions_within_budget(height, width, 2560, 1.0, Some(0.1));
+        let (_, wider_canvas_h, wider_canvas_w) = resize_dimensions_within_budget(height, width, 4000, 1.0, Some(0.1));
+        assert_eq!((tight_budget_h, tight_budget_w), (wider_canvas_h, wider_canvas_w));
+        assert!(
+            f64::from(pad_to_multiple(tight_budget_h, ALIGN)) * f64::from(pad_to_multiple(tight_budget_w, ALIGN))
+                <= 0.1 * PIXELS_PER_MEGAPIXEL,
+            "a tight budget must bind even under a generous canvas_size"
+        );
+    }
+
+    #[test]
+    fn should_keep_padded_area_within_budget_across_a_range_of_dimensions() {
+        // Property-style sweep: for every (width, height) on a grid plus odd/prime
+        // sizes, and every budget tried, the padded area must never exceed it. ~keep
+        let dimensions: Vec<(u32, u32)> = (1..=20)
+            .flat_map(|w| (1..=20).map(move |h| (w * 137, h * 97)))
+            .collect();
+        let budgets = [0.05f32, 0.25, 1.0, 4.0, 16.0];
+
+        for (width, height) in dimensions {
+            for budget in budgets {
+                let (_, target_h, target_w) = resize_dimensions_within_budget(height, width, 2560, 1.0, Some(budget));
+                let area = padded_area_pixels(target_h, target_w);
+                let budget_pixels = f64::from(budget) * PIXELS_PER_MEGAPIXEL;
+                assert!(
+                    area <= budget_pixels,
+                    "width={width} height={height} budget={budget}MP: padded area {area} exceeds budget {budget_pixels}"
+                );
+            }
+        }
     }
 
     #[test]

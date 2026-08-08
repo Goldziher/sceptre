@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{OcrError, Result};
+
 /// Parameters controlling CRAFT detection and box grouping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -48,6 +50,17 @@ pub struct DetectionConfig {
     /// against flipping an already-upright page on a marginal score difference.
     /// Default `0.05` (5%).
     pub orientation_margin: f32,
+    /// Opt-in cap on the padded detection input's area, in megapixels.
+    ///
+    /// Peak memory during detection tracks the padded CRAFT input's area, not its
+    /// longest side (see ADR 0041), so this bounds memory directly where
+    /// [`canvas_size`](Self::canvas_size) only bounds it indirectly. When set, it
+    /// further constrains the resize target computed from `canvas_size` and
+    /// `mag_ratio` so the padded (multiple-of-32) input area stays within the
+    /// budget; the effective canvas is the minimum of what `canvas_size` and this
+    /// budget each allow. `None` (the default) leaves detection input sizing
+    /// exactly as `canvas_size`/`mag_ratio` compute it today.
+    pub max_megapixels: Option<f32>,
 }
 
 impl Default for DetectionConfig {
@@ -67,7 +80,23 @@ impl Default for DetectionConfig {
             detect_orientation: false,
             orientation_probe_canvas_size: 1280,
             orientation_margin: 0.05,
+            max_megapixels: None,
         }
+    }
+}
+
+impl DetectionConfig {
+    /// Validate detection settings consumed by the engine.
+    pub(crate) fn validate(&self) -> Result<()> {
+        if let Some(max_megapixels) = self.max_megapixels {
+            let valid = max_megapixels.is_finite() && max_megapixels > 0.0;
+            if !valid {
+                return Err(OcrError::config(format!(
+                    "detection.max_megapixels must be finite and greater than 0, got {max_megapixels}"
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -81,6 +110,67 @@ mod tests {
         assert!(!config.detect_orientation);
         assert_eq!(config.orientation_probe_canvas_size, 1280);
         assert_eq!(config.orientation_margin, 0.05);
+    }
+
+    #[test]
+    fn should_default_max_megapixels_to_none() {
+        let config = DetectionConfig::default();
+        assert_eq!(config.max_megapixels, None);
+    }
+
+    #[test]
+    fn should_accept_absent_max_megapixels() {
+        let config = DetectionConfig {
+            max_megapixels: None,
+            ..DetectionConfig::default()
+        };
+        config.validate().expect("no budget is always valid");
+    }
+
+    #[test]
+    fn should_accept_a_positive_finite_max_megapixels() {
+        let config = DetectionConfig {
+            max_megapixels: Some(4.0),
+            ..DetectionConfig::default()
+        };
+        config.validate().expect("a positive finite budget is valid");
+    }
+
+    #[test]
+    fn should_reject_zero_max_megapixels() {
+        let config = DetectionConfig {
+            max_megapixels: Some(0.0),
+            ..DetectionConfig::default()
+        };
+        let error = config.validate().expect_err("zero budget must be rejected");
+        assert!(error.to_string().contains("max_megapixels"));
+    }
+
+    #[test]
+    fn should_reject_negative_max_megapixels() {
+        let config = DetectionConfig {
+            max_megapixels: Some(-1.0),
+            ..DetectionConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn should_reject_nan_max_megapixels() {
+        let config = DetectionConfig {
+            max_megapixels: Some(f32::NAN),
+            ..DetectionConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn should_reject_infinite_max_megapixels() {
+        let config = DetectionConfig {
+            max_megapixels: Some(f32::INFINITY),
+            ..DetectionConfig::default()
+        };
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -98,6 +188,19 @@ mod tests {
         assert!(restored.detect_orientation);
         assert_eq!(restored.orientation_probe_canvas_size, 640);
         assert_eq!(restored.orientation_margin, 0.1);
+    }
+
+    #[test]
+    fn should_round_trip_max_megapixels_through_json() {
+        let config = DetectionConfig {
+            max_megapixels: Some(6.5),
+            ..DetectionConfig::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("serialize");
+        let restored: DetectionConfig = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(restored.max_megapixels, Some(6.5));
     }
 
     #[test]

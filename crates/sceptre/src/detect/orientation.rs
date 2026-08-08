@@ -146,7 +146,7 @@ pub(crate) fn select_rotation(
     let mut link = [0.0f32; 4];
     for (index, rotation) in Rotation::ALL.into_iter().enumerate() {
         let rotated = rotate_image(image, rotation)?;
-        let prepared = preprocess::prepare_with_canvas(&rotated, probe_canvas, 1.0, None)?;
+        let prepared = preprocess::prepare_with_canvas(&rotated, probe_canvas, 1.0, None, None)?;
         let heat = craft::run_craft(backend, prepared.tensor)?;
         let (region_mass, link_mass) = heat_mass_parts(&heat, low_text, link_threshold);
         combined[index] = region_mass + link_mass;
@@ -585,7 +585,7 @@ mod real_model_selection {
             for (index, rotation) in Rotation::ALL.into_iter().enumerate() {
                 let rotated = rotate_image(&image, rotation).expect("rotate");
                 let prepared =
-                    preprocess::prepare_with_canvas(&rotated, config.orientation_probe_canvas_size, 1.0, None)
+                    preprocess::prepare_with_canvas(&rotated, config.orientation_probe_canvas_size, 1.0, None, None)
                         .expect("preprocess");
                 let heat = craft::run_craft(backend.as_ref(), prepared.tensor).expect("run craft");
                 let (region_mass, link_mass) = heat_mass_parts(&heat, config.low_text, config.link_threshold);
