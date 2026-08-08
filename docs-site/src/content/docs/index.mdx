@@ -28,9 +28,9 @@ import { Card, CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/comp
 
 sceptre is a from-scratch Rust reimplementation of [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s
 pipeline — **CRAFT** text detection then **gen2 CRNN** recognition with CTC decoding, over ONNX. It
-agrees with EasyOCR's output on every script it supports, runs **faster on a fraction of the
-memory**, and ships as one self-contained binary with **no Python runtime**. Use it as a
-**library**, a **CLI**, or an **MCP server**.
+agrees with EasyOCR's output on every script it supports, runs **faster** with **no Python
+runtime**, and ships as one self-contained binary. Use it as a **library**, a **CLI**, or an
+**MCP server**.
 
 ## Why sceptre
 
@@ -40,13 +40,14 @@ memory**, and ships as one self-contained binary with **no Python runtime**. Use
     Japanese, Korean, Cyrillic, Telugu, Kannada — on both text and boxes, to a per-image word-F1
     and box-IoU floor rather than character-for-character equality.
   </Card>
-  <Card title="Substantially faster" icon="rocket">
-    ~2.8× higher throughput than EasyOCR warm on the same corpus — and a cold, one-shot CLI run
-    (~4.4×) still beats EasyOCR's already-loaded reader.
+  <Card title="Faster, warm or cold" icon="rocket">
+    Higher throughput than EasyOCR's warm reader on the same corpus — and a cold, one-shot CLI run
+    still beats it. See [Benchmarks](/reference/benchmarks/) for the measured numbers.
   </Card>
-  <Card title="A fraction of the memory" icon="laptop">
-    Peak RSS around 3× lower than the Python + torch process, measured like-for-like. Runs where
-    EasyOCR won't — small containers, edge boxes, many workers.
+  <Card title="Memory tracks the model, not a runtime" icon="laptop">
+    Peak memory is dominated by the CRAFT detector both engines share, so it scales with page
+    size rather than with the process behind it — no interpreter or torch runtime to add on top.
+    See [Benchmarks](/reference/benchmarks/).
   </Card>
   <Card title="One binary, no Python" icon="seti:rust">
     A single static executable. Models download once, cache locally, and run offline thereafter.

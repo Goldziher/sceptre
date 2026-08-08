@@ -40,10 +40,10 @@ EasyOCR is accurate, but it is a PyTorch stack: a Python interpreter, a multi-gi
 keep warm. sceptre is a from-scratch Rust reimplementation of the same pipeline — **CRAFT** text detection then **gen2
 CRNN** recognition with CTC decoding, over ONNX — that keeps the accuracy and drops all of that.
 
-It agrees with [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s output across the scripts it supports, runs several
-times faster on a fraction of the memory — even a cold one-shot run beats EasyOCR warm ([measured
-figures](#benchmarks)) — and ships as one self-contained executable. Models download once, cache locally, and run
-offline thereafter. Use it as a Rust library, a CLI, or an MCP server.
+It agrees with [EasyOCR](https://github.com/JaidedAI/EasyOCR)'s output across the scripts it supports, runs faster —
+even a cold, one-shot run beats EasyOCR's warm reader ([measured figures](#benchmarks)) — and ships as one
+self-contained executable with no Python runtime. Models download once, cache locally, and run offline thereafter.
+Use it as a Rust library, a CLI, or an MCP server.
 
 Every model call goes through one backend seam, so the deployment target is a build-time choice rather than a rewrite:
 ONNX Runtime for native speed, pure-Rust ONNX for WASM and Android, and `candle` for GPU devices or a build that links
@@ -54,8 +54,8 @@ no ONNX Runtime at all.
 | Feature | Description |
 | ------- | ----------- |
 | **Parity accuracy** | Validated against real EasyOCR output across the gen2 scripts — English, Latin, Simplified Chinese, Japanese, Korean, Cyrillic, Telugu, Kannada — on text (word/char-F1) and boxes (IoU), held to a per-image floor rather than character-for-character equality |
-| **Several times faster** | Higher throughput than EasyOCR warm on the same corpus; even a cold, one-shot CLI run beats EasyOCR's already-loaded reader ([measured figures](#benchmarks)) |
-| **A fraction of the memory** | Peak RSS several times lower than the Python + torch process, measured like-for-like as whole-process peaks |
+| **Faster, warm or cold** | Higher throughput than EasyOCR warm on the same corpus; even a cold, one-shot CLI run beats EasyOCR's already-loaded reader ([measured figures](#benchmarks)) |
+| **No Python, no torch** | No interpreter, no multi-gigabyte runtime, no process to keep warm; peak memory is dominated by the CRAFT detector both engines share, so it scales with page size — see [benchmarks](#benchmarks) |
 | **One binary, no Python** | A single self-contained executable. Models download once, cache locally, and run offline thereafter — nothing to `pip install`, no interpreter to ship |
 | **Three surfaces** | The same engine as a Rust library, a CLI (`sceptre`), and an MCP server for agents |
 | **Three backends, one seam** | ONNX Runtime (`ort`) for native speed, pure-Rust ONNX (`tract`) for WASM / Android, and `candle` for a GPU or a build with no ONNX Runtime at all |
@@ -156,7 +156,9 @@ text and receipts, across the English, Latin, Chinese-simplified, Japanese and K
 groups — on CPU. Both engines are measured **identically**: each a fresh subprocess per language
 group under `/usr/bin/time`, at its native multi-threaded default, loading its model/reader once and
 processing every image — so peak RSS is a like-for-like whole-process figure (EasyOCR's legitimately
-includes the torch runtime). Numbers vary with hardware and load; the **ratios** are the point.
+includes the torch runtime). Numbers vary with hardware and load, and peak RSS is dominated by the
+CRAFT detector both engines share, so its ratio narrows toward parity as page size grows — see the
+[benchmarks page](https://docs.sceptre.xberg.io/reference/benchmarks/) for the full methodology.
 
 The table below is generated from [`benchmarks/published/latest.json`](benchmarks/published/latest.json)
 by `task python:publish`; CI fails if the two drift apart. Do not edit it by hand.
@@ -176,8 +178,11 @@ python:publish`.
 <!-- generated:benchmark-headline:end -->
 
 The accuracy columns are the parity check — sceptre and EasyOCR land on the same reading of the
-corpus; the win is speed and memory. Even a cold, one-shot CLI run, which pays model load on every
-invocation, still beats EasyOCR's already-warm reader.
+corpus; the speedup is the win. Even a cold, one-shot CLI run, which pays model load on every
+invocation, still beats EasyOCR's already-warm reader. Peak memory is dominated by the CRAFT
+detector both engines share, so it tracks page size rather than the runtime; sceptre's memory
+advantage is having no Python/torch process at all, which shows up on smaller pages and in process
+count rather than as a fixed ratio.
 
 **Runtime scope.** Every figure above — speed, memory, and the parity claim — was produced on the
 `ort` backend running the **CPU execution provider**, which is what `model.accelerator` defaults to.

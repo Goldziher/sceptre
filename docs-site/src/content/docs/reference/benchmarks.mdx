@@ -37,7 +37,8 @@ beats EasyOCR's warm, already-loaded reader.
 
 Quality (CER, WER, token-F1) is averaged over the labeled subset of the corpus only, scored against
 ground truth. The accuracy columns are the parity check: sceptre reads the corpus the same way
-EasyOCR does, so the speed and memory columns are the actual difference.
+EasyOCR does. Peak RSS is dominated by the CRAFT detector both engines share, so its ratio narrows
+toward parity as page size grows — throughput is the more stable difference between the two.
 
 ## Methodology
 
@@ -89,7 +90,8 @@ measures end-to-end OCR against EasyOCR. Parity fixtures backing the quality sig
 [`crates/sceptre/tests/data/golden/`](https://github.com/xberg-io/sceptre/tree/main/crates/sceptre/tests/data/golden).
 
 <Aside type="note">
-  The regression gate (`--assert`) enforces three floors — warm speedup ≥ 2.0×, peak-RSS ratio ≥ 3×,
-  and labeled token-F1 within 0.05 of EasyOCR — run manually via `workflow_dispatch` in CI, not on
-  every PR (the reference run needs torch, easyocr, and the full model set).
+  The regression gate (`--assert`) enforces floors on warm speedup, peak-RSS ratio, and labeled
+  token-F1 against EasyOCR — the exact thresholds live in the harness, not here, since peak-RSS
+  parity narrows as page size grows. Run manually via `workflow_dispatch` in CI, not on every PR
+  (the reference run needs torch, easyocr, and the full model set).
 </Aside>

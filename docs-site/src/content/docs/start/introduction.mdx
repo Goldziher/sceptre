@@ -20,7 +20,7 @@ entirely, while matching EasyOCR's output on every script it supports.
 | | What you get |
 |---|---|
 | **Parity accuracy** | Validated against real EasyOCR output across all eight gen2 scripts — text (word/char-F1) and boxes (IoU). |
-| **Substantially faster, less memory** | Higher throughput and a fraction of the peak RSS of the Python + torch process, measured like-for-like. See [Benchmarks](/reference/benchmarks/). |
+| **Faster, no Python runtime** | Higher throughput than EasyOCR's warm reader, and no interpreter or torch process to keep warm. See [Benchmarks](/reference/benchmarks/) for the measured numbers and the memory methodology. |
 | **One binary, no Python** | A single executable. Models download once from Hugging Face, cache locally, and run offline thereafter. |
 | **Three surfaces** | The same engine as a Rust library, a CLI (`sceptre`), and an MCP server for agents. |
 | **Native or pure-Rust** | ONNX Runtime (`ort`) for native speed, or a pure-Rust backend (`tract`) for WASM/Android, behind one seam. |
