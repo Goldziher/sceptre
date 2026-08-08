@@ -70,3 +70,10 @@ Chosen option: **build a first-party `.pth → ONNX` export pipeline and host th
 Supersedes [ADR 0003](0003-model-source-itext-onnx-runtime-download.md). See also the status notes
 on [ADR 0008](0008-uv-taskfile-tools-infra.md) (export path ordering) and
 [ADR 0011](0011-repointable-registry-owner.md) (repo-name change beyond the owner override).
+
+## Status update (2026-08-08)
+
+The hosting location is **amended by [ADR 0040](0040-models-hosted-under-the-xberg-io-hf-org.md)**:
+the exports now live under the `xberg-io` Hugging Face org as `xberg-io/sceptre-*` rather than
+`sceptre-ocr/*`. Everything else in this ADR — the first-party export pipeline, the provenance and
+licensing story, and the sha256 pinning — is unchanged, and the artifact bytes are identical.

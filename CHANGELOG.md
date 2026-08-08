@@ -85,6 +85,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Models are hosted under the `xberg-io` Hugging Face org.** The nine ONNX repos moved from
+  `sceptre-ocr/<model>` to `xberg-io/sceptre-<model>`, consolidating them with the rest of the
+  stack's model artifacts. The exports are byte-identical and every sha256 pin is unchanged, so
+  download verification is unaffected; the on-disk hub cache directory changes name with the repo
+  id, so the first run after upgrading re-downloads once. Hugging Face serves redirects from the
+  old ids, so 0.2.0–0.4.0 keep resolving models. The `sceptre-` prefix keeps
+  [ADR 0011](adrs/0011-repointable-registry-owner.md)'s `registry_owner` override a pure
+  owner-segment swap. See [ADR 0040](adrs/0040-models-hosted-under-the-xberg-io-hf-org.md).
 - **Accelerator validation is a per-backend table** instead of a test for `ort`. `ort` takes
   `coreml`, `directml`, `cuda`; `candle` takes `metal`, `cuda`; `tract` remains CPU-only. `cuda` is
   shared because it names hardware rather than an execution provider, while `coreml` and `metal`

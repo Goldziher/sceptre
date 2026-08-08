@@ -30,7 +30,7 @@ All eight of EasyOCR's gen2 (`*_g2`) recognizers are supported — the complete 
 ## Source, verification, and caching
 
 Every ONNX artifact is a first-party export — built from EasyOCR's weights by the sceptre export
-pipeline and hosted on the [`sceptre-ocr`](https://huggingface.co/sceptre-ocr) org on Hugging Face
+pipeline and hosted on the [`xberg-io`](https://huggingface.co/xberg-io) org on Hugging Face
 (Apache-2.0, dynamic-width — no letterbox distortion). Each model's SHA-256 is pinned in the
 registry and verified against the downloaded bytes.
 
@@ -58,7 +58,7 @@ registry is `sceptre env --format json`, which echoes it back in each model pin.
 the only real pin.** Derive CI cache keys from the digest set (see
 [Offline and CI](/guides/offline-and-ci/)), not from the revision.
 
-The registry owner (`sceptre-ocr` by default) can be overridden per config
+The registry owner (`xberg-io` by default) can be overridden per config
 (`ModelConfig::registry_owner`) to point at a mirror without any code change — the owner is
 validated to a safe form before it reaches the cache path.
 

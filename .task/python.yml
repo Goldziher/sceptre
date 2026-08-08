@@ -24,7 +24,7 @@ tasks:
   export:
     desc: >-
       Primary model-export path (ADR 0025): converts EasyOCR CRAFT + gen2 CRNN checkpoints
-      to the ONNX artifacts hosted on the sceptre-ocr HF org, and (re)writes the charset
+      to the ONNX artifacts hosted on the xberg-io HF org, and (re)writes the charset
       assets; requires the opt-in export/torch dependency group
     cmds:
       - uv run python -m sceptre_rs_tools.export

@@ -151,8 +151,8 @@ mod tests {
     use super::*;
     use crate::config::OcrConfig;
 
-    const CRAFT_REPO: &str = "sceptre-ocr/craft_mlt_25k";
-    const ENGLISH_REPO: &str = "sceptre-ocr/english_g2";
+    const CRAFT_REPO: &str = "xberg-io/sceptre-craft_mlt_25k";
+    const ENGLISH_REPO: &str = "xberg-io/sceptre-english_g2";
 
     /// A config pointed at a fresh, empty temp cache dir so nothing reads cached.
     fn config_with_empty_cache(languages: Vec<Language>) -> OcrConfig {

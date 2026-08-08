@@ -423,7 +423,7 @@ def test_environment_metadata_prefers_the_env_subcommand(tmp_path: Path) -> None
     payload = (
         '{"version": "0.4.0", "backend": "ort", "accelerator": "coreml", '
         '"onnxruntime": {"version": "1.22.0"}, '
-        '"models": [{"name": "craft_mlt_25k", "repo": "sceptre-ocr/craft_mlt_25k", "sha256": "159f5f"}]}'
+        '"models": [{"name": "craft_mlt_25k", "repo": "xberg-io/sceptre-craft_mlt_25k", "sha256": "159f5f"}]}'
     )
     binary = tmp_path / "sceptre"
     binary.write_text(f"#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n", encoding="utf-8")

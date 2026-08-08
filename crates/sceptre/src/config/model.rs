@@ -187,11 +187,12 @@ pub struct ModelConfig {
     pub cache_dir: Option<PathBuf>,
     /// Override for the Hugging Face registry owner hosting the ONNX exports.
     ///
-    /// `None` (the default) uses the first-party `sceptre-ocr` org. Setting it
-    /// swaps only the owner segment of every model repo id, so identical exports
-    /// can be served from a mirror or private account without any code change
-    /// (the `<model>` repo name is preserved). See ADR 0011 and ADR 0025; the
-    /// value is validated to a safe owner form before it reaches cache paths.
+    /// `None` (the default) uses the first-party `xberg-io` org, whose repos are
+    /// named `xberg-io/sceptre-<model>`. Setting it swaps only the owner segment
+    /// of every model repo id, so identical exports can be served from a mirror or
+    /// private account without any code change (the `sceptre-<model>` repo name is
+    /// preserved). See ADR 0011 and ADR 0025; the value is validated to a safe
+    /// owner form before it reaches cache paths.
     pub registry_owner: Option<String>,
 }
 

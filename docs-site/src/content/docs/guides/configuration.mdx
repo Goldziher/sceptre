@@ -98,7 +98,7 @@ See [Backends](/concepts/backends/) for why this is a single shared budget.
 | `detector_path` | `None` | Explicit local CRAFT ONNX path for host-managed assets. Must be set together with `recognizer_path`; when both are set the default provider bypasses Hugging Face entirely. Library-only — no CLI flag. |
 | `recognizer_path` | `None` | Explicit local recognizer ONNX path for the configured language group. Must be set together with `detector_path`. Library-only — no CLI flag. |
 | `cache_dir` | `None` | Override for the Hugging Face hub cache root. `None` resolves from `HF_HUB_CACHE` → `HUGGINGFACE_HUB_CACHE` → `$HF_HOME/hub` → `~/.cache/huggingface/hub`. Library-only — no CLI flag. |
-| `registry_owner` | `None` | Override for the Hugging Face registry owner. `None` uses the first-party `sceptre-ocr` org; only the owner segment of each model repo id changes. Library-only — no CLI flag. |
+| `registry_owner` | `None` | Override for the Hugging Face registry owner. `None` uses the first-party `xberg-io` org (repos are named `xberg-io/sceptre-<model>`); only the owner segment of each model repo id changes. Library-only — no CLI flag. |
 
 Setting only one of `detector_path` / `recognizer_path` is a config error naming the missing field,
 rather than a silent half-local provisioning.

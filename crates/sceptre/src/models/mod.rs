@@ -1,7 +1,7 @@
 //! Model registry and provisioning.
 //!
 //! [`registry`] enumerates the gen2 detector/recognizer ONNX artifacts (hosted by
-//! the first-party `sceptre-ocr` org on Hugging Face). [`download`] fetches and caches them.
+//! the first-party `xberg-io` org on Hugging Face). [`download`] fetches and caches them.
 //! [`provision`] is the public surface that enumerates (`model_manifest`) and
 //! prefetches (`download_models`) the models a configuration requires.
 

@@ -121,8 +121,8 @@ fn non_empty_env(key: &str) -> Option<String> {
 
 /// The on-disk cache directory name for a `owner/name` repo id.
 ///
-/// Mirrors Hugging Face's layout: `sceptre-ocr/english_g2`
-/// becomes `models--sceptre-ocr--english_g2`.
+/// Mirrors Hugging Face's layout: `xberg-io/sceptre-english_g2`
+/// becomes `models--xberg-io--sceptre-english_g2`.
 pub(crate) fn repo_cache_dir_name(repo_id: &str) -> String {
     format!("models--{}", repo_id.replace('/', "--"))
 }
@@ -368,8 +368,8 @@ mod tests {
     #[test]
     fn repo_cache_dir_name_mirrors_the_hugging_face_layout() {
         assert_eq!(
-            repo_cache_dir_name("sceptre-ocr/english_g2"),
-            "models--sceptre-ocr--english_g2"
+            repo_cache_dir_name("xberg-io/sceptre-english_g2"),
+            "models--xberg-io--sceptre-english_g2"
         );
     }
 
@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn resolve_cached_finds_a_file_planted_in_a_snapshot() {
         let root = std::env::temp_dir().join(format!("sceptre-resolve-{}", std::process::id()));
-        let repo = "sceptre-ocr/english_g2";
+        let repo = "xberg-io/sceptre-english_g2";
         let file = "english_g2.onnx";
         let snapshot = root.join(repo_cache_dir_name(repo)).join("snapshots").join("deadbeef");
         std::fs::create_dir_all(&snapshot).unwrap();
@@ -455,7 +455,10 @@ mod tests {
         let root = std::env::temp_dir().join(format!("sceptre-resolve-empty-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
 
-        assert_eq!(resolve_cached(&root, "sceptre-ocr/english_g2", "english_g2.onnx"), None);
+        assert_eq!(
+            resolve_cached(&root, "xberg-io/sceptre-english_g2", "english_g2.onnx"),
+            None
+        );
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -477,7 +480,7 @@ mod tests {
         snapshot
     }
 
-    const TEST_REPO: &str = "sceptre-ocr/english_g2";
+    const TEST_REPO: &str = "xberg-io/sceptre-english_g2";
     const TEST_FILE: &str = "english_g2.onnx";
 
     #[test]
@@ -626,7 +629,7 @@ mod download_tests {
         use super::tests::{snapshot_dir, unique_temp_dir};
 
         let root = unique_temp_dir("evict-plain");
-        let repo = "sceptre-ocr/english_g2";
+        let repo = "xberg-io/sceptre-english_g2";
         let file = "english_g2.onnx";
         let planted = snapshot_dir(&root, repo, "rev0").join(file);
         std::fs::write(&planted, b"corrupt").unwrap();
@@ -650,7 +653,7 @@ mod download_tests {
             use super::tests::{snapshot_dir, unique_temp_dir};
 
             let root = unique_temp_dir("evict-symlink");
-            let repo = "sceptre-ocr/english_g2";
+            let repo = "xberg-io/sceptre-english_g2";
             let file = "english_g2.onnx";
             let snapshot = snapshot_dir(&root, repo, "rev0");
             let blobs = root.join(repo_cache_dir_name(repo)).join("blobs");
@@ -678,7 +681,7 @@ mod download_tests {
         use super::tests::{snapshot_dir, unique_temp_dir};
 
         let root = unique_temp_dir("evict-ok");
-        let planted = snapshot_dir(&root, "sceptre-ocr/english_g2", "rev0").join("english_g2.onnx");
+        let planted = snapshot_dir(&root, "xberg-io/sceptre-english_g2", "rev0").join("english_g2.onnx");
         std::fs::write(&planted, b"abc").unwrap();
 
         verify_or_evict(&planted, ABC_SHA256, "english_g2").expect("a matching pin must pass");

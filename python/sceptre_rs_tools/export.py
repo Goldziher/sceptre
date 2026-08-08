@@ -1,7 +1,7 @@
 """First-party ``.pth -> ONNX`` export for CRAFT + the gen2 CRNN recognizers.
 
 This is the primary model-export path (ADR 0025): it loads EasyOCR's own PyTorch
-networks and re-exports them as the ONNX artifacts sceptre hosts on the ``sceptre-ocr``
+networks and re-exports them as the ONNX artifacts sceptre hosts on the ``xberg-io``
 Hugging Face org. Requires the opt-in ``export`` dependency group (torch, easyocr, onnx,
 onnxruntime, numpy); without it this exits cleanly with an explanatory message.
 

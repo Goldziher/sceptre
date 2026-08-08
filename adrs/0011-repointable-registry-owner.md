@@ -69,3 +69,8 @@ the "revisit if that host is chosen" limitation flagged above. The baked `hf_rep
 registry are therefore edited directly rather than via this owner-only override. The
 `registry_owner` mechanism itself is retained unchanged for downstream mirroring/re-pointing of the
 new `sceptre-ocr` ids.
+
+[ADR 0040](0040-models-hosted-under-the-xberg-io-hf-org.md) then moves those ids to
+`xberg-io/sceptre-<model>`. That move is a pure owner-segment change by construction — the
+`sceptre-` prefix was chosen precisely so the repo-name segment carries the project identity and
+this override keeps working as designed.

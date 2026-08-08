@@ -233,7 +233,7 @@ Targets EasyOCR's current models — the **CRAFT** detector and all eight **gen2
 Legacy gen1 models, DBNet, and beam-search decoding are out of scope
 (see [`adrs/0002`](adrs/0002-scope-gen2-recognizers-and-craft.md) and
 [`adrs/0026`](adrs/0026-extend-gen2-scope-telugu-kannada.md)). ONNX artifacts are first-party exports,
-built from EasyOCR's weights and hosted on the [`sceptre-ocr`](https://huggingface.co/sceptre-ocr)
+built from EasyOCR's weights and hosted on the [`xberg-io`](https://huggingface.co/xberg-io)
 Hugging Face org (Apache-2.0; see [`adrs/0025`](adrs/0025-first-party-onnx-exports.md)).
 
 ## Feature flags
@@ -296,5 +296,5 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instruct
 ## License
 
 [MIT License](LICENSE). Model weights are distributed under their own licenses — the gen2 EasyOCR
-models and the first-party [`sceptre-ocr`](https://huggingface.co/sceptre-ocr) ONNX exports derived
+models and the first-party [`xberg-io/sceptre-*`](https://huggingface.co/xberg-io) ONNX exports derived
 from them are Apache-2.0.

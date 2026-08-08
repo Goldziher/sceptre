@@ -475,14 +475,14 @@ mod tests {
         let models = vec![
             ModelInfo {
                 name: "craft_mlt_25k".to_string(),
-                repo: "sceptre-ocr/craft_mlt_25k".to_string(),
+                repo: "xberg-io/sceptre-craft_mlt_25k".to_string(),
                 role: ModelRole::Detector,
                 cached: true,
                 path: None,
             },
             ModelInfo {
                 name: "english_g2".to_string(),
-                repo: "sceptre-ocr/english_g2".to_string(),
+                repo: "xberg-io/sceptre-english_g2".to_string(),
                 role: ModelRole::Detector,
                 cached: false,
                 path: None,
@@ -495,7 +495,7 @@ mod tests {
         assert!(text.contains("english_g2"), "missing name: {text}");
         assert!(text.contains("cached"), "missing cached word: {text}");
         assert!(text.contains("missing"), "missing missing word: {text}");
-        assert!(text.contains("sceptre-ocr/craft_mlt_25k"), "missing repo: {text}");
+        assert!(text.contains("xberg-io/sceptre-craft_mlt_25k"), "missing repo: {text}");
     }
 
     #[test]

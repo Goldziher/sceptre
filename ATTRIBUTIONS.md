@@ -24,12 +24,12 @@ fixtures generated from upstream EasyOCR
 
 ## Model artifacts
 
-- **Source**: the first-party `sceptre-ocr/<model>` repos on Hugging Face —
-  <https://huggingface.co/sceptre-ocr>
+- **Source**: the first-party `xberg-io/sceptre-<model>` repos on Hugging Face —
+  <https://huggingface.co/xberg-io>
 - **License**: Apache-2.0
 
 The CRAFT detector and the eight gen2 recognizers are exported from EasyOCR's PyTorch weights by the
-`sceptre_rs_tools` export pipeline in this repository and published under the `sceptre-ocr` org, one
+`sceptre_rs_tools` export pipeline in this repository and published under the `xberg-io` org, one
 repo per model. They are downloaded at runtime, cached in the shared Hugging Face hub cache, and
 sha256-verified against pins in `crates/sceptre/src/models/registry.rs`. Because they are derived
 from EasyOCR's weights, the EasyOCR attribution above travels with them. See
@@ -37,7 +37,7 @@ from EasyOCR's weights, the EasyOCR attribution above travels with them. See
 
 Earlier releases sourced the same models from the third-party `itextresearch/itext-EasyOCR-*` ONNX
 repos on Hugging Face (Apache-2.0), which remain the lineage of the exports and are credited on each
-`sceptre-ocr` model card. That decision is recorded, and superseded, in
+`xberg-io/sceptre-*` model card. That decision is recorded, and superseded, in
 [`adrs/0003-model-source-itext-onnx-runtime-download.md`](adrs/0003-model-source-itext-onnx-runtime-download.md).
 
 ## CRAFT
