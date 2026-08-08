@@ -501,10 +501,13 @@ jobs:
           python-version: "3.13"
           install-command: "uv sync"
 
+      # The run-id suffix is load-bearing: a bare `backend-matrix-*` also matches the
+      # `backend-matrix-gpu-test` binary and `backend-matrix-model-seeder`, neither of which
+      # is a leg report. Only the report artifacts carry the run id. ~keep
       - name: Download every leg's reports
         uses: actions/download-artifact@v8
         with:
-          pattern: backend-matrix-*
+          pattern: backend-matrix-*-${{ github.run_id }}
           path: benchmark-results/backends
           merge-multiple: true
 

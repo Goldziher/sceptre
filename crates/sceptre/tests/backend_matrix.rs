@@ -289,7 +289,10 @@ fn run_leg(leg: &str, backend: Backend, accelerator: Accelerator) {
 
     let dir = output_dir();
     std::fs::create_dir_all(&dir).unwrap_or_else(|err| panic!("create {dir:?}: {err}"));
-    let path = dir.join(format!("{leg}.json"));
+    // Host-qualified: a leg name alone collides across hosts (macOS and Linux both emit
+    // ort-cpu), and the aggregate downloads every leg's artifact with merge-multiple, which
+    // flattens them onto one path and produces a file holding two JSON documents. ~keep
+    let path = dir.join(format!("{}-{}-{leg}.json", report.os, report.arch));
     let json = serde_json::to_string_pretty(&report).expect("serialize the leg report");
     std::fs::write(&path, json).unwrap_or_else(|err| panic!("write {path:?}: {err}"));
     println!("backend-matrix leg '{leg}' wrote {path:?}");
