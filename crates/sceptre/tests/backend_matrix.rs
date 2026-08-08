@@ -182,6 +182,10 @@ struct LegReport {
     accelerator_requested: Accelerator,
     accelerator_registered: Option<Accelerator>,
     ort_version: Option<String>,
+    /// True when this leg was built with an unoptimized profile. `ort` is prebuilt C++ and
+    /// indifferent to the Rust profile, while `tract` and `candle` are pure Rust, so such a
+    /// leg's cross-backend numbers are not comparable and must not be quoted.
+    unoptimized_build: bool,
     /// One-time cost of `Reader::builder().build_warmed()`, kept separate from
     /// steady-state inference per the matrix methodology.
     model_load_ms: f64,
@@ -278,6 +282,7 @@ fn run_leg(leg: &str, backend: Backend, accelerator: Accelerator) {
         accelerator_requested: runtime.accelerator_requested,
         accelerator_registered: runtime.accelerator_registered,
         ort_version: runtime.ort.and_then(|ort| ort.version),
+        unoptimized_build: cfg!(debug_assertions),
         model_load_ms,
         images,
     };

@@ -239,9 +239,12 @@ jobs:
       - name: Pre-seed every model, serially, before the matrix reads the cache
         run: ${{ steps.build.outputs.binary-path }} models download --all
 
+      # --release is load-bearing, not hygiene: `ort` is prebuilt C++ and indifferent to the
+      # Rust profile, while `tract` and `candle` are pure Rust, so a default (opt-level 0)
+      # test profile penalizes precisely the backends this matrix exists to compare. ~keep
       - name: Run the backend matrix (ort, tract, candle x CPU)
         run: |
-          cargo test --locked -p sceptre --test backend_matrix \
+          cargo test --release --locked -p sceptre --test backend_matrix \
             --features ort-bundled,tract,candle,download -- --ignored --nocapture
 
       - name: Upload leg reports
@@ -303,7 +306,7 @@ jobs:
       # Metal device (ADR 0035, open question #1). ~keep
       - name: Run the backend matrix (ort+coreml, tract, candle+metal)
         run: |
-          cargo test --locked -p sceptre --test backend_matrix \
+          cargo test --release --locked -p sceptre --test backend_matrix \
             --features ort-bundled,ort-coreml,tract,candle-metal,download -- --ignored --nocapture
 
       - name: Upload leg reports
