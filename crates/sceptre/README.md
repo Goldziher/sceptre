@@ -28,7 +28,7 @@ for line in reader.readtext("receipt.png".as_ref(), &ReadOptions::default())?.li
 ```
 
 The crate ships `default = []`; enable a backend and model download:
-`sceptre = { version = "0.4", features = ["ort-bundled", "download"] }`. `ort-bundled` fetches a
+`sceptre = { version = "0.5", features = ["ort-bundled", "download"] }`. `ort-bundled` fetches a
 prebuilt ONNX Runtime at build time; on targets `ort` publishes no prebuilt for — Intel macOS,
 musl/Alpine, armv7, riscv64, FreeBSD, i686, s390x, powerpc64le — use `ort-dynamic` (bring your own
 `libonnxruntime`) or `tract` (pure Rust) instead.
