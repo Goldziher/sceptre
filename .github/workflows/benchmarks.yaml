@@ -2,6 +2,16 @@ name: Benchmarks
 
 on:
   workflow_dispatch:
+    inputs:
+      legs:
+        description: Which measurement legs to run
+        type: choice
+        default: all
+        options:
+          - all
+          - head-to-head
+          - backend-matrix
+          - criterion
   schedule:
     # Weekly EasyOCR head-to-head, per ADR 0021 ("runs via workflow_dispatch and a weekly
     # schedule"). The old ci.yaml never added this trigger despite the ADR; this workflow
@@ -64,7 +74,10 @@ jobs:
   # compile-check only; this promotes it to an actual measurement, uploaded for inspection. ~keep
   bench:
     name: Criterion microbenchmarks
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    if: >-
+      github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.legs == 'all' || inputs.legs == 'criterion')
     runs-on: runner-large-arm64
     steps:
       - uses: actions/checkout@v6
@@ -107,7 +120,9 @@ jobs:
     name: EasyOCR head-to-head
     if: >-
       github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.legs == 'all' || inputs.legs == 'head-to-head')))
     runs-on: runner-medium
     timeout-minutes: 60
     env:
@@ -174,7 +189,10 @@ jobs:
   # accelerator that registered, not merely the one requested. ~keep
   backend-matrix-linux-cpu:
     name: Backend matrix (Linux CPU)
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    if: >-
+      github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.legs == 'all' || inputs.legs == 'backend-matrix')
     runs-on: runner-large-arm64
     timeout-minutes: 45
     env:
@@ -237,7 +255,10 @@ jobs:
 
   backend-matrix-macos:
     name: Backend matrix (macOS)
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    if: >-
+      github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.legs == 'all' || inputs.legs == 'backend-matrix')
     runs-on: macos-latest
     timeout-minutes: 45
     env:
@@ -296,7 +317,10 @@ jobs:
 
   backend-matrix-gpu-build:
     name: Backend matrix (GPU build)
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    if: >-
+      github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.legs == 'all' || inputs.legs == 'backend-matrix')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -372,7 +396,10 @@ jobs:
   backend-matrix-gpu-run:
     name: Backend matrix (GPU run)
     needs: backend-matrix-gpu-build
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    if: >-
+      github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.legs == 'all' || inputs.legs == 'backend-matrix')
     runs-on: runner-gpu-l4
     timeout-minutes: 60
     # A run in flight must not be killed mid-inference by a newer push cancelling the group. ~keep
@@ -452,7 +479,10 @@ jobs:
   backend-matrix-aggregate:
     name: Backend matrix (aggregate)
     needs: [backend-matrix-linux-cpu, backend-matrix-macos, backend-matrix-gpu-run]
-    if: always() && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name == 'workflow_dispatch'
+    if: >-
+      always() && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.legs == 'all' || inputs.legs == 'backend-matrix')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
