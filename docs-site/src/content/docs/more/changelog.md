@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An opt-in megapixel budget for detection.** `DetectionConfig::max_megapixels` (default
+  `None`, plus `--max-megapixels`) bounds the padded CRAFT input's *area*, composing with
+  `canvas_size` and `mag_ratio` as a minimum. Peak memory tracks area, not the longest side:
+  fitted over 91 (image, canvas) points, `RSS_MB ≈ 1063 × megapixels + 326` at R² 0.984 against
+  0.847 for a longest-side fit, and two images sharing a longest side can differ 2× in area. On a
+  3630×2777 page peak RSS goes 6230 MB unset → 2234 MB at `2.0` → 838 MB at `0.5`. The
+  `canvas_size` default stays at 2560 deliberately — see
+  [ADR 0041](https://github.com/xberg-io/sceptre/blob/main/adrs/0041-detection-megapixel-budget.md).
 - **Opt-in whole-page orientation detection.** `DetectionConfig::detect_orientation` (default
   `false`, plus a CLI flag and an MCP parameter) probes a page at 0°/90°/180°/270° by running a
   reduced-canvas CRAFT pass in each rotation and scoring region- and link-head activation, then
@@ -88,6 +96,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The benchmark's peak-RSS gate now measures sceptre, not a ratio against EasyOCR.** The old
+  floor divided EasyOCR's max-over-batches by sceptre's, each taken independently, so it could
+  publish a quotient of two measurements that never co-occurred — and because peak RSS is
+  dominated by the CRAFT detector *both* engines run, the ratio tends toward 1 as pages grow,
+  making it a gate on corpus image sizes. It is replaced by an absolute ceiling on sceptre's own
+  warm peak RSS against the committed baseline for the same `(os, arch, runner_label)`; every way
+  of failing to evaluate it is a breach that names the host, because "unmeasurable" must not read
+  as "fine". The cross-engine ratio survives as a *reported* figure, now a per-image median over
+  correctly paired records rather than a quotient of two corpus maxima, and the published table
+  names the statistic. Published artifacts move to `schema_version` 2. See
+  [ADR 0042](https://github.com/xberg-io/sceptre/blob/main/adrs/0042-host-scoped-benchmark-floors.md).
 - **Models are hosted under the `xberg-io` Hugging Face org.** The nine ONNX repos moved from
   `sceptre-ocr/<model>` to `xberg-io/sceptre-<model>`, consolidating them with the rest of the
   stack's model artifacts. The exports are byte-identical and every sha256 pin is unchanged, so
@@ -122,6 +141,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The backend agreement tests now actually run in CI.** `backend_agreement.rs` no-ops without
+  `SCEPTRE_REQUIRE_MODELS`, and that variable was set only on the parity job — so the test that
+  [ADR 0035](https://github.com/xberg-io/sceptre/blob/main/adrs/0035-backend-accelerator-benchmark-matrix.md) calls the only correctness bar for
+  every backend/accelerator pairing was compiled, never executed, and enforced on developer
+  machines alone. `ort`, `tract` and `candle` do agree.
+- **Benchmark reports were being discarded by their own validator.** `validate_report` range-checked
+  every aggregate statistic against [0, 1] while passing the metric's name, so `count` failed for
+  any metric with more than one sample; because the harness validates before writing, a complete
+  40-image run produced no artifact at all. Peak RSS and CPU core-seconds were also silently `null`
+  on Linux CI, where GNU `time` is absent and the fallback said nothing. Ratio asides rendered with
+  no decimals, so a 1.08× ratio published as "~1× lower".
 - **Rotated text boxes now match OpenCV's geometry.** `imageproc`'s `min_area_rect` snapped every
   rectangle corner outward with a per-corner `floor`/`ceil`; OpenCV's `minAreaRect`/`boxPoints`,
   which EasyOCR uses, never does. Axis-aligned boxes were unaffected — they already matched
