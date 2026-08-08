@@ -57,8 +57,8 @@ submodule and carry their own, per-dataset licenses and citations — NDL PDM OC
 TextOCR, DocLayNet, and libheif-rs fixtures among them. Those obligations are recorded next
 to the files they cover and are not duplicated here:
 
-- [`test_documents/ATTRIBUTIONS.md`](test_documents/ATTRIBUTIONS.md)
-- [`test_documents/LICENSES.md`](test_documents/LICENSES.md)
+- [`test_documents/ATTRIBUTIONS.md`](https://github.com/xberg-io/test_documents/blob/main/ATTRIBUTIONS.md)
+- [`test_documents/LICENSES.md`](https://github.com/xberg-io/test_documents/blob/main/LICENSES.md)
 
 ## Dependencies
 
