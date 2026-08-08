@@ -351,8 +351,10 @@ def test_check_thresholds_ignores_an_easyocr_memory_change(easyocr_rss: float) -
 def test_check_rss_ceiling_flags_a_sceptre_memory_regression() -> None:
     breaches = b.check_rss_ceiling(700.0, _host(), _published(500.0))
     assert breaches == [
-        "sceptre peak RSS 700.0 MB > ceiling 550.0 MB "
-        "(published baseline 500.0 MB x 1.10, runner-medium (Linux/x86_64))"
+        (
+            "sceptre peak RSS 700.0 MB > ceiling 550.0 MB "
+            "(published baseline 500.0 MB x 1.10, runner-medium (Linux/x86_64))"
+        )
     ]
 
 
@@ -400,8 +402,10 @@ def test_check_warm_throughput_floor_tolerates_degradation_inside_the_factor() -
 def test_check_warm_throughput_floor_flags_a_sceptre_speed_regression() -> None:
     breaches = b.check_warm_throughput_floor(1.5, _host(), _published())
     assert breaches == [
-        "sceptre warm throughput 1.500 img/s < floor 1.800 img/s "
-        "(published baseline 2.000 img/s x 0.90, runner-medium (Linux/x86_64))"
+        (
+            "sceptre warm throughput 1.500 img/s < floor 1.800 img/s "
+            "(published baseline 2.000 img/s x 0.90, runner-medium (Linux/x86_64))"
+        )
     ]
 
 
@@ -435,8 +439,10 @@ def test_check_thresholds_flags_a_sceptre_warm_throughput_regression() -> None:
     report.metadata["sceptre_batch"]["english"]["total_seconds"] = 2.0
     breaches = b.check_thresholds(report, _published(500.0))
     assert breaches == [
-        "sceptre warm throughput 1.000 img/s < floor 1.800 img/s "
-        "(published baseline 2.000 img/s x 0.90, runner-medium (Linux/x86_64))"
+        (
+            "sceptre warm throughput 1.000 img/s < floor 1.800 img/s "
+            "(published baseline 2.000 img/s x 0.90, runner-medium (Linux/x86_64))"
+        )
     ]
 
 

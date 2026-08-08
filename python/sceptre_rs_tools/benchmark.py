@@ -1624,29 +1624,37 @@ def check_rss_ceiling(
     ceiling_of = f"sceptre peak-RSS ceiling ({_host_label(host)})"
     if published is None:
         return [
-            f"{ceiling_of} unmeasurable: no committed baseline at {PUBLISHED_RELATIVE_PATH}; "
-            "measure this host and run `task python:publish`"
+            (
+                f"{ceiling_of} unmeasurable: no committed baseline at {PUBLISHED_RELATIVE_PATH}; "
+                "measure this host and run `task python:publish`"
+            )
         ]
     baseline_host = published_host(published)
     if baseline_host != host:
         return [
-            f"{ceiling_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} was measured on "
-            f"{_host_label(baseline_host)}; absolute floors are scoped to a host (ADR 0042), so "
-            "re-publish from a run on this one"
+            (
+                f"{ceiling_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} was measured on "
+                f"{_host_label(baseline_host)}; absolute floors are scoped to a host (ADR 0042), so "
+                "re-publish from a run on this one"
+            )
         ]
     baseline_mb = published_sceptre_peak_rss(published)
     if baseline_mb is None or baseline_mb <= 0:
         return [
-            f"{ceiling_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} carries no "
-            "headline.sceptre_warm.peak_rss_mb to gate against"
+            (
+                f"{ceiling_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} carries no "
+                "headline.sceptre_warm.peak_rss_mb to gate against"
+            )
         ]
     if measured_mb is None:
         return [f"{ceiling_of} unmeasurable: this run measured no sceptre peak RSS (is /usr/bin/time present?)"]
     ceiling_mb = baseline_mb * factor
     if measured_mb > ceiling_mb:
         return [
-            f"sceptre peak RSS {measured_mb:,.1f} MB > ceiling {ceiling_mb:,.1f} MB "
-            f"(published baseline {baseline_mb:,.1f} MB x {factor:.2f}, {_host_label(host)})"
+            (
+                f"sceptre peak RSS {measured_mb:,.1f} MB > ceiling {ceiling_mb:,.1f} MB "
+                f"(published baseline {baseline_mb:,.1f} MB x {factor:.2f}, {_host_label(host)})"
+            )
         ]
     return []
 
@@ -1669,29 +1677,37 @@ def check_warm_throughput_floor(
     floor_of = f"sceptre warm-throughput floor ({_host_label(host)})"
     if published is None:
         return [
-            f"{floor_of} unmeasurable: no committed baseline at {PUBLISHED_RELATIVE_PATH}; "
-            "measure this host and run `task python:publish`"
+            (
+                f"{floor_of} unmeasurable: no committed baseline at {PUBLISHED_RELATIVE_PATH}; "
+                "measure this host and run `task python:publish`"
+            )
         ]
     baseline_host = published_host(published)
     if baseline_host != host:
         return [
-            f"{floor_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} was measured on "
-            f"{_host_label(baseline_host)}; absolute floors are scoped to a host (ADR 0043), so "
-            "re-publish from a run on this one"
+            (
+                f"{floor_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} was measured on "
+                f"{_host_label(baseline_host)}; absolute floors are scoped to a host (ADR 0043), so "
+                "re-publish from a run on this one"
+            )
         ]
     baseline_img_s = published_sceptre_warm_throughput(published)
     if baseline_img_s is None or baseline_img_s <= 0:
         return [
-            f"{floor_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} carries no "
-            "headline.sceptre_warm.throughput_img_s to gate against"
+            (
+                f"{floor_of} unmeasurable: {PUBLISHED_RELATIVE_PATH} carries no "
+                "headline.sceptre_warm.throughput_img_s to gate against"
+            )
         ]
     if measured_img_s is None:
         return [f"{floor_of} unmeasurable: this run measured no sceptre warm throughput (missing batch timings)"]
     floor_img_s = baseline_img_s * factor
     if measured_img_s < floor_img_s:
         return [
-            f"sceptre warm throughput {measured_img_s:,.3f} img/s < floor {floor_img_s:,.3f} img/s "
-            f"(published baseline {baseline_img_s:,.3f} img/s x {factor:.2f}, {_host_label(host)})"
+            (
+                f"sceptre warm throughput {measured_img_s:,.3f} img/s < floor {floor_img_s:,.3f} img/s "
+                f"(published baseline {baseline_img_s:,.3f} img/s x {factor:.2f}, {_host_label(host)})"
+            )
         ]
     return []
 
