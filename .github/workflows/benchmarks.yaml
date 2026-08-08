@@ -164,6 +164,12 @@ jobs:
           key: easyocr-${{ runner.os }}-${{ hashFiles('uv.lock') }}
           restore-keys: easyocr-${{ runner.os }}-
 
+      # GNU time is not in the runner image, and the shell builtin is not a substitute: the
+      # harness needs /usr/bin/time -v for peak RSS and CPU core-seconds. Without it both
+      # metrics come back null for both engines and the peak-RSS floor is unmeasurable. ~keep
+      - name: Install GNU time
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq time
+
       - name: Build release CLI (bundled ONNX Runtime + on-demand model download)
         run: cargo build --release -p sceptre-cli --no-default-features --features ort-bundled,download
 

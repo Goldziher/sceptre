@@ -308,10 +308,26 @@ _TIME_USER_LINUX = re.compile(r"User time \(seconds\):\s+([\d.]+)")
 _TIME_SYS_LINUX = re.compile(r"System time \(seconds\):\s+([\d.]+)")
 
 
+_warned_missing_time_binary: set[str] = set()
+
+
 def _time_wrapper() -> list[str]:
-    """The ``/usr/bin/time`` prefix that reports peak RSS, or empty if unavailable."""
+    """The ``/usr/bin/time`` prefix that reports peak RSS, or empty if unavailable.
+
+    Absence is reported once rather than passed over: without the wrapper every ``rss_mb``
+    and ``cpu_core_seconds`` in the report is ``None``, for both engines, and the peak-RSS
+    floor becomes unmeasurable. The gate does fail on that, but only the warning explains
+    it -- the shell builtin ``time`` is not a substitute, the binary has to be installed.
+    """
     time_bin = Path("/usr/bin/time")
     if not time_bin.exists():
+        if not _warned_missing_time_binary:
+            _warned_missing_time_binary.add(str(time_bin))
+            print(
+                f"sceptre_rs_tools.benchmark: {time_bin} not found; peak RSS and CPU "
+                "core-seconds will be unmeasured for every engine (install GNU time)",
+                file=sys.stderr,
+            )
         return []
     return [str(time_bin), "-l" if sys.platform == "darwin" else "-v"]
 
