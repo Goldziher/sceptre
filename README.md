@@ -11,8 +11,8 @@
   <a href="https://crates.io/crates/sceptre">
     <img src="https://img.shields.io/crates/v/sceptre?label=Rust&color=007ec6" alt="Rust">
   </a>
-  <a href="https://github.com/xberg-io/sceptre/actions/workflows/ci-rust.yaml">
-    <img src="https://img.shields.io/github/actions/workflow/status/xberg-io/sceptre/ci-rust.yaml?label=CI&color=007ec6" alt="CI">
+  <a href="https://github.com/xberg-io/sceptre/actions/workflows/ci.yaml">
+    <img src="https://img.shields.io/github/actions/workflow/status/xberg-io/sceptre/ci.yaml?label=CI&color=007ec6" alt="CI">
   </a>
   <a href="https://docs.rs/sceptre">
     <img src="https://img.shields.io/docsrs/sceptre?label=docs.rs&color=007ec6" alt="docs.rs">

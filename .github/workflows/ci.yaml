@@ -1,36 +1,14 @@
-name: CI Rust
+name: CI
 
 on:
   push:
     branches: [main]
-    paths:
-      - crates/**
-      - tools/**
-      - scripts/**
-      - Cargo.toml
-      - Cargo.lock
-      - rustfmt.toml
-      - deny.toml
-      - .task/**
-      - Taskfile.yaml
-      - .github/workflows/ci-rust.yaml
   pull_request:
     branches: [main]
-    paths:
-      - crates/**
-      - tools/**
-      - scripts/**
-      - Cargo.toml
-      - Cargo.lock
-      - rustfmt.toml
-      - deny.toml
-      - .task/**
-      - Taskfile.yaml
-      - .github/workflows/ci-rust.yaml
   workflow_dispatch:
 
 concurrency:
-  group: ci-rust-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -42,9 +20,96 @@ env:
   SAMPLE_IMAGE: test_documents/images/english.png
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      # Fail open: a filter that never ran (workflow_dispatch) or could not resolve a base
+      # (first commit, shallow history) must report "everything changed", never "nothing
+      # changed" — a false negative here would silently skip the whole Rust matrix behind
+      # a green check, which is the one outcome this job exists to prevent. ~keep
+      rust: ${{ steps.filter.outcome == 'success' && steps.filter.outputs.rust || 'true' }}
+      python: ${{ steps.filter.outcome == 'success' && steps.filter.outputs.python || 'true' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve diff base
+        id: base
+        run: |
+          set -euo pipefail
+          # paths-filter accepts a SHA as `base` and diffs HEAD against it without
+          # re-fetching. A tracking-ref name (e.g. `origin/main`) makes paths-filter try to
+          # git-fetch it as a remote refspec, which fails, so this always resolves to a
+          # SHA or to nothing. ~keep
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            # `github.event.before`, not HEAD~1: a push can carry several commits, and
+            # diffing only the last one would miss a crates/** edit made earlier in the
+            # same push -- skipping the Rust matrix behind a green check. `before` is the
+            # ref's tip before the push, so it spans every commit the push delivered. ~keep
+            base="${{ github.event.before }}"
+            # All-zeros on a ref's first push, and absent entirely on workflow_dispatch.
+            # Blank it in both cases, and whenever the SHA is not in this checkout, so the
+            # filter step skips and the outputs above fail open. ~keep
+            case "$base" in *[!0]*) ;; *) base="" ;; esac
+            if [ -n "$base" ] && ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              base=""
+            fi
+          fi
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        if: github.event_name != 'workflow_dispatch' && steps.base.outputs.base != ''
+        with:
+          base: ${{ steps.base.outputs.base }}
+          filters: |
+            rust:
+              - 'crates/**'
+              - 'tools/**'
+              - 'scripts/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rustfmt.toml'
+              - 'deny.toml'
+              - '.task/**'
+              - 'Taskfile.yaml'
+              - '.github/workflows/ci.yaml'
+            python:
+              - 'python/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.github/workflows/ci.yaml'
+
+  validate:
+    name: Validate
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
+    with:
+      setup-rust: true
+      setup-python: true
+      python-version: "3.13"
+
+  changelog:
+    name: Changelog in sync
+    # The docs changelog page is generated from CHANGELOG.md. This job is what makes that
+    # true rather than aspirational: it catches a CHANGELOG.md edit that skipped the
+    # regeneration. It lives here, not in ci-docs.yaml, because that workflow only fires on
+    # docs-site/** and would never see the edit that causes the drift. ~keep
+    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: xberg-io/actions/install-task@v1
+      - run: task docs:changelog:check
+
   test:
     name: Test (${{ matrix.variant.label }}, ${{ matrix.os }})
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +190,8 @@ jobs:
 
   install:
     name: cargo install (${{ matrix.install.label }}, ${{ matrix.os }})
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
@@ -189,7 +255,10 @@ jobs:
 
   parity:
     name: Parity (${{ matrix.accelerator }} on ${{ matrix.os }})
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]' && github.event_name != 'pull_request'
+    needs: changes
+    if: >-
+      needs.changes.outputs.rust == 'true' && github.repository == 'xberg-io/sceptre' &&
+      github.actor != 'dependabot[bot]' && github.event_name != 'pull_request'
     # Heavy: downloads the real models and runs real inference. Kept off pull requests —
     # the light `test` lanes already compile and skip the model-gated tests — but run on
     # main and on demand. A parity gate that only fires when someone remembers to dispatch
@@ -311,7 +380,8 @@ jobs:
 
   gpu-backends:
     name: candle GPU (${{ matrix.device }})
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
     # COMPILE-ONLY, and deliberately so: no hosted runner has a GPU. This proves the
     # `candle-metal` / `candle-cuda` code paths and their toolchain requirements still
     # build; it is NOT evidence about GPU numerics. Metal is validated against ort on real
@@ -358,7 +428,8 @@ jobs:
         run: cargo check -p sceptre-cli --features "candle-${{ matrix.device }}"
 
   bench:
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -374,7 +445,8 @@ jobs:
         run: cargo check -p sceptre --benches --features bench
 
   deny:
-    if: github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -383,3 +455,28 @@ jobs:
           tool: cargo-deny
       - name: cargo deny check
         run: cargo deny check
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true' && github.repository == 'xberg-io/sceptre' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: xberg-io/actions/setup-python-env@v1
+        with:
+          python-version: "3.13"
+          # Plain `uv sync` installs only the default dependency group; the heavy
+          # torch/export group is optional and must be requested explicitly, so CI
+          # skips it here on purpose. The action's own default additionally passes
+          # `--no-install-project`, which would leave `python -m sceptre_rs_tools...`
+          # invocations broken with ModuleNotFoundError, so it is overridden here. ~keep
+          install-command: "uv sync"
+
+      - name: Ruff check
+        run: uv run ruff check python
+
+      - name: Pytest (pure harness logic)
+        # The benchmark unit tests cover metrics, capability detection, report rendering,
+        # and the regression gate without torch/easyocr or the release binary. ~keep
+        run: uv run pytest python/tests -q
