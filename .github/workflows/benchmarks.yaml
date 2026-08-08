@@ -68,6 +68,15 @@ jobs:
     runs-on: runner-large-arm64
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      # The detect/recognize benches read real corpus images through `bench.rs`, so they need
+      # the fetched binaries, not just the submodule's tracked text. ~keep
+      - name: Fetch test images
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: images/**
 
       - uses: xberg-io/actions/setup-rust@v1
         with:
