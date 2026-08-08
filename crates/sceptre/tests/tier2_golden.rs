@@ -36,20 +36,23 @@ const WORD_F1_THRESHOLD: f32 = 0.8;
 /// Recall floor for the greedy line-detection match: nearly every reference line must be
 /// covered.
 ///
-/// Calibrated against a full `SCEPTRE_REQUIRE_MODELS=1` corpus run. Seven of the eight
-/// images score a perfect 1.000; `french.jpg` is the floor at 0.833, so this sits just
-/// under it. A drop below here means sceptre stopped finding lines EasyOCR finds.
+/// Calibrated against a full `SCEPTRE_REQUIRE_MODELS=1` corpus run. Since ADR 0039 all
+/// eight images score a perfect 1.000. A drop below here means sceptre stopped finding
+/// lines EasyOCR finds.
 #[cfg(feature = "ort")]
 const LINE_RECALL_THRESHOLD: f32 = 0.8;
 
 /// Precision floor for the greedy line-detection match, i.e. the bar on fabricated lines.
 ///
-/// Deliberately looser than [`LINE_RECALL_THRESHOLD`]: splitting one reference line into
-/// two boxes costs precision without losing any text, which is a difference in grouping
-/// rather than a recognition regression. Same corpus run — `english.png` scores 0.923 and
-/// `french.jpg` is the floor at 0.625, so this sits just under that.
+/// Was 0.6, set to clear `french.jpg`'s 0.625 when a rounding artifact in the rotated-quad
+/// fit split two reference lines. ADR 0039 removed that artifact and every image now scores
+/// 1.000, so the floor rises to match [`LINE_RECALL_THRESHOLD`]. It stays a floor rather
+/// than a ratchet to 1.000 deliberately: these images carry few lines each, so a single
+/// grouping difference moves the score several points, and a near-1.000 gate would fail on
+/// legitimate change rather than on a regression. The per-image benchmark guardrails are
+/// what track the exact numbers.
 #[cfg(feature = "ort")]
-const LINE_PRECISION_THRESHOLD: f32 = 0.6;
+const LINE_PRECISION_THRESHOLD: f32 = 0.8;
 
 /// Whether `SCEPTRE_REQUIRE_MODELS` is set to a truthy value, forcing real-model
 /// tests to run (and fail loudly if models are missing) instead of skipping.
