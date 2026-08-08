@@ -985,6 +985,10 @@ def benchmark_entry(
 # --------------------------------------------------------------------------------------
 
 
+"""Key of the one `_summary` statistic that is a tally rather than a value in the metric's units."""
+SAMPLE_COUNT_STAT = "count"
+
+
 def _summary(values: list[float]) -> dict[str, float | None] | None:
     """Median / p95 / p99 / mean / count over a list of floats, or None if empty.
 
@@ -1092,15 +1096,26 @@ def validate_report(report: RunReport) -> list[str]:
     for aggregate_name, aggregates in (("labeled", report.aggregates_labeled), ("all", report.aggregates_all)):
         for field_name, summary in aggregates.items():
             for stat_name, value in summary.items():
-                problems.extend(
-                    _validate_score(f"aggregates.{aggregate_name}.{field_name}.{stat_name}", value, field_name)
-                )
+                label = f"aggregates.{aggregate_name}.{field_name}.{stat_name}"
+                if stat_name == SAMPLE_COUNT_STAT:
+                    problems.extend(_validate_sample_count(label, value))
+                else:
+                    problems.extend(_validate_score(label, value, field_name))
     for record in report.records:
         for field_name in _UNIT_INTERVAL_FIELDS:
             problems.extend(
                 _validate_score(f"records[{record.stem}].{field_name}", getattr(record, field_name), field_name)
             )
     return problems
+
+
+def _validate_sample_count(label: str, value: float | None) -> list[str]:
+    """Validate a `_summary` sample count, which is a tally rather than a score."""
+    if value is None:
+        return []
+    if not math.isfinite(value) or value < 0 or value != int(value):
+        return [f"{label} = {value} is not a sample count"]
+    return []
 
 
 def _validate_score(label: str, value: float | None, field_name: str) -> list[str]:

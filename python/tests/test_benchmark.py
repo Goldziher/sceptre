@@ -378,6 +378,21 @@ def test_validate_report_flags_an_out_of_range_record_score() -> None:
     assert any("agreement_word_f1" in problem and "outside [0, 1]" in problem for problem in problems)
 
 
+def test_validate_report_allows_a_sample_count_on_a_unit_interval_metric() -> None:
+    """`count` is a sample count, not a score, so the [0, 1] bound must not apply to it."""
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.aggregates_labeled["sceptre_token_f1"] = b._summary([0.9] * 27)
+    assert report.aggregates_labeled["sceptre_token_f1"]["count"] == 27
+    assert b.validate_report(report) == []
+
+
+def test_validate_report_still_flags_a_negative_sample_count() -> None:
+    report = _report(0.9, 0.8, 500.0, 11000.0)
+    report.aggregates_labeled["sceptre_token_f1"]["count"] = -1
+    problems = b.validate_report(report)
+    assert any("count" in problem for problem in problems)
+
+
 def test_validate_report_allows_unbounded_timing_fields() -> None:
     report = _report(0.9, 0.8, 500.0, 11000.0)
     report.aggregates_labeled["easyocr_warm_seconds"] = {"mean": 123.4}
