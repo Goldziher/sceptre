@@ -92,10 +92,32 @@ jobs:
         if: runner.os == 'Linux' && matrix.variant.label == 'default'
         run: ./scripts/verify-features.sh
 
+      # backend_agreement.rs no-ops without SCEPTRE_REQUIRE_MODELS, so compiling it proved
+      # nothing about whether ort, tract and candle agree. ADR 0035 calls it the only
+      # correctness bar for every backend/accelerator pairing; these three steps are what
+      # make that true in CI rather than only on a developer machine. ~keep
+      - name: Cache Hugging Face models
+        if: matrix.variant.label == 'backend-agreement'
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.hf
+          key: hf-${{ runner.os }}-${{ hashFiles('crates/sceptre/src/models/registry.rs') }}
+
+      - name: Pre-seed every model, serially, before the agreement legs read the cache
+        if: matrix.variant.label == 'backend-agreement'
+        env:
+          HF_HOME: ${{ github.workspace }}/.hf
+        run: |
+          cargo run --release -p sceptre-cli --no-default-features \
+            --features ort-bundled,download -- models download --all
+
       - name: Clippy
         run: task rust:ci:clippy FEATURES="${{ matrix.variant.features }}"
 
       - name: Test
+        env:
+          HF_HOME: ${{ github.workspace }}/.hf
+          SCEPTRE_REQUIRE_MODELS: ${{ matrix.variant.label == 'backend-agreement' && '1' || '' }}
         run: task rust:ci:test FEATURES="${{ matrix.variant.features }}"
 
       - name: Build
