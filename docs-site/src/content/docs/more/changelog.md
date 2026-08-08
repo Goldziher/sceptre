@@ -8,6 +8,31 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The benchmark `--assert` speed gate is now self-referential and host-scoped.** It required
+  sceptre's warm/batch wall time to beat EasyOCR's by 2.0×; it now requires sceptre's own warm
+  throughput to stay within 10% of the figure the committed baseline published for the same host.
+  The old floor had both defects [ADR 0042](https://github.com/xberg-io/sceptre/blob/main/adrs/0042-host-scoped-benchmark-floors.md) found in
+  the peak-RSS floor it deliberately left open: it was host-dependent, because on this corpus the
+  two engines do near-identical CPU work (core-seconds ratio 1.064×) and essentially all of
+  sceptre's advantage is parallel scaling (5.92 effective cores against 3.23), which an 8-core
+  runner caps; and it was coupled to EasyOCR, so a faster reference release tripped a gate whose
+  message said sceptre regressed. `warm_speedup` remains a reported figure. See
+  [ADR 0043](https://github.com/xberg-io/sceptre/blob/main/adrs/0043-host-scoped-self-referential-speed-floor.md).
+- The published benchmark baseline was re-measured on `runner-medium` with 0.6.0, replacing a
+  0.4.0 Darwin/arm64 one. Headline figures fall (warm speedup 2.28× → 1.95×, peak-RSS ratio
+  3.8× → 1.4×) because the CI host is smaller and slower, not because sceptre regressed; quality
+  is unchanged and still ahead of EasyOCR. The rendered tables now name the runner class.
+
+### Fixed
+
+- GitHub releases carry their changelog section as the release body. `publish.yaml` passed a
+  literal `Release <tag>` placeholder and the finalize step has no notes input, so every release
+  through 0.6.0 published with an empty body.
+
 ## [0.6.0] - 2026-08-08
 
 ### Added
@@ -321,6 +346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Offline-first model provisioning: models download from Hugging Face on first use, cache locally,
   and are sha256-verified on download — every run thereafter reads the cache with no network.
 
+[Unreleased]: https://github.com/xberg-io/sceptre/compare/v0.6.0...HEAD
 [0.6.0]: https://github.com/xberg-io/sceptre/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/xberg-io/sceptre/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/xberg-io/sceptre/compare/v0.2.0...v0.3.0
