@@ -8,14 +8,64 @@
   },
   "environment": {
     "accelerator": "cpu",
-    "arch": "arm64",
+    "arch": "x86_64",
     "backend": "ort",
-    "cpu_count": 14,
+    "corpus": {
+      "images": {
+        "Hadley_Crater": "318376a19d246216b1d087b8aaf0388fff15efdc87c073c47e99f1d1b1bd4535",
+        "alpha": "c4f6239077c8db145640f633988ee9f65780beb2788beebb2b1efd38566a38ce",
+        "balance_sheet_1": "2a077ba1d2451109dc1dec5174a661405c8825f4c7abf54ce8064997bb5330be",
+        "chi_sim_image": "8bd2f7f94402a1429bf04d53de13ed93a2983da2e4183288bd59097cdbd4c0e2",
+        "chinese": "7d8f231016c6a35da879b7d79b39c45b694aef962ae30f64063d981e618fbf7f",
+        "complex_document": "e80abc54fbb7c1974ceaf1d91259a2156a545cfcf3de647024aad06ba434f84a",
+        "complex_document_rotated_180": "d17968f9aeac86a35ff85078b26084b06216e062ce99706eddf87a06282aab87",
+        "complex_document_rotated_270": "f40a59a781da4424ac9f6862c43e1eaca235f62175b0f529b988f788328f9eae",
+        "complex_document_rotated_90": "2d500ac3b438c7e97cdf847ace1d3bf77ec5838a5bfe87ae018610f34ea31c60",
+        "cord_receipt_01": "7281a7b76327ed77867b20432717f1046bb8ab91371a80fac376ab45ccbf04f9",
+        "cord_receipt_02": "ce405c567deaaec169b6700d758bcd3bb44a355c35af022f721a975f274a9f4f",
+        "cord_receipt_03": "95b97f197b17c471988759c0e039a792b6eca5636dca85204c8ef4d19e04cd05",
+        "cord_receipt_04": "c300405986f1a12bb714a1eb035179ff3c9b280ae93dba9ba2beb75e5094ce16",
+        "doclaynet_page_01": "cd74a2f31169a464ef883150ac70be2dd614ac7718ec0e233446794b9f819629",
+        "doclaynet_page_02": "0c76bd1ee2cea37f3a2c15f4b0a2fb2208fa3caca58c8f93f139c63ebc5af11a",
+        "english": "f9f8c82b6b15ac6c9367c7939129395d6c45a882a2dadde33aaa810da4d450d5",
+        "english_and_korean": "d4286aded62c52b4f25a5a73111e25a30ad87bc757d84efd9e06f707e866fd2f",
+        "financial_table_1": "85f4634183039c7289e7b387f77ac5d47a55af4975b9fa626f428f8b53d9bd94",
+        "french": "549784c349af8a87d53e2fec897d03aa800ed73a64bb9d8de60485cdd71d1e98",
+        "invoice_image": "9aaea6583434eff8bf70b9fb26325951f4439431956ff30033be9a347456b8cc",
+        "japanese": "a636f5b3b497aba2f28862cdaadbeb0d0e542604cb0141670f8e0af66a639021",
+        "jpn_vert": "afefe464ce50da90d62c49f1737ca724ebc1616ee489063dd1d870cd741a20c7",
+        "korean": "702c3dcc04ac968ea023aee6466d201fe98ec313b84c68de85e1a5e70888998e",
+        "layout_parser_ocr": "83b589c5b841b5794ea6c852b444395f41425a51724b5d74fd8d8e2f7d724a2d",
+        "layout_parser_paper_with_table": "83b589c5b841b5794ea6c852b444395f41425a51724b5d74fd8d8e2f7d724a2d",
+        "ndl_meiji_vertical_01": "94e6cf1b5beb9219c17d0a161dbd064e454c6deb823b1db14207ab063be3a155",
+        "ndl_meiji_vertical_02": "8c0324d53abb0a606738eb4ca06e987f66340b10ac28c90e28ccb44456fa1aef",
+        "ndl_meiji_vertical_03": "8e932769b789ad3da818135e22741776d0f693b39981cfa9cdea785004fcd1a1",
+        "ndl_meiji_vertical_04": "195f9a8f6630227cd98cea1a79cc0b60c3ef74b4c54d8f066b9245adb446f328",
+        "ndl_meiji_vertical_05": "0fe6353204e4ee5ca6d93cfe90cce51b95c94e4ce9c0a0e06f2dd33e0d2635f3",
+        "ocr_image": "82ae016f652e36a8b0721dca2e38f999c245c524dd1f2631968be8901123841d",
+        "ocr_test_original": "4cf3aa5fa772d0809a8143d86a2aa9446f1c46f52d491e4e909a42d607db1d68",
+        "ocr_test_rotated_180": "e21938211d791265b0deb5a5a3d27b50e55e430d6ac5fb25e5f80abc5a92ca0b",
+        "ocr_test_rotated_270": "fe2befea29c1d04fb3b7569c777d604ea6e987f583dcaff4580edb75176d6517",
+        "ocr_test_rotated_90": "9a67a012fe80a9a07c639a9a59ddb98feed64f4604d4d7dacd698e0a7d642004",
+        "sample": "d48ef1fff395e9f9ad0be81b1ca1e4f431b8e884b3052cc50910217232ea4fdf",
+        "sample_text": "3da4c782f8b1567816f045a5d6f6a2424fc37af5c2117286c8ed5ba5ef29ed87",
+        "simple_table": "c9840b62965e30024f6cbf1fe32d74887aa66c04bd28161ecb4a43bb6600d4a7",
+        "test": "7f3d10e8050a8485cd6d420677935c960f5449151e3310e015cdae764ba7e933",
+        "test_hello_world": "a3b088cbd13c0e88faf503ffc6b7c670f0d7a553f3d4c342e5811c9f7b7a3bd2",
+        "textocr_scene_01": "14e051506881064812bd952e2abe5f6570790711d9dbf24b65ad873544a7bc29",
+        "textocr_scene_02": "27c84ed9d5405d6b90890d5a9f8dce93e875d94661a87cac0f811865905df954",
+        "textocr_scene_03": "fad13da4cce41d7de954914bf5952b67eebb9e63b035160a7fe61a2726c8a620"
+      },
+      "lock_schema": 1,
+      "resolved": true,
+      "source": "test_documents/corpus.lock.json"
+    },
+    "cpu_count": 8,
     "models": [
       {
         "file": "craft_mlt_25k.onnx",
         "name": "craft_mlt_25k",
-        "repo": "sceptre-ocr/craft_mlt_25k",
+        "repo": "xberg-io/sceptre-craft_mlt_25k",
         "revision": "main",
         "role": "detector",
         "sha256": "159f5ffecde90d567f54da3e449fb0eba54a1da791c429c3509984dcfd7f684e"
@@ -23,7 +73,7 @@
       {
         "file": "english_g2.onnx",
         "name": "english_g2",
-        "repo": "sceptre-ocr/english_g2",
+        "repo": "xberg-io/sceptre-english_g2",
         "revision": "main",
         "role": "recognizer:english",
         "sha256": "29ef336a7ad835d3e16eb70f23973d0fefd7a81fe6070845850954fe1cece0db"
@@ -31,7 +81,7 @@
       {
         "file": "latin_g2.onnx",
         "name": "latin_g2",
-        "repo": "sceptre-ocr/latin_g2",
+        "repo": "xberg-io/sceptre-latin_g2",
         "revision": "main",
         "role": "recognizer:latin",
         "sha256": "69ff1f543bb2b733708d4ab9e25d7dd3a9a25033da163698236211e36df4c787"
@@ -39,7 +89,7 @@
       {
         "file": "zh_sim_g2.onnx",
         "name": "zh_sim_g2",
-        "repo": "sceptre-ocr/zh_sim_g2",
+        "repo": "xberg-io/sceptre-zh_sim_g2",
         "revision": "main",
         "role": "recognizer:chinese_simplified",
         "sha256": "4ce0cde647eb9305ec2ed9dfd79bd27ab573750424be2fe46daf91093dd0464f"
@@ -47,7 +97,7 @@
       {
         "file": "japanese_g2.onnx",
         "name": "japanese_g2",
-        "repo": "sceptre-ocr/japanese_g2",
+        "repo": "xberg-io/sceptre-japanese_g2",
         "revision": "main",
         "role": "recognizer:japanese",
         "sha256": "daa18f93ff2cb5d3666fa3e0f14909d520e17c90bb49d2aa1ad633d8c4f8bd45"
@@ -55,7 +105,7 @@
       {
         "file": "korean_g2.onnx",
         "name": "korean_g2",
-        "repo": "sceptre-ocr/korean_g2",
+        "repo": "xberg-io/sceptre-korean_g2",
         "revision": "main",
         "role": "recognizer:korean",
         "sha256": "ccfd19e313c112999f6faa72d9e5bc4d67e11fedc96169a8de9e72c8110b3de8"
@@ -63,7 +113,7 @@
       {
         "file": "cyrillic_g2.onnx",
         "name": "cyrillic_g2",
-        "repo": "sceptre-ocr/cyrillic_g2",
+        "repo": "xberg-io/sceptre-cyrillic_g2",
         "revision": "main",
         "role": "recognizer:cyrillic",
         "sha256": "71fb248ecb7fd5e47333ea5269fd1abdb82934b01ae877bbdad95e9ce2e2ea9b"
@@ -71,7 +121,7 @@
       {
         "file": "telugu_g2.onnx",
         "name": "telugu_g2",
-        "repo": "sceptre-ocr/telugu_g2",
+        "repo": "xberg-io/sceptre-telugu_g2",
         "revision": "main",
         "role": "recognizer:telugu",
         "sha256": "d9bd97bc07c48504722c8a0e69ac5e1394e069d79fd51a17fd40d51192ac2ef4"
@@ -79,7 +129,7 @@
       {
         "file": "kannada_g2.onnx",
         "name": "kannada_g2",
-        "repo": "sceptre-ocr/kannada_g2",
+        "repo": "xberg-io/sceptre-kannada_g2",
         "revision": "main",
         "role": "recognizer:kannada",
         "sha256": "86b925fd3eef9557792b017206c01b3fcf6824099472a3be54748042ffe21334"
@@ -91,43 +141,45 @@
       "provisioning": "bundled",
       "version": "1.28.0"
     },
-    "os": "Darwin",
-    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "os": "Linux",
+    "platform": "Linux-6.12.85+-x86_64-with-glibc2.39",
     "probe": "sceptre env --format json",
     "reference": {
       "easyocr_version": "1.7.2",
-      "python": "3.14.1 (main, Dec  2 2025, 22:17:19) [Clang 21.1.4 ]",
-      "torch_version": "2.13.0"
+      "python": "3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]",
+      "torch_version": "2.13.0+cu130"
     },
-    "sceptre_version": "0.4.0"
+    "runner_label": "runner-medium",
+    "sceptre_version": "0.6.0"
   },
   "headline": {
-    "cold_speedup": 2.3816848765337832,
+    "cold_speedup": 1.751293782942722,
     "easyocr_warm": {
-      "mean_cer": 0.5538865586255445,
-      "mean_token_f1": 0.3475787438784818,
-      "peak_rss_mb": 20691.320832,
-      "throughput_img_s": 0.4689641664035982
+      "mean_cer": 0.5686123346447794,
+      "mean_token_f1": 0.33727630391278524,
+      "peak_rss_mb": 4963.88096,
+      "throughput_img_s": 0.11956475489777499
     },
-    "rss_ratio": 3.7699598801284613,
+    "rss_ratio": 1.3640877475032769,
     "sceptre_cold": {
-      "mean_cer": 0.5696392408977318,
-      "mean_token_f1": 0.36074361204527156,
-      "peak_rss_mb": 6654.787584,
-      "throughput_img_s": 1.1169248627597224
+      "mean_cer": 0.5685278295677284,
+      "mean_token_f1": 0.35820990526809876,
+      "peak_rss_mb": 4653.727744,
+      "throughput_img_s": 0.20939301191154372
     },
     "sceptre_warm": {
-      "mean_cer": 0.5696392408977318,
-      "mean_token_f1": 0.36074361204527156,
-      "peak_rss_mb": 6654.787584,
-      "throughput_img_s": 1.068086258954634
+      "mean_cer": 0.5685278295677284,
+      "mean_token_f1": 0.35820990526809876,
+      "peak_rss_mb": 4653.727744,
+      "throughput_img_s": 0.23285508999881022
     },
-    "warm_speedup": 2.2775434360914937
+    "warm_speedup": 1.947522831438878
   },
   "run": {
     "group": "all",
-    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
-    "repeats": 3,
+    "platform": "Linux-6.12.85+-x86_64-with-glibc2.39",
+    "repeats": 2,
+    "runner_label": "runner-medium",
     "threads": "engine default (all cores)"
   },
   "schema_version": 2
